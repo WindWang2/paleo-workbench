@@ -39,6 +39,10 @@
 #include <pwb/mapping/extract.hpp>
 #include <pwb/mapping/factor_grid_io.hpp>
 #include <pwb/mapping/interpolator.hpp>
+
+#include <pwb/qgis_processing/algorithm_ids.hpp>
+#include <pwb/qgis_processing/provider.hpp>
+#include <pwb/qgis_processing/runner.hpp>
 #endif
 
 #if defined(PWB_WITH_WORKFLOW_ENGINE)
@@ -192,8 +196,34 @@ Result checkMappingKernel() {
         r.detail = QStringLiteral("interpolate_factor statistics unusable");
         return r;
     }
+    // Phase 4: the same chain must also be addressable through the Paleo
+    // Processing registry — run_map_pipeline (libs/application) is an
+    // in-product composition of exactly paleo:extract_factors ->
+    // paleo:interpolation_idw/_kriging -> paleo:grid_contours, so the
+    // product never keeps a private kernel the registry cannot reach.
+    pwb::qgis_processing::install_paleo_provider();
+    const QStringList paleo_ids = pwb::qgis_processing::paleo_algorithm_ids();
+    const QString wanted[] = {
+        pwb::qgis_processing::paleo_id(
+            pwb::qgis_processing::kAlgExtractFactors),
+        pwb::qgis_processing::paleo_id(
+            pwb::qgis_processing::kAlgInterpolationIdw),
+        pwb::qgis_processing::paleo_id(
+            pwb::qgis_processing::kAlgInterpolationKriging),
+        pwb::qgis_processing::paleo_id(
+            pwb::qgis_processing::kAlgGridContours),
+    };
+    for (const QString& id : wanted) {
+        if (!paleo_ids.contains(id)) {
+            r.detail = QStringLiteral("paleo algorithm missing from the "
+                                      "registry: %1")
+                           .arg(id);
+            return r;
+        }
+    }
     r.passed = true;
-    r.detail = QStringLiteral("3 wells -> idw %1x%1 grid, min %2 max %3")
+    r.detail = QStringLiteral("3 wells -> idw %1x%1 grid, min %2 max %3; "
+                              "paleo chain registered")
                    .arg(options.grid_n)
                    .arg(grid.statistics.min)
                    .arg(grid.statistics.max);

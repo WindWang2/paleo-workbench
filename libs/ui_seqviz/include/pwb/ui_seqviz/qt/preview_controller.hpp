@@ -6,9 +6,9 @@
 //
 // The core owns generations, the single pending slot, inflight keys and
 // the LRU/disk caches; this shell owns the worker-thread mechanics the
-// header leaves to Qt: a JobOwner submits run_preview_job /
-// run_media_preload_job bodies through the shared scheduler, completions
-// hop back onto the GUI thread as queued JobOutcome deliveries, and the
+// header leaves to Qt: a PwbTaskOwner submits run_preview_job /
+// run_media_preload_job bodies through QgsTaskManager, completions hop
+// back onto the GUI thread as queued outcome deliveries, and the
 // thread-finished hook defers pump_pending() through a 0ms timer (the
 // Python #951 deferral verbatim).
 
@@ -19,8 +19,12 @@
 #include <optional>
 #include <string>
 
-#include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/qgis_processing/task_bridge.hpp>
 #include <pwb/ui_data_core/preview_worker.hpp>
+
+namespace pwb::qgis_processing {
+struct CompatJobOutcome;  // job_compat.hpp (implementation-side seam)
+}
 
 namespace pwb::ui_seqviz::qt {
 
@@ -70,11 +74,12 @@ private:
     void start_media_job(int generation,
                          const ui_data_core::PreviewResult& result,
                          const std::string& key, int cache_generation);
-    void on_job_finished(const pwb::job::qtbridge::JobOutcome& outcome);
+    void on_job_finished(
+        const pwb::qgis_processing::CompatJobOutcome& outcome);
 
     ui_data_core::PreviewProvider provider_;
     ui_data_core::PreviewRequestCore core_;
-    pwb::job::qtbridge::JobOwner job_owner_;
+    pwb::qgis_processing::PwbTaskOwner job_owner_;
 };
 
 }  // namespace pwb::ui_seqviz::qt

@@ -35,7 +35,7 @@ target_link_libraries(pwb_ui_seqviz PUBLIC
     Pwb::Domain
     Pwb::UiDataCore
     Pwb::UiWorkers
-    Pwb::JobRuntime
+    Pwb::JobContracts
     Pwb::WellScience
 )
 
@@ -53,12 +53,12 @@ if(TARGET Qt6::Widgets)
         add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ui_widgets
                          ${CMAKE_CURRENT_BINARY_DIR}/ui_widgets)
     endif()
-    # Pwb::JobQt (job::qtbridge::JobOwner — OwnedWorkerJob parity) comes
-    # from the same job_runtime subdirectory the core already pulled in;
-    # it exists whenever Qt6::Core was found there.
-    if(NOT TARGET Pwb::JobQt)
-        message(STATUS "UI-10: pwb_ui_seqviz_qt built without Pwb::JobQt — "
-                "dialogs keep the injected-service synchronous path")
+    # Pwb::QgisProcessing (PwbTaskOwner / QgsTaskManager bridge) is
+    # required for the worker-backed widgets; guarded so pure-Qt hosts
+    # without the QGIS SDK admission keep configuring.
+    if(NOT TARGET Pwb::QgisProcessing)
+        add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../qgis_processing
+                         ${CMAKE_CURRENT_BINARY_DIR}/qgis_processing)
     endif()
 
     add_library(pwb_ui_seqviz_qt STATIC
@@ -90,8 +90,8 @@ if(TARGET Qt6::Widgets)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_compile_features(pwb_ui_seqviz_qt PUBLIC cxx_std_20)
     target_link_libraries(pwb_ui_seqviz_qt
-        PUBLIC Pwb::UiSeqviz Pwb::UiShellQt Pwb::UiWidgets Pwb::JobQt
-               Qt6::Widgets
+        PUBLIC Pwb::UiSeqviz Pwb::UiShellQt Pwb::UiWidgets
+               Pwb::QgisProcessing Pwb::JobQt Qt6::Widgets Qt6::Svg
         PRIVATE Pwb::UiWorkers Pwb::UiDataCore Qt6::Gui)
 endif()
 

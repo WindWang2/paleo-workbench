@@ -13,6 +13,7 @@
 
 #include "closure_preview_adapters.hpp"
 
+#include <pwb/qgis_processing/job_compat.hpp>
 #include <pwb/ui_workers/contour_draft.hpp>
 #include <pwb/ui_workers/worker_common.hpp>
 #include <pwb/viz_charts/marching_squares.hpp>
@@ -443,8 +444,9 @@ int main(int argc, char** argv) {
             return compute_factor_preview(request, ctx);
         };
         FactorPreviewOutcome outcome;
-        owner.start(jobs.scheduler(), std::move(spec),
-                    [&outcome](const pwb::job::qtbridge::JobOutcome& o) {
+        pwb::qgis_processing::start_job_spec(
+            owner, std::move(spec),
+            [&outcome](const pwb::qgis_processing::CompatJobOutcome& o) {
                         if (const auto* r =
                                 std::any_cast<FactorPreviewOutcome>(&o.result)) {
                             outcome = *r;
@@ -571,7 +573,7 @@ int main(int argc, char** argv) {
             [&result](const ContourDraftResult& r) { result = r; },
             [&failed](const std::string&) { failed = true; });
         auto& owner = jobs.make_owner(nullptr);
-        owner.start(jobs.scheduler(), std::move(spec), {});
+        pwb::qgis_processing::start_job_spec(owner, std::move(spec), {});
         for (int i = 0; i < 3000 && result.count() == 0 && !failed; ++i) {
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
             std::this_thread::sleep_for(std::chrono::milliseconds(5));

@@ -54,7 +54,7 @@ target_include_directories(viz_b.dock_smoke PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
 target_link_libraries(viz_b.dock_smoke PRIVATE
     Pwb::VisualizationCrossWellQt Pwb::VisualizationWellTieQt
-    Pwb::UiWorkers Pwb::UiWellseisQt Pwb::Domain Pwb::JobQt
+    Pwb::UiWorkers Pwb::UiWellseisQt Pwb::Domain Pwb::QgisProcessing
     Qt6::Widgets)
 target_compile_definitions(viz_b.dock_smoke PRIVATE
     PWB_VIZ_B_CROSS_WELL_FIXTURE="${CMAKE_SOURCE_DIR}/libs/visualization/src/cross_well/cross_well_tests/fixtures/viz_b_cross_well_oracle.json")

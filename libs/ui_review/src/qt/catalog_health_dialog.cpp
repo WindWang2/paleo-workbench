@@ -1,6 +1,6 @@
 #include "pwb/ui_review/qt/catalog_health_dialog.hpp"
 
-#include "pwb/job_runtime/qt/job_bridge.hpp"
+#include <pwb/qgis_processing/job_compat.hpp>
 #include "pwb/ui_review/audit_summary.hpp"
 #include "pwb/ui_review/tokens.hpp"
 #include "pwb/ui_widgets/object_table.hpp"
@@ -26,16 +26,11 @@ struct AuditIssueRow {
 };
 
 CatalogHealthDialog::CatalogHealthDialog(
-    QWidget* parent, std::function<ICatalogApi*()> service_provider,
-    std::shared_ptr<job::JobScheduler> scheduler)
-    : QDialog(parent),
-      service_provider_(std::move(service_provider)),
-      scheduler_(scheduler ? std::move(scheduler)
-                           : std::make_shared<job::JobScheduler>(
-                                 job::JobScheduler::Options{})) {
+    QWidget* parent, std::function<ICatalogApi*()> service_provider)
+    : QDialog(parent), service_provider_(std::move(service_provider)) {
     setWindowTitle(QStringLiteral("数据健康检查 (Catalog Health)"));
     resize(760, 520);
-    job_ = std::make_unique<job::qtbridge::JobOwner>(this);
+    job_ = std::make_unique<pwb::qgis_processing::PwbTaskOwner>(this);
 
     auto* layout = new QVBoxLayout(this);
     layout->setSpacing(tokens::kSpace2);
@@ -163,9 +158,9 @@ void CatalogHealthDialog::run_audit(bool deep) {
             return ctx.token().is_cancelled();
         });
     };
-    job_->start(
-        *scheduler_, std::move(spec),
-        [this](const job::qtbridge::JobOutcome& outcome) {
+    pwb::qgis_processing::start_job_spec(
+        *job_, std::move(spec),
+        [this](const pwb::qgis_processing::CompatJobOutcome& outcome) {
             set_running(false);
             switch (outcome.state) {
             case job::JobState::done:

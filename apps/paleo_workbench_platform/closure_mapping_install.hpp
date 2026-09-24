@@ -34,6 +34,7 @@ class QMainWindow;
 
 namespace pwb::app {
 class AppShell;
+class JobCenter;
 }
 
 namespace pwb::application {
@@ -63,13 +64,18 @@ struct Install {
     std::function<std::shared_ptr<pwb::application::PwbDataStore>()>
         store_getter;
 
+    // The composition root's JobCenter (may be null in reduced hosts):
+    // the preparation worker lanes take their PwbTaskOwner slots from it
+    // (close-protocol registration + the shared admission gate). Null
+    // falls back to window-parented owners.
+    JobCenter* jobs = nullptr;
+
     // BEGIN qgis-native-layout-convergence
     // Opens the governed layout export dialog (the SAME map_export action
     // path). Bound by the host window; the native layout editor's export
     // button rides it — one export authority, one provenance ledger.
     std::function<void(QgsPrintLayout*)> export_layout_dialog;
     // END qgis-native-layout-convergence
-
 };
 
 // Installs the mapping-page adopt set + preparation page. Safe to call

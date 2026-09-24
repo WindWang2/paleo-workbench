@@ -42,6 +42,10 @@ endif()
 # Appended only: sources and tests above stay untouched.
 if(PWB_BUILD_CONV_04)
     target_sources(pwb_mapping_kernel PRIVATE src/ring_ops.cpp)
+    # Capability flag for adapters (qgis_processing registers clip/repair
+    # algorithms only when the kernel actually provides them).
+    target_compile_definitions(pwb_mapping_kernel PUBLIC
+        PWB_MAPPING_HAS_RING_OPS=1)
     if(BUILD_TESTING)
         add_executable(mapping_kernel.ring_ops mapping_kernel_tests/ring_ops_test.cpp)
         target_compile_features(mapping_kernel.ring_ops PRIVATE cxx_std_20)
@@ -59,6 +63,8 @@ endif()
 # (tools/oracle/generate_constrained_idw_fixtures.py).
 if(PWB_BUILD_CONV_05)
     target_sources(pwb_mapping_kernel PRIVATE src/constrained_idw.cpp)
+    target_compile_definitions(pwb_mapping_kernel PUBLIC
+        PWB_MAPPING_HAS_CONSTRAINED_IDW=1)
 endif()
 # END CONV-05
 # BEGIN CONV-10

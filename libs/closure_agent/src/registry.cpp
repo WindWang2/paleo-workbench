@@ -112,4 +112,33 @@ std::vector<Json> ActionRegistry::inventory() const {
     return entries;
 }
 
+std::vector<ActionSpec> processing_algorithm_specs(
+    const std::vector<AlgorithmToolInfo>& infos) {
+    std::vector<ActionSpec> specs;
+    specs.reserve(infos.size());
+    for (const AlgorithmToolInfo& info : infos) {
+        // "paleo:seismic_envelope" -> "paleo.seismic_envelope": the registry
+        // id pattern is '<domain>.<name>' (one dot, [a-z0-9_]); the LLM
+        // tool name derives from it as "paleo__seismic_envelope".
+        std::string action_id;
+        action_id.reserve(info.id.size());
+        for (const char ch : info.id) {
+            action_id.push_back(ch == ':' ? '.' : ch);
+        }
+        ActionSpec spec;
+        spec.action_id = std::move(action_id);
+        spec.description = "Processing algorithm " + info.display + " (group "
+            + info.group + ", paleo id " + info.id
+            + ") — executed through the Paleo Processing registry";
+        spec.risk = ActionRisk::Compute;
+        spec.category = "background.compute";
+        spec.provider_id = "paleo_processing";
+        spec.supports_cancel = true;   // kernels cancel between stages
+        spec.deterministic = true;
+        spec.domain_tags = {"processing", info.group};
+        specs.push_back(std::move(spec));
+    }
+    return specs;
+}
+
 }  // namespace pwb::closure_agent

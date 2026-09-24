@@ -20,14 +20,11 @@
 #include <string>
 #include <vector>
 
+#include <pwb/qgis_processing/task_bridge.hpp>
 #include <pwb/ui_controllers/qt/job_owner_runner.hpp>
 #include <pwb/ui_controllers/workflow_controller.hpp>
 
 class QWidget;
-
-namespace pwb::job {
-class JobScheduler;
-}
 
 namespace pwb::ui_controllers::qt {
 
@@ -35,9 +32,13 @@ namespace pwb::ui_controllers::qt {
 class WorkflowController : public QObject {
     Q_OBJECT
 public:
-    // `scheduler` must outlive the runners (app-lifetime).
-    explicit WorkflowController(job::JobScheduler& scheduler,
-                                QObject* parent = nullptr);
+    // `gate` may be null (no admission — runners' tasks go straight to
+    // QgsTaskManager); when non-null and no process-shared gate is
+    // installed yet (JobCenter installs one app-lifetime), it becomes the
+    // shared gate so the runners' tasks pass admission + task_key dedupe.
+    explicit WorkflowController(
+        pwb::qgis_processing::PwbTaskGate* gate = nullptr,
+        QObject* parent = nullptr);
     ~WorkflowController() override;
 
     // The seam bags the integration adapter fills (bind before first
@@ -126,7 +127,7 @@ private:
                       const char* slot_signature);
     void defer_(int hub, QObject* page);
 
-    job::JobScheduler& scheduler_;
+    pwb::qgis_processing::PwbTaskGate* gate_ = nullptr;  // not owned
     std::unique_ptr<JobOwnerRunner> recompute_job_;
     std::unique_ptr<JobOwnerRunner> prepare_job_;
     std::unique_ptr<WorkflowCore> core_;

@@ -49,7 +49,10 @@ if(TARGET pwb_ui_canvas)
              COMMAND ui_canvas.fallback_backend)
     set_tests_properties(ui_canvas.fallback_backend PROPERTIES
         TIMEOUT 120
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        # QGIS vendor runtime closure (Pwb::UiCanvas now reaches the task
+        # bridge).
+        ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}")
 
     add_executable(ui_canvas.qt_widgets_smoke qt_widgets_smoke_test.cpp)
     target_compile_features(ui_canvas.qt_widgets_smoke PRIVATE cxx_std_20)
@@ -62,7 +65,10 @@ if(TARGET pwb_ui_canvas)
              COMMAND ui_canvas.qt_widgets_smoke)
     set_tests_properties(ui_canvas.qt_widgets_smoke PROPERTIES
         TIMEOUT 120
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        # QGIS vendor runtime closure — the task bridge reaches
+        # QgsApplication::taskManager().
+        ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}")
 endif()
 
 # --- QGIS-backed smoke (offscreen, real runtime) ---------------------------

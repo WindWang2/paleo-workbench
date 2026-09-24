@@ -15,7 +15,7 @@
 
 #include <filesystem>
 
-#include <pwb/job_runtime/job_scheduler.hpp>
+#include <pwb/qgis_processing/job_compat.hpp>
 #include <pwb/ui_seqviz/page_tokens.hpp>
 #include <pwb/ui_seqviz/qt/panel_float_button.hpp>
 #include <pwb/ui_seqviz/qt/preview_controller.hpp>
@@ -70,15 +70,16 @@ VisualizationPage::VisualizationPage(
     connect(preview_controller_, &PreviewRequestController::failed, this,
             [this](const QString& message) { show_preview_error(message); });
 
-    well_log_job_ = new job::qtbridge::JobOwner(this);
-    connect(well_log_job_, &job::qtbridge::JobOwner::released, this,
-            &VisualizationPage::on_well_log_job_released);
-    export_job_ = new job::qtbridge::JobOwner(this);
-    connect(export_job_, &job::qtbridge::JobOwner::released, this, [this] {
-        if (export_busy_) {
-            end_export_busy();
-        }
-    });
+    well_log_job_ = new pwb::qgis_processing::PwbTaskOwner(this);
+    connect(well_log_job_, &pwb::qgis_processing::PwbTaskOwner::released,
+            this, &VisualizationPage::on_well_log_job_released);
+    export_job_ = new pwb::qgis_processing::PwbTaskOwner(this);
+    connect(export_job_, &pwb::qgis_processing::PwbTaskOwner::released,
+            this, [this] {
+                if (export_busy_) {
+                    end_export_busy();
+                }
+            });
 
     auto* outer = new QVBoxLayout(this);
     const int margin = tokens::PAGE_MARGIN;
@@ -355,9 +356,9 @@ void VisualizationPage::open_well_log(const VizRefSlice& ref) {
 
     job::JobSpec spec = ui_workers::make_well_log_load_job_spec(
         std::move(input));
-    well_log_job_->start(
-        job::global_scheduler(), std::move(spec),
-        [this, ref, seq](const job::qtbridge::JobOutcome& outcome) {
+    pwb::qgis_processing::start_job_spec(
+        *well_log_job_, std::move(spec),
+        [this, ref, seq](const pwb::qgis_processing::CompatJobOutcome& outcome) {
             switch (outcome.state) {
             case job::JobState::done:
             case job::JobState::degraded: {

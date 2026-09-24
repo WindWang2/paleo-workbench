@@ -4,7 +4,8 @@
 // timeline (newest first) + selection-driven detail + gated lifecycle
 // actions (promote/copy to OUTPUT, open location, compare, trash,
 // restore). All reads/mutations go through ICatalogApi; committed
-// versions stay immutable. Promote runs off the GUI thread via JobOwner
+// versions stay immutable. Promote runs off the GUI thread via a
+// PwbTaskOwner on the QGIS task bridge
 // (payload copy + SHA-256 can be unbounded); the timeline reloads after
 // every successful mutation and emits versions_changed.
 
@@ -17,12 +18,9 @@
 #include <memory>
 #include <vector>
 
-namespace pwb::job {
-class JobScheduler;
-}  // namespace pwb::job
-namespace pwb::job::qtbridge {
-class JobOwner;
-}  // namespace pwb::job::qtbridge
+namespace pwb::qgis_processing {
+class PwbTaskOwner;
+}  // namespace pwb::qgis_processing
 namespace pwb::ui_widgets {
 class ObjectTableModel;
 class StableSelection;
@@ -56,8 +54,7 @@ public:
     VersionWorkbenchDialog(
         QWidget* parent,
         std::function<ICatalogApi*()> service_provider,
-        QString asset_id,
-        std::shared_ptr<job::JobScheduler> scheduler = nullptr);
+        QString asset_id);
     ~VersionWorkbenchDialog() override;
 
     // reload_versions parity — re-read asset + versions (cache nothing),
@@ -107,8 +104,7 @@ private:
 
     std::function<ICatalogApi*()> service_provider_;
     QString asset_id_;
-    std::shared_ptr<job::JobScheduler> scheduler_;
-    std::unique_ptr<job::qtbridge::JobOwner> promote_job_;
+    std::unique_ptr<pwb::qgis_processing::PwbTaskOwner> promote_job_;
     std::unique_ptr<ui_widgets::StableSelection> timeline_selection_;
 
     std::vector<catalog::DataVersion> versions_;

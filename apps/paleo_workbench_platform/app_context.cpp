@@ -7,8 +7,9 @@
 #endif
 
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
-#include <pwb/science/algorithms/coherence_c3.hpp>
-#include <pwb/seismic_attributes/attributes.hpp>
+#include <pwb/application/algorithm_runner.hpp>
+#include <pwb/qgis_processing/provider.hpp>
+#include <pwb/qgis_processing/runner.hpp>
 #endif
 #ifdef PWB_WITH_PROVIDERS
 #include <pwb/providers/service.hpp>
@@ -46,46 +47,18 @@ AppContext::~AppContext() {
 
 void AppContext::registerProductKernels() {
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
-    // The context is the composition root: E's contract has the host
-    // register kernels explicitly (no static auto-registration into a
-    // shared registry).
+    // CONV-QGIS-PROCESSING phase 4: kernels are no longer registered into
+    // the runner by the host — the Paleo Processing provider inside
+    // QgsProcessingRegistry is the single algorithm authority. Constructing
+    // the runner installs the provider idempotently (belt-and-braces with
+    // JobCenter's ctor install: AppContext is constructed BEFORE any
+    // window/JobCenter exists, so this is the first install in practice).
     impl_->attribute_runner = std::make_unique<pwb::application::AlgorithmRunner>();
-    const std::string rejections[] = {
-        impl_->attribute_runner->register_kernel(
-            pwb::seismic_attributes::make_envelope("pwb-platform")),
-        impl_->attribute_runner->register_kernel(
-            pwb::seismic_attributes::make_instantaneous_phase("pwb-platform")),
-        impl_->attribute_runner->register_kernel(
-            pwb::seismic_attributes::make_instantaneous_frequency("pwb-platform")),
-        impl_->attribute_runner->register_kernel(
-            pwb::seismic_attributes::make_rms_amplitude("pwb-platform")),
-        // S line: the volume-structural production kernels.
-        impl_->attribute_runner->register_kernel(
-            pwb::seismic_attributes::make_sweetness("pwb-platform")),
-        impl_->attribute_runner->register_kernel(
-            pwb::seismic_attributes::make_relative_impedance("pwb-platform")),
-        impl_->attribute_runner->register_kernel(
-            pwb::seismic_attributes::make_dip_inline("pwb-platform")),
-        impl_->attribute_runner->register_kernel(
-            pwb::seismic_attributes::make_dip_crossline("pwb-platform")),
-        impl_->attribute_runner->register_kernel(
-            pwb::seismic_attributes::make_dip_azimuth("pwb-platform")),
-        impl_->attribute_runner->register_kernel(
-            pwb::seismic_attributes::make_curvature_mean("pwb-platform")),
-        // C3 eigenstructure coherence — the science-suite kernel
-        // (pwb_science, oracle-frozen in tests/cpp/science/
-        // coherence_c3_oracle_test.cpp) joins the product runner; before
-        // this registration the kernel existed but no product path could
-        // run it (Python parity: seismic_view exposes 相干(C3)).
-        impl_->attribute_runner->register_kernel(
-            pwb::science::algorithms::make_coherence_c3("pwb-platform")),
-    };
-    for (const std::string& rejection : rejections) {
-        if (!rejection.empty()) {
-            diagnostics::warning(diagnostics::LogArea::Science,
-                                 QStringLiteral("attribute kernel registration: %1")
-                                     .arg(QString::fromStdString(rejection)));
-        }
+    const bool installed = pwb::qgis_processing::paleo_provider_installed();
+    if (!installed) {
+        diagnostics::warning(diagnostics::LogArea::Science,
+                             QStringLiteral("paleo Processing provider is "
+                                            "not registered"));
     }
 #endif
 }
@@ -167,12 +140,22 @@ QVector<AppContext::RuntimeCapability> AppContext::capabilities() const {
         }
         if (cap.id == QLatin1String("seismic_attributes")) {
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
+            // Registry-backed probe: count the seismic-family algorithms
+            // the Paleo Processing provider exposes (the runner holds no
+            // kernel map since the phase-4 convergence).
+            int seismic_algorithms = 0;
+            for (const pwb::qgis_processing::PaleoAlgorithmInfo& info :
+                 pwb::qgis_processing::paleo_algorithm_infos()) {
+                if (info.group_id == QLatin1String("seismic")) {
+                    ++seismic_algorithms;
+                }
+            }
             cap.runtime_ok = impl_->attribute_runner != nullptr
-                             && !impl_->attribute_runner->algorithms().empty();
+                             && seismic_algorithms > 0;
             cap.detail = cap.runtime_ok
-                ? QStringLiteral("%1 kernels registered").arg(QString::number(
-                      impl_->attribute_runner->algorithms().size()))
-                : QStringLiteral("no attribute kernels registered");
+                ? QStringLiteral("%1 processing algorithms registered")
+                      .arg(QString::number(seismic_algorithms))
+                : QStringLiteral("no paleo processing algorithms registered");
 #else
             // The switch is ON but the runner needs the data-integration
             // macro pair — without it no kernel can even register, so a

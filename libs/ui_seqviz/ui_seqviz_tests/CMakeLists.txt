@@ -6,7 +6,7 @@ target_compile_features(ui_seqviz.core_state PRIVATE cxx_std_20)
 target_include_directories(ui_seqviz.core_state PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ui_seqviz.core_state PRIVATE
-    Pwb::UiSeqviz Pwb::Domain Pwb::UiWorkers Pwb::JobRuntime
+    Pwb::UiSeqviz Pwb::Domain Pwb::UiWorkers Pwb::JobContracts
     Pwb::MappingDocument Pwb::WellScience Pwb::UiDataCore)
 add_test(NAME ui_seqviz.core_state COMMAND ui_seqviz.core_state)
 set_tests_properties(ui_seqviz.core_state PROPERTIES TIMEOUT 120)

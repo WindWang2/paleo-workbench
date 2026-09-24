@@ -390,7 +390,7 @@ void MainWindow::installStageFlow() {
     };
     seams.running_tasks = [this]() {
 #ifdef PWB_WITH_CONV_30
-        return static_cast<int>(job_center_->scheduler().statuses().size());
+        return job_center_->task_count();
 #else
         return 0;
 #endif
@@ -705,13 +705,13 @@ void MainWindow::installStageFlow() {
     if (workstation->task_center() != nullptr) {
         auto* center = workstation->task_center();
         center->set_snapshot_provider([this]() {
-            return job_center_->scheduler().statuses();
+            return job_center_->task_snapshots();
         });
         center->set_operation_provider([]() {
             return pwb::ui_shell::operation_registry().records();
         });
         center->set_cancel_task([this](const std::string& job_id) {
-            return job_center_->scheduler().cancel(job_id);
+            return job_center_->cancel_task(QString::fromStdString(job_id));
         });
         center->set_record_lookup(
             [](const std::string& op_id)

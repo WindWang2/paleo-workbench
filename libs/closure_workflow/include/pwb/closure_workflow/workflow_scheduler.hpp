@@ -4,39 +4,42 @@
 // submit_to_scheduler L362 + scheduler-token sync), completing the
 // CONV-32 deferral (32-findings D5) at the closure level:
 //
-//   * ONE queue authority: a workflow run is submitted as a single job on
-//     the host's job::JobScheduler (the app's single heavy queue) — never
-//     a second queue;
-//   * scheduler-side cooperative cancellation propagates into the engine
-//     token (Python _SyncedToken): job cancel → engine CancelToken at the
-//     engine's poll points (loop head / guard / backoff waits) and at
-//     every node boundary via the update callback;
-//   * on_done / on_fail / on_cancel forward the terminal WorkflowRun or
-//     failure, mirroring the TaskSpec callback contract.
+//   * ONE queue authority: a workflow run is submitted as ONE background
+//     body through the host's RunSubmitter (the app's QgsTaskManager
+//     bridge or a thread pool) — never a second queue and never a
+//     private scheduler;
+//   * cooperative cancellation flows through the engine token: cancel()
+//     (the run_id-keyed side channel, Python _pending_tokens) flips the
+//     engine CancelToken at the engine's poll points (loop head / guard /
+//     backoff waits) and at every node boundary via the update callback;
+//   * the returned future carries the terminal WorkflowRunOutcome (or the
+//     failure exception) — the wait/observe surface the job handle used
+//     to provide.
 //
 // Honest scope note: the engine's internal per-node pool
 // (_drive_parallel) stays a documented CONV-32 deferral — the C++
 // RunEngine drive loop is sequential regardless of spec.max_concurrency,
 // and Python's own production path defaults to max_concurrency == 1
-// (sequential _drive_sequential). Runs PARALLELIZE across the scheduler
-// pool; nodes within one run execute in dependency order.
+// (sequential _drive_sequential). Runs PARALLELIZE across submitter
+// threads; nodes within one run execute in dependency order.
 //
-// Qt-free, Python-free.
+// Qt-free, Python-free, scheduler-free.
 
-#include <pwb/job_runtime/job_scheduler.hpp>
 #include <pwb/workflow_engine/run_engine.hpp>
 
 #include <atomic>
+#include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <string>
+#include <utility>
 
 namespace pwb::closure_workflow {
 
-// Terminal payload carried in the job result std::any (kind-checked by
-// on_done consumers).
+// Terminal payload carried in the run future (kind-checked by on_done
+// consumers).
 struct WorkflowRunOutcome {
     std::string run_id;
     std::string state;  // RunState value string ("completed"/"failed"/…)
@@ -44,15 +47,23 @@ struct WorkflowRunOutcome {
     std::string error;  // failure message when failed
 };
 
-// Submits whole-workflow-run jobs on the host scheduler.
+// Submits whole-workflow-run jobs on the host executor.
 class WorkflowScheduler {
 public:
+    // The host's background-execution seam: `submit(body)` must run
+    // `body` (eventually, exactly once) on a NON-calling thread — the
+    // synchronous-blocking parity the retired job submission had. The
+    // product binds the QgsTaskManager bridge (PwbTaskOwner /
+    // PaleoFunctionTask::Body); tests bind a thread-pool or detached
+    // std::thread submitter.
+    using RunSubmitter = std::function<void(std::function<void()> body)>;
+
     struct Options {
-        // Dedupe key; empty → unique (parity of task_key=None). A resubmit
-        // while one is running throws JobSubmitError("duplicate.task_key").
+        // Dedupe/documentation key; empty → unique. (Admission-level
+        // dedupe is the executor's policy now — the QGIS gate enforces
+        // task_key supersede when the product submitter carries it.)
         std::string task_key;
-        // Python submit_to_scheduler default priority=20.
-        int priority = 20;
+        int priority = 20;  // Python submit_to_scheduler default priority=20.
         bool reverify_cache = true;
         bool use_cache = true;
         // Resume a RUNNING/INTERRUPTED run through the crash mapping
@@ -64,18 +75,18 @@ public:
             : task_key(std::move(task_key)), priority(priority) {}
     };
 
-    WorkflowScheduler(pwb::job::JobScheduler& scheduler,
+    WorkflowScheduler(RunSubmitter submitter,
                       pwb::workflow_engine::RunEngine& engine,
                       pwb::workflow_engine::WorkflowRunStore& store)
-        : scheduler_(scheduler), engine_(engine), store_(store) {}
+        : submitter_(std::move(submitter)), engine_(engine), store_(store) {}
 
-    // Submit the stored run as ONE background.compute job. Returns the
-    // job handle (cancel() propagates into the engine token).
-    // LIFETIME: *context (when non-null) must stay valid until the job
-    // reaches a terminal state — Python's closure keeps the ActionContext
-    // alive the same way; callers typically hold it for the process
-    // lifetime of the open project.
-    [[nodiscard]] pwb::job::JobHandle submit(
+    // Submit the stored run as ONE background body. The returned future
+    // holds the terminal WorkflowRunOutcome (or the failure exception —
+    // .get() rethrows). LIFETIME: *context (when non-null) must stay
+    // valid until the run reaches a terminal state — Python's closure
+    // keeps the ActionContext alive the same way; callers typically hold
+    // it for the process lifetime of the open project.
+    [[nodiscard]] std::future<WorkflowRunOutcome> submit(
         const std::string& run_id,
         const pwb::workflow_engine::RunContext* context,
         const Options& options = Options());
@@ -86,10 +97,10 @@ public:
     [[nodiscard]] bool cancel(const std::string& run_id);
 
 private:
-    pwb::job::JobScheduler& scheduler_;
+    RunSubmitter submitter_;
     pwb::workflow_engine::RunEngine& engine_;
     pwb::workflow_engine::WorkflowRunStore& store_;
-    // run_id → engine token shared with the in-flight job (the
+    // run_id → engine token shared with the in-flight body (the
     // _pending_tokens parity; guarded by the scheduler's own mutex rules —
     // tokens are only flipped, never destroyed while registered).
     std::mutex mutex_;

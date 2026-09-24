@@ -48,7 +48,7 @@ set_tests_properties(well.vizb_las_path PROPERTIES TIMEOUT 300)
 #    DTW, save/reopen pick reproducibility, cross-project isolation,
 #    tie readout reproducibility.
 if(TARGET Pwb::VisualizationCrossWellQt AND TARGET Pwb::VisualizationWellTieQt
-   AND TARGET Pwb::UiWellseisQt AND TARGET Pwb::JobQt)
+   AND TARGET Pwb::UiWellseisQt AND TARGET Pwb::QgisProcessing)
     add_executable(well.dock_lifecycle well_dock_lifecycle_test.cpp
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/viz_b_cross_well_dock.cpp
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/viz_b_well_source.cpp
@@ -60,7 +60,7 @@ if(TARGET Pwb::VisualizationCrossWellQt AND TARGET Pwb::VisualizationWellTieQt
     target_link_libraries(well.dock_lifecycle PRIVATE
         Pwb::UiWorkersWleLoad Pwb::VisualizationCrossWellQt
         Pwb::VisualizationWellTieQt Pwb::UiWorkers Pwb::UiWellseisQt
-        Pwb::Domain Pwb::JobQt WellLog::IO  # WLE 头直链
+        Pwb::Domain Pwb::QgisProcessing WellLog::IO  # WLE 头直链
         Qt6::Widgets)
     target_compile_definitions(well.dock_lifecycle PRIVATE
         PWB_WELL_FIXTURE_DIR="${PWB_WELL_FIXTURE_DIR}"
@@ -91,7 +91,7 @@ if(TARGET Pwb::VizChartsQt AND TARGET Pwb::UiPagesDataQt
     target_link_libraries(well.presenter_flow PRIVATE
         Pwb::VizChartsQt Pwb::UiPagesDataQt Pwb::UiPagesPreviewQt
         Pwb::MappingKernel Pwb::UiWorkers Pwb::UiWorkersWleLoad
-        Pwb::VisualizationCrossWell Pwb::JobQt Pwb::Domain WellLog::IO
+        Pwb::VisualizationCrossWell Pwb::QgisProcessing Pwb::Domain WellLog::IO
         Qt6::Widgets)
     target_compile_definitions(well.presenter_flow PRIVATE
         PWB_WELL_FIXTURE_DIR="${PWB_WELL_FIXTURE_DIR}"

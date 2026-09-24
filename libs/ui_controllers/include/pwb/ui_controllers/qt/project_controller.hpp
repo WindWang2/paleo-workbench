@@ -5,8 +5,9 @@
 //
 // Owns ProjectControllerCore + the save JobOwnerRunner and binds the
 // host seams onto real Qt surfaces: QFileDialog/QMessageBox for the
-// dialog seams, QTimer::singleShot(0) for the next-turn marshal, and the
-// shared JobScheduler for the save job. The window/app_shell attributes
+// dialog seams, QTimer::singleShot(0) for the next-turn marshal; the
+// save job runs on the QGIS task bridge (JobOwnerRunner). The
+// window/app_shell attributes
 // (document, project_path, page refresh hooks) stay injected — the
 // integration adapter binds them through the *_api() accessors before
 // first core() use; rebind() re-creates the core for late binds.
@@ -23,10 +24,6 @@
 
 class QWidget;
 
-namespace pwb::job {
-class JobScheduler;
-}
-
 namespace pwb::ui_controllers::qt {
 
 class JobOwnerRunner;
@@ -34,9 +31,10 @@ class JobOwnerRunner;
 class ProjectController : public QObject {
     Q_OBJECT
 public:
-    // `scheduler` must outlive the runner (app-lifetime).
-    explicit ProjectController(job::JobScheduler& scheduler,
-                               QObject* parent = nullptr);
+    // The save job runs through a JobOwnerRunner over the QGIS task
+    // bridge (process-shared gate when installed, else straight to
+    // QgsTaskManager).
+    explicit ProjectController(QObject* parent = nullptr);
     ~ProjectController() override;
 
     // The seam bags the integration adapter fills (bind before first
@@ -85,7 +83,6 @@ public:
     }
 
 private:
-    job::JobScheduler& scheduler_;
     std::unique_ptr<JobOwnerRunner> save_runner_;
     std::unique_ptr<ProjectControllerCore> core_;
     ProjectHostApi host_;

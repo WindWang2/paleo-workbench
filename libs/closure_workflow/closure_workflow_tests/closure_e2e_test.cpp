@@ -615,25 +615,27 @@ int main() {
         check("refusals.recipe_forbidden_key", recipe_refused);
 
         // ---- K. scheduler submit + synced cancel --------------------------
-        // (Real JobScheduler, real engine token bridge.)
-        pwb::job::JobScheduler::Options job_options;
-        job_options.max_workers = 1;
-        pwb::job::JobScheduler job_scheduler(job_options);
+        // (Detached-thread RunSubmitter — the background-body semantics
+        // the retired scheduler job had; real engine token bridge.)
+        const pwb::closure_workflow::WorkflowScheduler::RunSubmitter
+            detach_submitter = [](std::function<void()> body) {
+                std::thread(std::move(body)).detach();
+            };
         host.release.store(true);
-        pwb::closure_workflow::WorkflowScheduler scheduler(job_scheduler,
-                                                           engine, store);
+        pwb::closure_workflow::WorkflowScheduler scheduler(detach_submitter,
+                                                            engine, store);
         host.executions.store(0);
         const pwb::workflow_spec::WorkflowRun sched_run =
             engine.create_run(loaded.workflow, Json::object(), &context);
-        auto handle = scheduler.submit(sched_run.run_id, &context);
-        handle.wait();
-        const auto snapshot = handle.snapshot();
-        check("scheduler.done", snapshot.state == pwb::job::JobState::done,
-              "state=" + std::string(pwb::job::to_string(snapshot.state)));
+        auto sched_done = scheduler.submit(sched_run.run_id, &context);
+        const auto sched_outcome = sched_done.get();
+        check("scheduler.done",
+              sched_outcome.state == "completed" && !sched_outcome.failed,
+              "state=" + sched_outcome.state);
 
-        // K2 scheduler-side cancel: the job cancel propagates through the
-        // watcher into the engine token; the run lands CANCELLED and the
-        // job finishes done (the task returned a terminal WorkflowRun).
+        // K2 scheduler-side cancel: cancel() flips the engine token
+        // through the side channel; the run lands CANCELLED and the
+        // future resolves with the terminal WorkflowRun.
         WorkflowRunStore k_store(dir / "runs_k");
         RunFunctionMap k_functions;
         k_functions.emplace(
@@ -645,17 +647,17 @@ int main() {
             });
         RunEngine k_engine(action_catalog, k_functions, k_store, nullptr,
                            nullptr, nullptr, nullptr, nullptr, &rail);
-        pwb::closure_workflow::WorkflowScheduler k_scheduler(job_scheduler,
-                                                             k_engine,
-                                                             k_store);
+        pwb::closure_workflow::WorkflowScheduler k_scheduler(detach_submitter,
+                                                              k_engine,
+                                                              k_store);
         host.release.store(false);
         const pwb::workflow_spec::WorkflowRun k_run =
             k_engine.create_run(failing, Json::object(), &context);
-        auto k_handle = k_scheduler.submit(k_run.run_id, &context);
+        auto k_done = k_scheduler.submit(k_run.run_id, &context);
         std::this_thread::sleep_for(std::chrono::milliseconds(120));
         check("scheduler.cancel_signalled", k_scheduler.cancel(k_run.run_id));
         host.release.store(true);  // the body observes the token next poll
-        k_handle.wait();
+        (void)k_done.get();
         const pwb::workflow_spec::WorkflowRun k_stored = k_store.load(k_run.run_id);
         check("scheduler.cancelled_run",
               k_stored.state == pwb::workflow_spec::RunState::cancelled,

@@ -42,7 +42,6 @@ target_link_libraries(pwb_closure_workflow
         Pwb::FactorFusion
         Pwb::MappingKernel
         Pwb::Prediction
-        Pwb::JobRuntime
     PRIVATE
         Pwb::FactorHost  # python_repr_double (src/ only)
 )

@@ -13,7 +13,7 @@
 #include <pwb/ui_pages_data/qt/data_reader_panel.hpp>
 #include <pwb/ui_pages_data/qt/data_workspace.hpp>
 
-#include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/qgis_processing/job_compat.hpp>
 
 #include <QDockWidget>
 #include <QLabel>
@@ -302,7 +302,7 @@ void VizEDataPage::present_base_preview(
 
     auto& owner = jobs_->make_owner(nullptr);
     base_owner_ = &owner;
-    pwb::job::qtbridge::JobOwner* owner_ptr = &owner;
+    pwb::qgis_processing::PwbTaskOwner* owner_ptr = &owner;
     pwb::job::JobSpec spec;
     spec.kind = "preview.registry_base";
     spec.title = pwb::ui_pages_data::loading_title(row.view.name);
@@ -331,9 +331,10 @@ void VizEDataPage::present_base_preview(
         return outcome;
     };
     const std::shared_ptr<std::atomic<bool>> alive = alive_;
-    owner.start(jobs_->scheduler(), std::move(spec),
-                [this, alive, generation, owner_ptr](
-                    const pwb::job::qtbridge::JobOutcome& o) {
+    pwb::qgis_processing::start_job_spec(
+        owner, std::move(spec),
+        [this, alive, generation, owner_ptr](
+            const pwb::qgis_processing::CompatJobOutcome& o) {
                     if (!alive->load()) return;
                     const bool terminal =
                         o.state != pwb::job::JobState::queued &&
@@ -491,13 +492,13 @@ void VizEDataPage::present_horizon(const QString& path,
             {points.x[i], points.y[i], points.z[i], "ok"});
     }
 
-    // One JobOwner per request: JobOwner refuses a second concurrent
+    // One task owner per request: the owner refuses a second concurrent
     // start, and repeated previews must not serialize behind a cancelling
-    // job. NO QObject parent — JobCenter's unique_ptr already owns the
-    // owner, and a parent here would double-delete whenever this page dies
-    // before the JobCenter (the owner still delivers to this GUI thread,
-    // which is where make_owner runs).
-    pwb::job::qtbridge::JobOwner& owner = jobs_->make_owner(nullptr);
+    // job. JobCenter's unique_ptr owns the owner for its whole lifetime,
+    // so the nullptr parent is fine (no parent-child double delete, and
+    // the owner still delivers to this GUI thread, which is where
+    // make_owner runs).
+    pwb::qgis_processing::PwbTaskOwner& owner = jobs_->make_owner(nullptr);
     pwb::job::JobSpec spec;
     spec.kind = "compute.viz_e.surface_preview";
     spec.title = "曲面预览插值";
@@ -508,9 +509,10 @@ void VizEDataPage::present_horizon(const QString& path,
         return compute_factor_preview(request, ctx);
     };
     const std::shared_ptr<std::atomic<bool>> alive = alive_;
-    owner.start(jobs_->scheduler(), std::move(spec),
-                 [this, alive, generation](
-                     const pwb::job::qtbridge::JobOutcome& o) {
+    pwb::qgis_processing::start_job_spec(
+        owner, std::move(spec),
+        [this, alive, generation](
+            const pwb::qgis_processing::CompatJobOutcome& o) {
                      if (!alive->load()) {
                          return;  // page died mid-flight — drop the delivery
                      }

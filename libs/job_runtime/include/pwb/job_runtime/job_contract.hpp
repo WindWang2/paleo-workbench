@@ -210,6 +210,16 @@ public:
     // snapshot()/cancel() on it.
     [[nodiscard]] JobHandle self_handle() const;
 
+    // Bridge seam (QGIS task convergence, Wave C): hosts that execute
+    // JobSpec bodies on non-scheduler executors (PwbTaskOwner /
+    // PaleoFunctionTask — pwb::qgis_processing::body_from_job_spec) wire
+    // the progress sink here; the scheduler sets the same field internally
+    // at claim time. Without a sink report_progress() is a harmless no-op.
+    void set_progress_sink(
+        std::function<void(double, const std::string&)> sink) {
+        progress_sink_ = std::move(sink);
+    }
+
 private:
     friend class JobScheduler;
     std::string job_id_;
@@ -257,6 +267,17 @@ struct JobSpec {
 };
 
 // ------------------------------------------------------------- handle --
+
+// Lease handle returned by the scheduler's admission hook; release() is
+// called exactly once, when the job reaches a terminal state (or when a
+// claimed job is un-admitted due to a lost race). Lives in the contract
+// layer so the governor (pwb_job_governance) can mint leases without
+// linking the scheduler itself (Wave D split).
+class AdmissionLease {
+public:
+    virtual ~AdmissionLease() = default;
+    virtual void release() = 0;
+};
 
 class JobScheduler;
 

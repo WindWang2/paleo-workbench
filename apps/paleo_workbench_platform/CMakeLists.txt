@@ -14,6 +14,7 @@ add_executable(pwb-platform
     diagnostics.cpp
     self_check.cpp
     main_window.cpp
+    processing_install.cpp
     job_center.hpp
     job_center.cpp
 )
@@ -131,7 +132,7 @@ set(PWB_V14_WELLSEIS OFF)
 if(TARGET Pwb::UiWellseisQt)
     set(PWB_V14_WELLSEIS ON)
 elseif(PWB_BUILD_CONV_22 AND TARGET Pwb::GeoModel
-       AND TARGET Pwb::Domain AND TARGET Pwb::JobRuntime
+       AND TARGET Pwb::Domain AND TARGET Pwb::JobContracts
        AND TARGET Qt6::Widgets)
     set(PWB_V14_WELLSEIS ON)
 endif()
@@ -155,15 +156,16 @@ if(PWB_BUILD_CONV_07)
 endif()
 # END native-product closure
 # BEGIN CONV-30
-# CONV-30 async job runtime: the app hosts the bounded scheduler + Qt
-# bridge (job_center.*) and the migrated surfaces (SEG-Y import, attribute
-# supervision, factor-map compute) submit through it. Fail-closed: an ON
-# option without the JobQt target is a configure error.
+# CONV-30 async execution: the app hosts the QgsTaskManager bridge
+# (job_center.* installs the Paleo Processing provider + the shared task
+# gate) and the migrated surfaces (SEG-Y import, attribute supervision,
+# factor-map compute) submit through it. Fail-closed: an ON option
+# without the QgisProcessing target is a configure error.
 if(PWB_BUILD_CONV_30)
-    if(NOT TARGET Pwb::JobQt)
-        message(FATAL_ERROR "PWB_BUILD_CONV_30=ON requires Pwb::JobQt (libs/job_runtime)")
+    if(NOT TARGET Pwb::QgisProcessing)
+        message(FATAL_ERROR "PWB_BUILD_CONV_30=ON requires Pwb::QgisProcessing (libs/qgis_processing)")
     endif()
-    target_link_libraries(pwb-platform PRIVATE Pwb::JobQt)
+    target_link_libraries(pwb-platform PRIVATE Pwb::QgisProcessing)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CONV_30=1)
 endif()
 # END CONV-30
@@ -268,6 +270,17 @@ if(TARGET Pwb::Providers)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_PROVIDERS=1)
 endif()
 # END CONV-PROVIDERS
+
+# BEGIN CONV-QGIS-PROCESSING (phase 4) — agent tool source
+# processing_install converts the paleo Processing algorithms into
+# closure_agent ActionSpecs. The agent library is optional in the build;
+# the conversion outlet (paleo_processing_tool_infos) works without it,
+# register_paleo_agent_actions() compiles only when it is linked.
+if(TARGET Pwb::ClosureAgent)
+    target_link_libraries(pwb-platform PRIVATE Pwb::ClosureAgent)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_CLOSURE_AGENT=1)
+endif()
+# END CONV-QGIS-PROCESSING
 
 # BEGIN VIZ-B
 # Cross-well correlation & well-tie dock (line B): the wiring moved to the

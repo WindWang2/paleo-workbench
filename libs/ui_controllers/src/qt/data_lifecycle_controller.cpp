@@ -11,11 +11,10 @@
 namespace pwb::ui_controllers::qt {
 
 DataLifecycleController::DataLifecycleController(
-    job::JobScheduler& scheduler, ui_shell::OperationRegistry* operations,
-    QObject* parent)
-    : QObject(parent), scheduler_(scheduler), operations_(operations) {
-    catalog_job_ = std::make_unique<JobOwnerRunner>(scheduler_, this);
-    verify_job_ = std::make_unique<JobOwnerRunner>(scheduler_, this);
+    ui_shell::OperationRegistry* operations, QObject* parent)
+    : QObject(parent), operations_(operations) {
+    catalog_job_ = std::make_unique<JobOwnerRunner>(this);
+    verify_job_ = std::make_unique<JobOwnerRunner>(this);
 }
 
 DataLifecycleController::~DataLifecycleController() = default;

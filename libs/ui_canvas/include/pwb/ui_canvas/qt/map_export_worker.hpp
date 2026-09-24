@@ -1,12 +1,12 @@
 // UI-15 — map export worker (ui/map_export_worker.py port). One export
-// job runs the frozen render_and_save_map_export semantics on a
-// JobRuntime lane owned by a JobOwner:
+// task runs the frozen render_and_save_map_export semantics on the QGIS
+// task bridge (a PwbTaskOwner owning one QgsTaskManager task):
 //
 //   * MapExportWorker  — the QObject surface (start/cancel/shutdown +
 //     finished/failed/cancelled signals) mirroring Python's
-//     MapExportWorker + OwnedWorkerJob pair; the JobOwner is internal so
-//     ownership semantics stay identical (the worker QObject parents the
-//     whole job).
+//     MapExportWorker + OwnedWorkerJob pair; the PwbTaskOwner is internal
+//     so ownership semantics stay identical (the worker QObject parents
+//     the whole task).
 //   * render_and_save_map_export — the synchronous task body (native QGIS
 //     attempt → fallback renderer → QImage + decorations + PNG write),
 //     throwing ExportCancelled at cancellation checkpoints and
@@ -30,17 +30,10 @@
 #include <QObject>
 #include <QString>
 
+#include <pwb/qgis_processing/task_bridge.hpp>
 #include <pwb/ui_canvas/export_core.hpp>
 
 class QWidget;
-
-namespace pwb::job::qtbridge {
-class JobOwner;
-}
-
-namespace pwb::job {
-class JobScheduler;
-}
 
 namespace pwb::ui_canvas {
 
@@ -65,12 +58,12 @@ MapExportSpec snapshot_map_export(const UnifiedMapCanvas& canvas,
 // Duck-walk parity: the widget itself, else its first descendant canvas.
 UnifiedMapCanvas* unified_map_canvas_from(QWidget* widget);
 
-// The worker/job pair: start() submits one export on an internal
-// JobScheduler lane owned by an internal JobOwner (the OwnedWorkerJob
-// port keeps the same one-job-per-worker ownership). cancel() is
-// cooperative (threading.Event.set parity); shutdown(wait_ms) reports
-// whether native work joined — false detaches, matching the bounded
-// shutdown contract (#1042).
+// The worker/task pair: start() submits one export task on the QGIS
+// task bridge owned by an internal PwbTaskOwner (the OwnedWorkerJob port
+// keeps the same one-job-per-worker ownership). cancel() is cooperative
+// (threading.Event.set parity); shutdown(wait_ms) reports whether native
+// work joined — false means the task keeps running under QgsTaskManager
+// (adoption, #1042 bounded-shutdown contract).
 class MapExportWorker : public QObject {
     Q_OBJECT
 
@@ -98,8 +91,7 @@ signals:
 private:
     MapExportSpec spec_;
     std::optional<MapExportReport> report_;
-    std::unique_ptr<pwb::job::JobScheduler> scheduler_;  // owned
-    pwb::job::qtbridge::JobOwner* job_ = nullptr;        // owned (child)
+    pwb::qgis_processing::PwbTaskOwner job_;  // one export task slot
     bool started_ = false;
 };
 

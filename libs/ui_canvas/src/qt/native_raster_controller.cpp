@@ -3,6 +3,7 @@
 
 #include <pwb/ui_canvas/qt/native_raster_controller.hpp>
 
+#include <pwb/qgis_processing/job_compat.hpp>
 #include <pwb/ui_canvas/qt/qt_meta.hpp>
 
 #include <algorithm>
@@ -20,16 +21,12 @@ std::string request_key(const NativeRasterRequest& request) {
 NativeRasterRequestController::NativeRasterRequestController(
     QObject* parent)
     : QObject(parent) {
-    // One background lane — Python's single OwnedWorkerJob per controller.
-    pwb::job::JobScheduler::Options options;
-    options.max_workers = 1;
-    options.interactive_workers = 0;
-    scheduler_ = std::make_shared<pwb::job::JobScheduler>(options);
-    job_ = new pwb::job::qtbridge::JobOwner(this);
+    // One task slot — Python's single OwnedWorkerJob per controller.
+    job_ = new pwb::qgis_processing::PwbTaskOwner(this);
     // released() fires only on shutdown() — the guard inside
     // dispatch_next makes that hop a no-op; normal completion dispatch
     // happens inside the finished callback (see start()).
-    connect(job_, &pwb::job::qtbridge::JobOwner::released, this,
+    connect(job_, &pwb::qgis_processing::PwbTaskOwner::released, this,
             &NativeRasterRequestController::dispatch_next);
 }
 
@@ -89,11 +86,9 @@ void NativeRasterRequestController::invalidate() {
 bool NativeRasterRequestController::shutdown(int wait_ms) {
     shutdown_ = true;
     invalidate();
-    const bool joined = job_->shutdown(wait_ms);
-    // The scheduler lane joins bounded too — a detached job keeps its cell
-    // alive through the keeper; the scheduler destructor drains the rest.
-    scheduler_->shutdown(false, wait_ms / 1000.0);
-    return joined;
+    // The task keeps running under QgsTaskManager when it refuses the
+    // bounded join (adoption) — the boolean stays the #1042 contract.
+    return job_->shutdown(wait_ms);
 }
 
 bool NativeRasterRequestController::is_running() const {
@@ -123,43 +118,39 @@ void NativeRasterRequestController::start(
         ctx.check_cancelled();
         return image;
     };
-    job_->start(*scheduler_, spec,
-                [this, captured](
-                    const pwb::job::qtbridge::JobOutcome& outcome) {
-                    if (!shutdown_) {
-                        if (outcome.state == pwb::job::JobState::done ||
-                            outcome.state == pwb::job::JobState::degraded) {
-                            if (same_request(
-                                    desired_lookup(captured.layer_id),
-                                    captured)) {
-                                const auto* image =
-                                    std::any_cast<RasterImage>(
-                                        &outcome.result);
-                                if (image != nullptr) {
-                                    emit raster_ready(captured, *image);
-                                }
-                            }
-                        } else if (outcome.state ==
-                                   pwb::job::JobState::failed) {
-                            if (same_request(
-                                    desired_lookup(captured.layer_id),
-                                    captured)) {
-                                emit raster_failed(
-                                    captured,
-                                    QString::fromStdString(outcome.error));
-                            }
+    pwb::qgis_processing::start_job_spec(
+        *job_, std::move(spec),
+        [this, captured](
+            const pwb::qgis_processing::CompatJobOutcome& outcome) {
+            if (!shutdown_) {
+                if (outcome.state == pwb::job::JobState::done ||
+                    outcome.state == pwb::job::JobState::degraded) {
+                    if (same_request(desired_lookup(captured.layer_id),
+                                     captured)) {
+                        const auto* image =
+                            std::any_cast<RasterImage>(&outcome.result);
+                        if (image != nullptr) {
+                            emit raster_ready(captured, *image);
                         }
-                        // cancelled: Python's cancelled signal has no
-                        // consumer — the released hop still starts the
-                        // next pending request below.
                     }
-                    // JobOwner emits released() only on shutdown(); the
-                    // finished-delivery hop is the C++ terminal event that
-                    // frees this slot (the job is already terminal here,
-                    // so re-start is legal). Python's released →
-                    // _on_released parity.
-                    dispatch_next();
-                });
+                } else if (outcome.state == pwb::job::JobState::failed) {
+                    if (same_request(desired_lookup(captured.layer_id),
+                                     captured)) {
+                        emit raster_failed(
+                            captured,
+                            QString::fromStdString(outcome.error));
+                    }
+                }
+                // cancelled: Python's cancelled signal has no consumer —
+                // the released hop still starts the next pending request
+                // below.
+            }
+            // PwbTaskOwner emits released() only on shutdown(); the
+            // finished-delivery hop is the terminal event that frees this
+            // slot (the task is already terminal here, so re-start is
+            // legal). Python's released → _on_released parity.
+            dispatch_next();
+        });
 }
 
 void NativeRasterRequestController::dispatch_next() {

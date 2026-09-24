@@ -8,12 +8,13 @@
 #
 # Gating mirrors UI-09/10/11: no per-slice option; the core target joins
 # every configuration that resolved the libraries the cores bind
-# (job runtime + domain + catalog + project + ui_data_core + ui_workers +
-# ui_shell + workflow_runtime + prediction + tool_policy); the _qt target
-# additionally needs Qt6::Widgets + Pwb::JobQt.
+# (job contracts vocabulary + domain + catalog + project + ui_data_core +
+# ui_workers + ui_shell + workflow_runtime + prediction + tool_policy);
+# the _qt target additionally needs Qt6::Widgets + Pwb::QgisProcessing
+# (QgsTaskManager bridge).
 
 foreach(_required
-        Pwb::JobRuntime Pwb::Domain Pwb::Catalog Pwb::Project
+        Pwb::JobContracts Pwb::Domain Pwb::Catalog Pwb::Project
         Pwb::UiDataCore Pwb::UiWorkers Pwb::UiShell Pwb::WorkflowRuntime
         Pwb::Prediction Pwb::ToolPolicy Pwb::UiWorkstation)
     if(NOT TARGET ${_required})
@@ -35,19 +36,19 @@ add_library(Pwb::UiControllers ALIAS pwb_ui_controllers)
 target_include_directories(pwb_ui_controllers PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(pwb_ui_controllers PUBLIC cxx_std_20)
-# PUBLIC: the headers expose JobSpec/JobContext, domain::Json, catalog
-# models, ui_data_core handles, ui_workers inputs and the recompute-plan
-# types through the seam APIs.
+# PUBLIC: the headers expose JobSpec/JobContext (contracts vocabulary),
+# domain::Json, catalog models, ui_data_core handles, ui_workers inputs
+# and the recompute-plan types through the seam APIs.
 target_link_libraries(pwb_ui_controllers PUBLIC
-    Pwb::JobRuntime Pwb::Domain Pwb::Catalog Pwb::Project
+    Pwb::JobContracts Pwb::Domain Pwb::Catalog Pwb::Project
     Pwb::UiDataCore Pwb::UiWorkers Pwb::UiShell Pwb::WorkflowRuntime
     Pwb::Prediction Pwb::ToolPolicy Pwb::UiWorkstation)
 
-# Qt Widgets shells (UI-14): JobOwnerRunner over Pwb::JobQt, the
-# MapActionController QObject, QtSelectionContext +
-# ViewCoordinationController, and the Project/DataLifecycle/Workflow
-# controller shells with stock-dialog binds.
-if(TARGET Qt6::Widgets AND TARGET Pwb::JobQt)
+# Qt Widgets shells (UI-14): JobOwnerRunner over Pwb::QgisProcessing
+# (QgsTaskManager bridge), the MapActionController QObject,
+# QtSelectionContext + ViewCoordinationController, and the
+# Project/DataLifecycle/Workflow controller shells with stock-dialog binds.
+if(TARGET Qt6::Widgets AND TARGET Pwb::QgisProcessing)
     add_library(pwb_ui_controllers_qt STATIC
         src/qt/job_owner_runner.cpp
         src/qt/map_action_controller.cpp
@@ -69,12 +70,12 @@ if(TARGET Qt6::Widgets AND TARGET Pwb::JobQt)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_compile_features(pwb_ui_controllers_qt PUBLIC cxx_std_20)
     target_link_libraries(pwb_ui_controllers_qt PUBLIC
-        Pwb::UiControllers Pwb::JobQt Qt6::Widgets
+        Pwb::UiControllers Pwb::QgisProcessing Qt6::Widgets
         PRIVATE Qt6::Gui)
 else()
     message(STATUS
         "UI-14: pwb_ui_controllers_qt skipped — needs Qt6::Widgets + "
-        "Pwb::JobQt (PWB_BUILD_CONV_30)")
+        "Pwb::QgisProcessing (QGIS SDK admission)")
 endif()
 
 if(BUILD_TESTING)

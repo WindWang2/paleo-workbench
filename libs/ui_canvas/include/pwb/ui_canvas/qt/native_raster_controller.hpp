@@ -7,11 +7,12 @@
 // scene epoch still match. It never stores a second scientific grid or
 // invokes interpolation.
 //
-// C++ ownership: one JobScheduler lane + one JobOwner (the OwnedWorkerJob
-// port — CONV-30). Latest-request-per-layer tracking, cooperative cancel
-// (delivery suppression, never a force-stop of native raster work), stale
-// result suppression by request identity, and the boolean shutdown/join
-// report are all preserved.
+// C++ ownership: one PwbTaskOwner task slot on the QGIS task bridge
+// (the OwnedWorkerJob port — one raster task at a time).
+// Latest-request-per-layer tracking, cooperative cancel (delivery
+// suppression, never a force-stop of native raster work), stale result
+// suppression by request identity, and the boolean shutdown/join report
+// are all preserved.
 #pragma once
 
 #include <deque>
@@ -22,8 +23,7 @@
 
 #include <QObject>
 
-#include <pwb/job_runtime/job_scheduler.hpp>
-#include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/qgis_processing/task_bridge.hpp>
 #include <pwb/ui_canvas/layer_scene.hpp>
 
 namespace pwb::ui_canvas {
@@ -87,8 +87,7 @@ private:
     std::optional<NativeRasterRequest> desired_lookup(
         const std::string& layer_id) const;
 
-    std::shared_ptr<pwb::job::JobScheduler> scheduler_;
-    pwb::job::qtbridge::JobOwner* job_ = nullptr;  // child QObject
+    pwb::qgis_processing::PwbTaskOwner* job_ = nullptr;  // child QObject
     std::optional<NativeRasterRequest> active_;
     // FIFO pending queue keyed by layer (Python OrderedDict parity —
     // re-queueing a layer keeps its ORIGINAL slot order).

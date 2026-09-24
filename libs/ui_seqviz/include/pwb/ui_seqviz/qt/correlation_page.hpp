@@ -6,7 +6,7 @@
 //
 // The page owns the widget tree (well picker | section host | action
 // panel in a horizontal splitter), the backend stack, the well-list
-// keyed diff, the UI-04 load/DTW worker wiring through JobOwner, and
+// keyed diff, the UI-04 load/DTW worker wiring through PwbTaskOwner, and
 // the interpretation-version dialogs. Every domain call the Python page
 // reaches into (tops files, correlation lifecycle, engine adapters,
 // catalog registration) is an injected seam — absent seams take the
@@ -25,7 +25,7 @@
 #include <utility>
 #include <vector>
 
-#include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/qgis_processing/task_bridge.hpp>
 #include <pwb/ui_seqviz/correlation_state.hpp>
 #include <pwb/ui_seqviz/viz_page_state.hpp>
 #include <pwb/ui_workers/correlation_load.hpp>
@@ -444,8 +444,8 @@ private:
     std::string dtw_conf_text_ = "置信度: 不可用";
     double dtw_confidence_ = 0.0;
 
-    job::qtbridge::JobOwner* load_job_ = nullptr;
-    job::qtbridge::JobOwner* dtw_job_ = nullptr;
+    pwb::qgis_processing::PwbTaskOwner* load_job_ = nullptr;
+    pwb::qgis_processing::PwbTaskOwner* dtw_job_ = nullptr;
 
     // widgets
     QSplitter* splitter_ = nullptr;

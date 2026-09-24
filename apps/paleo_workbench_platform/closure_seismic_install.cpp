@@ -1,3 +1,4 @@
+#include "algorithm_exec.hpp"
 #include "closure_seismic_install.hpp"
 
 #include <array>
@@ -14,9 +15,7 @@
 #include <QString>
 
 #include <pwb/science/algorithm.hpp>
-#include <pwb/science/registry.hpp>
 #include <pwb/science/types.hpp>
-#include <pwb/seismic_attributes/attributes.hpp>
 #include <pwb/seismic_service/volume_service.hpp>
 #include <pwb/seismic_viewer/seismic_slice_widget.hpp>
 #include <pwb/seismic_viewer/slice_selection.hpp>
@@ -58,22 +57,21 @@ bool is_section_kernel(const std::string& kernel_id) {
 // Deterministic section-attribute run: wrap the canonical plane
 // (rows = traces, cols = samples on both section views) as a packed
 // (n_traces, 1, n_samples) volume — the same contract crossplot_core uses —
-// and run one frozen kernel through the science SDK.
+// and run one frozen kernel through the science SDK. Phase 4: the kernel
+// resolves through the product's paleo executor table
+// (algorithm_exec.cpp, the same vocabulary QgsProcessingRegistry exposes)
+// — this GUI-thread, in-memory-plane path no longer keeps a TU-static
+// AlgorithmRegistry.
 bool run_section_kernel(const std::string& kernel_id,
                         std::span<const float> plane, std::int64_t n_traces,
                         std::int64_t n_samples, double sample_interval_s,
                         std::vector<float>& out, std::string& diagnostic) {
-    static pwb::science::AlgorithmRegistry registry;
-    static const bool registered = [] {
-        const auto report = pwb::seismic_attributes::register_seismic_attributes(
-            registry, "closure-seismic-07");
-        return !report.registered_ids.empty();
-    }();
-    if (!registered) {
-        diagnostic = "seismic attribute kernels failed to register";
-        return false;
-    }
-    pwb::science::IAlgorithm* algorithm = registry.find(kernel_id);
+    // kernel_id carries the science prefix ("seismic.envelope"); the
+    // executor table is keyed by the paleo name ("seismic_envelope").
+    const std::string paleo_name =
+        "paleo:seismic_" + kernel_id.substr(kernel_id.find('.') + 1);
+    std::unique_ptr<pwb::science::IAlgorithm> algorithm =
+        pwb::app::make_science_algorithm(paleo_name);
     if (algorithm == nullptr) {
         diagnostic = "algorithm not registered: " + kernel_id;
         return false;
@@ -292,8 +290,9 @@ struct SeismicPageBinding::Impl {
         }
         std::vector<float> attribute;
         std::string diagnostic;
-        // The science registry ids carry the "seismic." prefix
-        // (attributes.cpp: {"seismic.envelope", ...}).
+        // The panel kernel ids ("envelope", ...) ride the paleo vocabulary
+        // through run_section_kernel ("seismic.envelope" -> the
+        // paleo:seismic_envelope executor entry).
         if (!run_section_kernel("seismic." + kernel, plane.values, plane.rows,
                                 plane.cols, sample_interval_s, attribute,
                                 diagnostic)) {

@@ -6,8 +6,9 @@
 // Ownership + lifetime contract for the non-UI product services:
 //   * ProjectSession (map/edit session) — created here, closed here in a
 //     defined order while the MainWindow (canvas host) is still alive;
-//   * the attribute AlgorithmRunner (kernel registration happens once
-//     here, not per window);
+//   * the attribute AlgorithmRunner (delegates to the Paleo Processing
+//     provider in QgsProcessingRegistry — no host-side kernel registration
+//     since the phase-4 convergence; constructed once here, not per window);
 //   * the project data-store handle shared by every operation that
 //     resolves catalog versions.
 //

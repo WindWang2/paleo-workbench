@@ -6,7 +6,8 @@
 //   * create_factor_map_dialog.py → CreateFactorMapDialog (QDialog)
 //
 // View data comes from the Qt-free factor_state core; worker execution
-// goes through job::JobSpec + job::qtbridge::JobOwner over
+// goes through job::JobSpec adapted onto the QGIS task bridge
+// (PwbTaskOwner + pwb::qgis_processing::start_job_spec) over
 // run_factor_map_job (UI-04 worker semantics, injected service seam).
 
 #include <QDialog>
@@ -14,7 +15,7 @@
 #include <QLabel>
 
 #include <memory>
-#include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/qgis_processing/task_bridge.hpp>
 #include <pwb/ui_seqviz/factor_state.hpp>
 #include <vector>
 
@@ -26,6 +27,10 @@ class QScrollArea;
 class QSpinBox;
 class QVBoxLayout;
 class QGridLayout;
+
+namespace pwb::qgis_processing {
+struct CompatJobOutcome;  // job_compat.hpp (implementation-side seam)
+}
 
 namespace pwb::ui_seqviz::qt {
 
@@ -135,7 +140,7 @@ private:
 
 // ---------------------------------------------------------------------------
 // create_factor_map_dialog.py — modal factor-map creation dialog over the
-// injected FactorMapServiceFn + job::JobOwner (OwnedWorkerJob parity).
+// injected FactorMapServiceFn + a PwbTaskOwner (OwnedWorkerJob parity).
 // ---------------------------------------------------------------------------
 class CreateFactorMapDialog : public QDialog {
     Q_OBJECT
@@ -180,10 +185,11 @@ public slots:
     void reject() override;
 
 private:
-    void on_job_finished(const pwb::job::qtbridge::JobOutcome& outcome);
+    void on_job_finished(
+        const pwb::qgis_processing::CompatJobOutcome& outcome);
 
     FactorMapServiceFn service_;
-    pwb::job::qtbridge::JobOwner job_owner_;
+    pwb::qgis_processing::PwbTaskOwner job_owner_;
     std::any created_map_doc_;
 
     QComboBox* factor_combo_ = nullptr;

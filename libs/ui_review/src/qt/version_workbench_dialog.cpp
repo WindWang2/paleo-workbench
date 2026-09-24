@@ -1,6 +1,6 @@
 #include "pwb/ui_review/qt/version_workbench_dialog.hpp"
 
-#include "pwb/job_runtime/qt/job_bridge.hpp"
+#include <pwb/qgis_processing/job_compat.hpp>
 #include "pwb/ui_data_core/asset_view.hpp"
 #include "pwb/ui_review/tokens.hpp"
 #include "pwb/ui_widgets/object_table.hpp"
@@ -92,16 +92,13 @@ VersionCompareDialog::VersionCompareDialog(
 
 VersionWorkbenchDialog::VersionWorkbenchDialog(
     QWidget* parent, std::function<ICatalogApi*()> service_provider,
-    QString asset_id, std::shared_ptr<job::JobScheduler> scheduler)
+    QString asset_id)
     : QDialog(parent),
       service_provider_(std::move(service_provider)),
-      asset_id_(std::move(asset_id)),
-      scheduler_(scheduler ? std::move(scheduler)
-                           : std::make_shared<job::JobScheduler>(
-                                 job::JobScheduler::Options{})) {
+      asset_id_(std::move(asset_id)) {
     setWindowTitle(QStringLiteral("版本工作台 (Version Workbench)"));
     resize(940, 640);
-    promote_job_ = std::make_unique<job::qtbridge::JobOwner>(this);
+    promote_job_ = std::make_unique<pwb::qgis_processing::PwbTaskOwner>(this);
 
     auto* layout = new QVBoxLayout(this);
     layout->setSpacing(tokens::kSpace2);
@@ -467,8 +464,9 @@ void VersionWorkbenchDialog::on_promote_clicked() {
     spec.run = [svc, version_id](job::JobContext&) -> std::any {
         return svc->promote_version(version_id);
     };
-    promote_job_->start(*scheduler_, std::move(spec),
-                        [this](const job::qtbridge::JobOutcome& outcome) {
+    pwb::qgis_processing::start_job_spec(
+        *promote_job_, std::move(spec),
+        [this](const pwb::qgis_processing::CompatJobOutcome& outcome) {
         set_actions_enabled(true);
         if (outcome.state == job::JobState::failed) {
             QMessageBox::critical(this, QStringLiteral("提升失败"),
