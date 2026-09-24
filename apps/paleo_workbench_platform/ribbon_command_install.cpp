@@ -47,6 +47,10 @@
 #include <pwb/ui_wellseis/qt/well_log_prediction_page.hpp>
 #include <pwb/ui_workstation/workstation_frame.hpp>
 
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+#include <pwb/closure_science/qt/prediction_workflow.hpp>
+#endif
+
 #if defined(PWB_WITH_CLOSURE_MAPPING)
 #include "closure_mapping_install.hpp"
 #include <pwb/ui_pages_data/qt/preparation_page.hpp>
@@ -458,9 +462,45 @@ void data_commands(ui_shell::CommandRegistry& registry,
 
 void predict_commands(ui_shell::CommandRegistry& registry,
                       std::vector<std::string>* ids, const Ctx& c) {
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+    // The ws1 prediction workflow controller (main_window's
+    // PREDICTION-WORKFLOW install; findChild keeps this file decoupled
+    // from the install order). nullptr = the install slice never ran —
+    // the commands below stay honestly disabled.
+    const auto workflow = [c]() {
+        return c.shell != nullptr
+                   ? c.shell->findChild<
+                         pwb::closure_science::qt::
+                             PredictionWorkflowController*>()
+                   : nullptr;
+    };
+    const auto has_workflow = [workflow]() -> std::optional<std::string> {
+        if (workflow() == nullptr) {
+            return std::string("预测工作流装配切片未接入");
+        }
+        return std::nullopt;
+    };
+    register_real(
+        registry, ids, "predict.select_well", QStringLiteral("选择井数据"),
+        QStringLiteral("选择参与预测的井（稳定资源 id，多选）"),
+        QStringLiteral("井 well 选择 select"),
+        [c, workflow] {
+            if (auto* controller = workflow(); controller != nullptr) {
+                controller->open_well_selection();
+            }
+        },
+        [c, has_workflow](const CommandContext&)
+            -> std::optional<std::string> {
+            if (auto problem = needs_project(c); problem.has_value()) {
+                return problem;
+            }
+            return has_workflow();
+        });
+#else
     register_disabled(registry, ids, "predict.select_well",
                       QStringLiteral("选择井数据"), QStringLiteral("选择参与预测的井"),
-                      QStringLiteral("井 well"), QStringLiteral("M5 接入"));
+                      QStringLiteral("井 well"), QStringLiteral("构建未含预测科学切片"));
+#endif
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
     register_real(registry, ids, "predict.select_seismic",
                   QStringLiteral("选择地震"),
@@ -479,9 +519,61 @@ void predict_commands(ui_shell::CommandRegistry& registry,
                       QStringLiteral("地震 seismic 体"),
                       QStringLiteral("构建未含地震查看器/数据集成切片"));
 #endif
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+    register_real(
+        registry, ids, "predict.model_params", QStringLiteral("相预测 v2"),
+        QStringLiteral("选择预测模型/版本（注册表 + 模型包校验 + 执行器可用性）"),
+        QStringLiteral("相预测 模型 model 版本"),
+        [c, workflow] {
+            if (auto* controller = workflow(); controller != nullptr) {
+                controller->open_model_selection();
+            }
+        },
+        [c, has_workflow](const CommandContext&) {
+            if (auto problem = needs_project(c); problem.has_value()) {
+                return problem;
+            }
+            return has_workflow();
+        });
+#else
     register_disabled(registry, ids, "predict.model_params",
                       QStringLiteral("相预测 v2"), QStringLiteral("预测模型/版本选择"),
-                      QStringLiteral("相预测 模型 model 版本"), QStringLiteral("M5 接入"));
+                      QStringLiteral("相预测 模型 model 版本"), QStringLiteral("构建未含预测科学切片"));
+#endif
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+    // RunSpec path: preflight (model package + input contract + params)
+    // -> the SAME ONNX runtime the seismic page uses. Without a workflow
+    // controller the legacy well-page route stays (its own guards fire
+    // honestly).
+    register_real(
+        registry, ids, "predict.run", QStringLiteral("运行预测"),
+        QStringLiteral("按当前 RunSpec 运行真实 ONNX 相预测（预检先行）"),
+        QStringLiteral("运行 run 预测 prediction"),
+        [c, workflow] {
+            auto* controller = workflow();
+            if (controller != nullptr) {
+                controller->run();
+                return;
+            }
+            if (c.shell->well_log_page() != nullptr) {
+                c.shell->well_log_page()->on_run();
+            }
+        },
+        [c, workflow](const CommandContext&)
+            -> std::optional<std::string> {
+            if (auto problem = needs_project(c); problem.has_value()) {
+                return problem;
+            }
+            auto* controller = workflow();
+            if (controller == nullptr) {
+                return std::string("预测工作流装配切片未接入");
+            }
+            if (controller->is_running()) {
+                return std::string("已有推断在运行（单飞：同一 RunSpec 不可并发）");
+            }
+            return std::string();
+        });
+#else
     register_real(registry, ids, "predict.run", QStringLiteral("运行预测"),
                   QStringLiteral("对所选井运行真实 ONNX 相预测"),
                   QStringLiteral("运行 run 预测 prediction"),
@@ -491,6 +583,33 @@ void predict_commands(ui_shell::CommandRegistry& registry,
                       }
                   },
                   [c](const CommandContext&) { return needs_project(c); });
+#endif
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+    // Real cancel: the in-flight inference run first (cooperative, at the
+    // provider's tile-group seam), the JobCenter task center second.
+    register_real(
+        registry, ids, "predict.cancel", QStringLiteral("取消"),
+        QStringLiteral("协作取消运行中的推断（分块组间隙停止）"),
+        QStringLiteral("取消 cancel"),
+        [c, workflow] {
+            auto* controller = workflow();
+            if (controller != nullptr && controller->cancel()) {
+                return;
+            }
+            open_task_center(c);
+        },
+        [c, workflow](const CommandContext&)
+            -> std::optional<std::string> {
+            auto* controller = workflow();
+            if (controller != nullptr && controller->is_running()) {
+                return std::nullopt;  // a real inference run can be cancelled
+            }
+            if (!running_tasks(c)) {
+                return std::string("当前没有可取消的运行中任务");
+            }
+            return needs_project(c);
+        });
+#else
     register_real(registry, ids, "predict.cancel", QStringLiteral("取消"),
                   QStringLiteral("打开任务中心取消运行中的任务"),
                   QStringLiteral("取消 cancel"), [c] { open_task_center(c); },
@@ -500,9 +619,28 @@ void predict_commands(ui_shell::CommandRegistry& registry,
                       }
                       return needs_project(c);
                   });
+#endif
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+    register_real(
+        registry, ids, "predict.params", QStringLiteral("参数"),
+        QStringLiteral("预测运行参数（范围/默认值与推理内核一致）"),
+        QStringLiteral("参数 params 运行 run"),
+        [c, workflow] {
+            if (auto* controller = workflow(); controller != nullptr) {
+                controller->open_params();
+            }
+        },
+        [c, has_workflow](const CommandContext&) {
+            if (auto problem = needs_project(c); problem.has_value()) {
+                return problem;
+            }
+            return has_workflow();
+        });
+#else
     register_disabled(registry, ids, "predict.params", QStringLiteral("参数"),
                       QStringLiteral("预测运行参数"), QStringLiteral("参数 params"),
-                      QStringLiteral("M5 接入"));
+                      QStringLiteral("构建未含预测科学切片"));
+#endif
     register_real(registry, ids, "predict.overlay_seismic",
                   QStringLiteral("地震叠加"), QStringLiteral("叠加地震相预测成果"),
                   QStringLiteral("叠加 overlay"),
@@ -521,9 +659,34 @@ void predict_commands(ui_shell::CommandRegistry& registry,
                                             "add_well_prediction_overlay"));
                   },
                   [c](const CommandContext&) { return needs_project(c); });
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+    // Well-seismic link: real cursor/selection linkage gated by a
+    // recorded time-depth calibration (fail closed with the exact reason —
+    // no fabricated linear velocity).
+    register_real(
+        registry, ids, "predict.link", QStringLiteral("联动"),
+        QStringLiteral("井震联动（时深标定门控；twt↔深度游标）"),
+        QStringLiteral("联动 link 井震"),
+        [c, workflow] {
+            auto* controller = workflow();
+            if (controller == nullptr) return;
+            auto* link = controller->link();
+            link->set_enabled(!link->is_enabled());
+        },
+        [c, workflow](const CommandContext&) {
+            auto* controller = workflow();
+            if (controller == nullptr) {
+                return std::string("预测工作流装配切片未接入");
+            }
+            const QString reason = controller->link()->unavailable_reason();
+            if (!reason.isEmpty()) return reason.toStdString();
+            return std::string();
+        });
+#else
     register_disabled(registry, ids, "predict.link", QStringLiteral("联动"),
                       QStringLiteral("井震联动开关"), QStringLiteral("联动 link"),
-                      QStringLiteral("M5 接入"));
+                      QStringLiteral("构建未含预测科学切片"));
+#endif
     register_real(registry, ids, "predict.save", QStringLiteral("保存结果"),
                   QStringLiteral("保存当前阶段成果"), QStringLiteral("保存 save"),
                   [c] {
