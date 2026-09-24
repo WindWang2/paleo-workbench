@@ -44,7 +44,7 @@
 // reconcile + stage switches + save-time user-edit adoption; real-time
 // tree-model signal write-back is the Prompt-2 integration point
 // (08-known-limitations §2).
-#include <pwb/qgis/layer_tree_stack.hpp>
+#include <pwb/qgis/layer_tree_composer.hpp>
 #include <pwb/ui_composite/layer_group_controller.hpp>
 #include <pwb/ui_composite/layer_presentation.hpp>
 #include <pwb/ui_composite/layer_stage_controller.hpp>
@@ -175,6 +175,11 @@ public:
     // actions trigger; no parallel logic).
     QString openVectorLayer(const QString& path);
     QString openRasterLayer(const QString& path);
+    // Provider-driven admission (QGIS-native convergence): asks
+    // QgsProviderRegistry which layers live in the URI and admits every
+    // sublayer with the provider's own key — no extension sniffing, no
+    // fabricated layers on unrecognized sources.
+    QString openDataFile(const QString& path);
     // Opens a .paleo project session through B: real store (refuses
     // unreadable/read-only), startup journal recovery, then every bound
     // GeoJSON layer is materialized as an EXPLICIT WORKING COPY under
@@ -638,23 +643,44 @@ public:
     void syncLayerControlOnSave();
 
 private:
-    // Build/attach the control plane over the freshly opened project's
-    // live workspace state + session map, reconcile the desired tree and
-    // restore the stage view (openProject success path).
-    void applyLayerControlForOpen();
-    pwb::qgis::QgsLayerTreeStack* layerTreeStackForTest() {
-        return layer_tree_stack_.get();
+    // Build the QGIS-native layer control plane over the freshly opened
+    // project's live workspace state + session map (sidecar restore /
+    // legacy migration / template routing) and restore the stage view
+    // (openProject success path). When the GIS state came back from the
+    // sibling .qgs file the restored tree IS the structure — the
+    // composer ADOPTS it instead of rebuilding from the sidecar.
+    void applyLayerControlForOpen(bool restored_from_qgis = false);
+    // Drop the layer control plane (recorder connection first, then the
+    // tree executors, then the referenced workspace state). Called on
+    // reopen and project close; idempotent.
+    void resetLayerControlPlane();
+    pwb::qgis::LayerTreeComposer* layerTreeComposerForTest() {
+        return layer_composer_.get();
     }
+    // QGIS-native tree sidecar path for the open project (empty when no
+    // project is open): <artifacts>/layer-tree.xml, written by
+    // syncLayerControlOnSave through QgsLayerTree::writeXml.
+    std::filesystem::path layerTreeSidecarPath() const;
+    // Native-tree checkbox echo -> per-stage overlay recorder
+    // (disconnected/rebound per project open).
+    QMetaObject::Connection group_visibility_connection_;
     std::unique_ptr<pwb::workspace::MappingWorkspaceState> layer_workspace_;
-    std::unique_ptr<pwb::qgis::QgsLayerTreeStack> layer_tree_stack_;
+    std::unique_ptr<pwb::qgis::LayerTreeComposer> layer_composer_;
     std::unique_ptr<pwb::ui_composite::LayerGroupController> layer_groups_;
     std::unique_ptr<pwb::ui_composite::LayerStageController> layer_stage_;
     std::unique_ptr<pwb::ui_composite::LayerTargets> layer_targets_;
-    // Last composition snapshots (drives the save-time re-reconcile that
-    // persists adopted user tree edits).
-    std::vector<pwb::ui_composite::LayerSnapshotInput> layer_snapshots_;
 #endif
     // END V14-QGIS-CONTROL
+public:
+    // QGIS-native persistence handoff (save path, BEFORE
+    // syncLayerControlOnSave; only compiled/used with PWB_WITH_CONV_27):
+    // write the live session QgsProject to the sibling .qgs file and
+    // record the pointer (+ tree de-duplication) in the mapping_workspace
+    // state. A failed write returns the honest error and MUST abort the
+    // project save (no half-success).
+    QString persistQgisProjectOnSave();
+
+private:
     std::function<int()> dirty_close_responder_;
     std::function<int()> discard_confirm_responder_;
     std::function<void(const QString&)> properties_responder_;

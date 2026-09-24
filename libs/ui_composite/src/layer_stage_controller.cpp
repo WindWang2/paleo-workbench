@@ -1,5 +1,4 @@
-// V14 layer stage controller — port of the layer subset of
-// controller.py (see layer_stage_controller.hpp).
+// Layer stage controller — see layer_stage_controller.hpp.
 #include "pwb/ui_composite/layer_stage_controller.hpp"
 
 #include "pwb/ui_composite/stage_profiles.hpp"
@@ -27,6 +26,14 @@ void LayerStageController::set_target_resolver(
     target_resolver_ = std::move(resolver);
 }
 
+void LayerStageController::set_tree_execution(
+    std::function<void()> ensure_groups,
+    std::function<void(const std::map<std::string, bool>&)>
+        apply_group_visibility) {
+    ensure_groups_ = std::move(ensure_groups);
+    apply_group_visibility_ = std::move(apply_group_visibility);
+}
+
 bool LayerStageController::target_layer_exists(
     const std::string& layer_id) const {
     if (target_validator_) {
@@ -46,17 +53,19 @@ bool LayerStageController::set_stage(MappingStage stage) {
     if (target.empty()) return false;  // unknown stage requested
     if (target == state_.current_stage) return false;
     state_.current_stage = target;
-    // V11 (D11-ws): materialize the new stage's empty system groups
-    // (minimal diff: empty-group creation only). R2-P1: a bridge throw
-    // must not break the stage switch (visibility/signals continue).
-    try {
-        groups_.rematerialize_for_stage();
-    } catch (const std::exception&) {
-        // host logs; the switch itself proceeds
+    // V11 (D11-ws): materialize the new stage's empty system groups on
+    // the live tree (create-only). R2-P1: an execution hook throw must
+    // not break the stage switch (visibility/signals continue).
+    if (ensure_groups_) {
+        try {
+            ensure_groups_();
+        } catch (const std::exception&) {
+            // host logs; the switch itself proceeds
+        }
     }
     // Group visibility delta (profile defaults + user overlays, full
-    // push).
-    groups_.apply_stage_visibility(stage);
+    // push onto the real QGIS tree).
+    push_stage_visibility();
     // Edit-target reassignment: NEVER inherited across stages (P0/P1
     // business risk, V5 §88).
     reassign_active_target();
@@ -69,6 +78,21 @@ bool LayerStageController::set_stage(MappingStage stage) {
     return true;
 }
 
+void LayerStageController::push_stage_visibility() {
+    const std::optional<MappingStage> stage =
+        tool_policy::stage_from_value(state_.current_stage);
+    if (!stage.has_value()) return;
+    const std::map<std::string, bool> effective =
+        groups_.effective_stage_visibility(*stage);
+    if (apply_group_visibility_) {
+        try {
+            apply_group_visibility_(effective);
+        } catch (const std::exception&) {
+            // host logs; per-group application continues composer-side
+        }
+    }
+}
+
 void LayerStageController::reassign_active_target() {
     // Resolution order (V13 W-P):
     // 1. this stage's persisted active_layer_id (the user's explicit
@@ -79,7 +103,7 @@ void LayerStageController::reassign_active_target() {
     //    layer;
     // 3. all missing -> none (edit actions disable with a reason — never
     //    silently point at some other editable layer).
-    std::optional<std::string> target_id;
+    std::optional<std::string> target_id{std::nullopt};
     const std::optional<MappingStage> stage =
         tool_policy::stage_from_value(state_.current_stage);
     if (!stage.has_value()) return;  // unknown persisted stage: no reassign
@@ -131,15 +155,10 @@ void LayerStageController::set_active_target(const std::string& layer_id) {
 }
 
 void LayerStageController::restore_stage_view() {
-    // Project-reopen restore: visibility + expand states + edit target.
-    auto stage = tool_policy::stage_from_value(state_.current_stage);
-    if (stage.has_value()) {
-        groups_.apply_stage_visibility(*stage);
-    }
-    auto expanded_it = groups_.expand_states.find(state_.current_stage);
-    if (expanded_it != groups_.expand_states.end()) {
-        groups_.apply_group_expanded(expanded_it->second);
-    }
+    // Project-reopen restore: visibility + edit target. Expand states
+    // persist natively on the QGIS tree nodes (sidecar serialization) —
+    // no domain-side restore needed.
+    push_stage_visibility();
     reassign_active_target();
 }
 

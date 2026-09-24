@@ -423,24 +423,6 @@ const std::vector<FieldSpec> kUserVectorLayer{
     {"opacity", FieldType::Double, 1.0},
 };
 
-const std::vector<FieldSpec> kMapReferenceLayer{
-    {"id", FieldType::String, ""},
-    {"name", FieldType::String},
-    {"source_path", FieldType::String},
-    {"source_kind", FieldType::StrictEnum, "raster", {"raster", "vector"}},
-    {"source_crs", FieldType::String},
-    {"project_crs", FieldType::String},
-    {"transform_wkt", FieldType::String, ""},
-    {"visible", FieldType::Bool, true},
-    {"opacity", FieldType::Double, 0.65},
-    {"order", FieldType::Int, 0},
-    {"participates_in_snap", FieldType::Bool, false},
-    {"cache_key", FieldType::String, ""},
-    {"external", FieldType::Bool, false},
-    {"status", FieldType::StrictEnum,
-     "ready", {"ready", "offline", "failed"}},
-    {"error_message", FieldType::String, ""},
-};
 
 const ModelSpec kMetaSpec{"ProjectMeta", &kProjectMeta};
 const ModelSpec kCoordinateSpec{"CoordinateReference", &kCoordinate};
@@ -452,8 +434,6 @@ const ModelSpec kDomainEntitySpec{"DomainEntity", &kDomainEntity};
 const ModelSpec kLinkSpec{"EntityAssetLink", &kEntityAssetLink};
 const ModelSpec kResourceSpec{"ResourceItem", &kResourceItem};
 const ModelSpec kUserVectorLayerSpec{"UserVectorLayer", &kUserVectorLayer};
-const ModelSpec kMapReferenceLayerSpec{"MapReferenceLayer",
-                                       &kMapReferenceLayer};
 
 // Python-parity defaults for the two sections Python materializes on
 // ProjectDocument.new (see kProjectDocument below). Function-local statics
@@ -524,9 +504,16 @@ const std::vector<FieldSpec> kProjectDocument{
     {"paleomap_documents", FieldType::JsonList, Json::array()},
     {"user_vector_layers", FieldType::NestedList, Json::array(), {},
      kUserVectorLayerSpec},
-    {"map_qgis_project_xml", FieldType::String, ""},
-    {"workstation_reference_layers", FieldType::NestedList, Json::array(),
-     {}, kMapReferenceLayerSpec},
+    // RETIRED (QGIS-native data-management convergence):
+    //   * map_qgis_project_xml — the inline QGIS-project XML envelope was
+    //     never written by the native shell; GIS state now lives in the
+    //     sibling .qgs file referenced by
+    //     mapping_workspace.qgis_project_file. Legacy documents carrying
+    //     the section round-trip it verbatim (unknown-key pass-through).
+    //   * workstation_reference_layers — dead self-built datasource
+    //     description (no writer since the C++ migration; reference
+    //     layers are QgsProject layers now). Same verbatim legacy
+    //     round-trip; QA readers treat absence as an empty list.
     {"onboarding_report", FieldType::JsonMap, Json::object()},
     {"quality_reports", FieldType::JsonList, Json::array()},
     {"version_sets", FieldType::JsonList, Json::array()},
@@ -560,8 +547,5 @@ const ModelSpec& well_entity_spec() { return specs::kWellSpec; }
 const ModelSpec& seismic_survey_spec() { return specs::kSurveySpec; }
 const ModelSpec& domain_entity_spec() { return specs::kDomainEntitySpec; }
 const ModelSpec& entity_asset_link_spec() { return specs::kLinkSpec; }
-const ModelSpec& map_reference_layer_spec() {
-    return specs::kMapReferenceLayerSpec;
-}
 
 }  // namespace pwb::project

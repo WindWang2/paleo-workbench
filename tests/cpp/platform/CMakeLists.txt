@@ -100,6 +100,14 @@ endif()
 pwb_add_platform_test(toolpolicy_matrix test_tool_policy.cpp)
 pwb_add_platform_test(toolpolicy_golden test_tool_policy_golden.cpp)
 pwb_add_platform_test(qgis_smoke test_qgis_smoke.cpp)
+# QGIS-native project persistence (data-management convergence):
+# QgsProject write/read round-trip, workspace .qgs handoff codec,
+# provider-registry layer factory.
+pwb_add_platform_test(qgis_project_store test_qgis_project_store.cpp)
+# QGIS-NATIVE-LAYER-CONTROL: the real QgsLayerTree as the single layer
+# control plane (compose/sidecar roundtrip/stage visibility/placement/
+# user groups/legacy migration/1000-layer scale/teardown).
+pwb_add_platform_test(layer_tree_composer test_layer_tree_composer.cpp)
 pwb_add_platform_test(edit_cycle test_edit_cycle.cpp)
 pwb_add_platform_test(lifecycle_cycles test_lifecycle.cpp)
 pwb_add_platform_test(export_layout test_export.cpp)
