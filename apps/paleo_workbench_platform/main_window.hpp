@@ -175,6 +175,11 @@ public:
     // actions trigger; no parallel logic).
     QString openVectorLayer(const QString& path);
     QString openRasterLayer(const QString& path);
+    // Provider-driven admission (QGIS-native convergence): asks
+    // QgsProviderRegistry which layers live in the URI and admits every
+    // sublayer with the provider's own key — no extension sniffing, no
+    // fabricated layers on unrecognized sources.
+    QString openDataFile(const QString& path);
     // Opens a .paleo project session through B: real store (refuses
     // unreadable/read-only), startup journal recovery, then every bound
     // GeoJSON layer is materialized as an EXPLICIT WORKING COPY under
@@ -623,8 +628,10 @@ private:
     // Build the QGIS-native layer control plane over the freshly opened
     // project's live workspace state + session map (sidecar restore /
     // legacy migration / template routing) and restore the stage view
-    // (openProject success path).
-    void applyLayerControlForOpen();
+    // (openProject success path). When the GIS state came back from the
+    // sibling .qgs file the restored tree IS the structure — the
+    // composer ADOPTS it instead of rebuilding from the sidecar.
+    void applyLayerControlForOpen(bool restored_from_qgis = false);
     // Drop the layer control plane (recorder connection first, then the
     // tree executors, then the referenced workspace state). Called on
     // reopen and project close; idempotent.
@@ -646,6 +653,16 @@ private:
     std::unique_ptr<pwb::ui_composite::LayerTargets> layer_targets_;
 #endif
     // END V14-QGIS-CONTROL
+public:
+    // QGIS-native persistence handoff (save path, BEFORE
+    // syncLayerControlOnSave; only compiled/used with PWB_WITH_CONV_27):
+    // write the live session QgsProject to the sibling .qgs file and
+    // record the pointer (+ tree de-duplication) in the mapping_workspace
+    // state. A failed write returns the honest error and MUST abort the
+    // project save (no half-success).
+    QString persistQgisProjectOnSave();
+
+private:
     std::function<int()> dirty_close_responder_;
     std::function<int()> discard_confirm_responder_;
     std::function<void(const QString&)> properties_responder_;

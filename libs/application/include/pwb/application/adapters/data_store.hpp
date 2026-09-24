@@ -5,10 +5,16 @@
 // B's COMMITTED surface (ProjectManager + CatalogRepository +
 // CommitCoordinator over DataFacade's journal dir): reads go through
 // DataFacade snapshots (zero writes), every commit goes through B's
-// CommitCoordinator with caller-supplied operation_id idempotency. B's
-// WritableSession is not consumed yet (headers committed, implementation
-// pending on their branch); when B delivers it this class switches to it
-// without changing A's port.
+// CommitCoordinator with caller-supplied operation_id idempotency.
+//
+// AUTHORITY BOUNDARY (QGIS-native data-management convergence): this
+// store owns the DOMAIN lineage — catalog versions/runs, workspace
+// memberships (asset/version bindings), document sections and their
+// crash-safe persistence. It does NOT own GIS state: layers, sources,
+// CRS, styles, tree/visibility and the .qgs persistence handoff belong
+// to the session's QgsProject (see pwb::qgis::map_project_store); the
+// document's mapping_workspace carries only the domain semantics (roles,
+// stage views) plus the qgis_project_file POINTER.
 //
 // Cross-domain translation lives here and only here (string ids <->
 // domain::StrongId, staged GeoJSON -> StagedAssetV1).

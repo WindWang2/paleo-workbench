@@ -284,6 +284,14 @@ bool LayerTreeComposer::compose(
     return ok;
 }
 
+void LayerTreeComposer::adopt_restored_tree() {
+    if (root() == nullptr) return;
+    // The restored .qgs tree already carries structure/order/visibility —
+    // never clear it; only the skeleton and node-less layers are missing.
+    ensure_system_groups();
+    route_unplaced_layers(/*route_root_level=*/false);
+}
+
 void LayerTreeComposer::clear_tree_structure() {
     QgsLayerTreeGroup* tree_root = root();
     if (tree_root == nullptr) return;

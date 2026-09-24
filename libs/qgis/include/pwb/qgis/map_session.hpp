@@ -53,6 +53,13 @@ public:
                                    const LayerBinding& binding,
                                    std::string* error);
 
+    // Generic admission for an already-constructed layer (provider chosen
+    // by the caller — e.g. layer_factory from QgsProviderRegistry results).
+    // Takes ownership; on validation failure the layer is deleted and
+    // nullptr + diagnostic returned.
+    QgsMapLayer* adopt_layer(QgsMapLayer* layer, const LayerBinding& binding,
+                            std::string* error);
+
     // Domain-id addressed lookup (join key authority).
     QgsMapLayer* layerById(const std::string& layer_id) const;
     QgsVectorLayer* vectorLayerById(const std::string& layer_id) const;
@@ -82,16 +89,24 @@ public:
     // Ordered teardown, also invoked by the destructor.
     void close();
 
+    // Tree→canvas bridges this session created (canvas-parented, tracked
+    // here so a QgsProject::read can temporarily drop them — the bridge
+    // defers setCanvasLayers through the event loop, which the project
+    // read's provider-preload loop would service over a half-rebuilt
+    // tree. map_project_store::load detaches and re-attaches them).
+    void attach_canvas_bridges();
+    void detach_canvas_bridges();
+
 private:
 
     std::unique_ptr<QgsProject> project_;
     std::vector<QPointer<QgsMapCanvas>> canvases_;
-    std::vector<QPointer<QgsLayerTreeView>> trees_;
-    bool closed_ = false;
     // Per-canvas tree bridges (created in createCanvas; nudged after
     // admission — the vendored bridge cannot see non-singleton project
     // layer additions by itself).
     std::vector<QPointer<QgsLayerTreeMapCanvasBridge>> bridges_;
+    std::vector<QPointer<QgsLayerTreeView>> trees_;
+    bool closed_ = false;
     void syncBridges();
 
     // Domain join key -> QGIS layer id (call before addMapLayer; see

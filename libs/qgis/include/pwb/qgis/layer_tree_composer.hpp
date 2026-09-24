@@ -79,6 +79,14 @@ public:
     bool compose(const std::optional<std::filesystem::path>& sidecar,
                  std::string* error = nullptr);
 
+    // .qgs handoff restore: QgsProject::read already rebuilt the live
+    // tree — it IS the structure (same authority decision as a sidecar
+    // restore). Ensures the system skeleton and routes only layers with
+    // no node; root-level placements stay deliberate user choice. Call
+    // instead of compose() when the session map was restored from the
+    // sibling .qgs file.
+    void adopt_restored_tree();
+
     // Restore the QGIS-native tree sidecar (QgsLayerTree::writeXml
     // format). Drops layer nodes that no longer resolve to live layers
     // (stale ids), keeps everything else verbatim.
