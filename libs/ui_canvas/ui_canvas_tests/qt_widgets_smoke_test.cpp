@@ -6,7 +6,7 @@
 // the zero-consumer prototype canvas stack — retired with the
 // QGIS-native shell convergence.)
 
-#include <QApplication>
+#include <qgsapplication.h>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QLabel>
@@ -220,7 +220,9 @@ PWB_TEST(preview_settings_dialog_modal_apply) {
 
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    // QgsApplication: the raster controller / export worker tasks run on
+    // QgsApplication::taskManager().
+    QgsApplication app(argc, argv, true);
     qRegisterMetaType<pwb::ui_canvas::Json>("pwb::ui_canvas::Json");
     qRegisterMetaType<pwb::ui_canvas::RenderFrame>(
         "pwb::ui_canvas::RenderFrame");

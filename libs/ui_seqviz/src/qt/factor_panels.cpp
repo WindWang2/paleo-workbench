@@ -13,7 +13,7 @@
 #include <QSpinBox>
 #include <QVBoxLayout>
 
-#include <pwb/job_runtime/job_scheduler.hpp>
+#include <pwb/qgis_processing/job_compat.hpp>
 #include <pwb/ui_seqviz/page_tokens.hpp>
 #include <pwb/ui_widgets/badges.hpp>
 
@@ -435,14 +435,16 @@ bool CreateFactorMapDialog::start_job() {
 
     job::JobSpec spec =
         make_factor_map_job_spec(create_params(), service_);
-    job_owner_.start(
-        job::global_scheduler(), std::move(spec),
-        [this](const job::qtbridge::JobOutcome& outcome) { on_job_finished(outcome); });
+    pwb::qgis_processing::start_job_spec(
+        job_owner_, std::move(spec),
+        [this](const pwb::qgis_processing::CompatJobOutcome& outcome) {
+            on_job_finished(outcome);
+        });
     return true;
 }
 
 void CreateFactorMapDialog::on_job_finished(
-    const job::qtbridge::JobOutcome& outcome) {
+    const pwb::qgis_processing::CompatJobOutcome& outcome) {
     progress_bar_->setVisible(false);
     switch (outcome.state) {
     case job::JobState::done:

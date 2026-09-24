@@ -36,7 +36,7 @@ target_sources(viz_e.pa_flow PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/job_center.hpp)
 target_link_libraries(viz_e.pa_flow PRIVATE
     Pwb::VizChartsQt Pwb::UiPagesDataQt Pwb::MappingKernel Pwb::UiWorkers
-    Pwb::JobQt Pwb::Domain
+    Pwb::QgisProcessing Pwb::JobQt Pwb::Domain Pwb::QgisPlot
     Pwb::UiDataCore Pwb::Ingest Pwb::Catalog Pwb::Data Pwb::Application
     Pwb::UiPagesPreview Pwb::UiPagesPreviewQt
     Qt6::Widgets)

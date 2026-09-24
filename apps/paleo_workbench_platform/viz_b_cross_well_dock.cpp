@@ -25,7 +25,7 @@
 #include <QVBoxLayout>
 
 #include <pwb/domain/json.hpp>
-#include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/qgis_processing/job_compat.hpp>
 #include <pwb/ui_wellseis/correlation.hpp>
 #include <pwb/ui_wellseis/qt/correlation_link_editor.hpp>
 #include <pwb/ui_wellseis/qt/cross_well_export_dialog.hpp>
@@ -414,11 +414,11 @@ void VizBCrossWellDock::on_load_las() {
     };
     auto& owner = job_center_->make_owner(this);
     QObject::connect(progress, &QProgressDialog::canceled, &owner,
-                     &pwb::job::qtbridge::JobOwner::cancel);
-    owner.start(
-        job_center_->scheduler(), std::move(spec),
+                     &pwb::qgis_processing::PwbTaskOwner::cancel);
+    pwb::qgis_processing::start_job_spec(
+        owner, std::move(spec),
         [this, generation, progress, paths](
-            const pwb::job::qtbridge::JobOutcome& outcome) {
+            const pwb::qgis_processing::CompatJobOutcome& outcome) {
             progress->deleteLater();
             if (generation != session_generation_) {
                 return;  // 换工程/关闭在飞 —— 丢弃
@@ -725,15 +725,15 @@ void VizBCrossWellDock::on_propagate_dtw() {
     auto spec = pwb::ui_workers::make_dtw_propagation_job_spec(
         std::move(input));
 
-    // A fresh owner per submission: JobOwner::start throws when the
-    // owner already runs a job (single-job-per-owner contract).
+    // A fresh owner per submission: the task owner refuses a second
+    // concurrent start (single-job-per-owner contract).
     auto& owner = job_center_->make_owner(this);
     QObject::connect(progress, &QProgressDialog::canceled, &owner,
-                     &pwb::job::qtbridge::JobOwner::cancel);
-    owner.start(
-        job_center_->scheduler(), std::move(spec),
+                     &pwb::qgis_processing::PwbTaskOwner::cancel);
+    pwb::qgis_processing::start_job_spec(
+        owner, std::move(spec),
         [this, generation, formation_copy, progress](
-            const pwb::job::qtbridge::JobOutcome& outcome) {
+            const pwb::qgis_processing::CompatJobOutcome& outcome) {
             // Queued to the GUI thread; the released guard already
             // dropped this delivery if the dock is gone.
             progress->deleteLater();

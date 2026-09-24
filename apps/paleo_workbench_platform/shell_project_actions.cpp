@@ -115,6 +115,15 @@ QString save_open_project(MainWindow& window, QString* saved_to) {
 
     // BEGIN V14-QGIS-CONTROL
 #ifdef PWB_WITH_CONV_27
+    // QGIS-native persistence handoff FIRST: write the live QgsProject to
+    // the sibling .qgs file and record the pointer in the workspace
+    // state, so the layer-control persistence below runs with the tree
+    // de-duplication active (the GIS tree lives in the .qgs only). A
+    // failed .qgs write aborts the save — no half-success.
+    const QString qgs_error = window.persistQgisProjectOnSave();
+    if (!qgs_error.isEmpty()) {
+        return QObject::tr("QGIS 工程保存失败，工程未保存：%1").arg(qgs_error);
+    }
     // Persist the live layer-control workspace state (desired tree,
     // memberships, stage view states) into the document before the save
     // pipeline serializes it.
@@ -129,6 +138,12 @@ QString save_open_project(MainWindow& window, QString* saved_to) {
     // per-layer honest: an empty layer never wipes synced geometry.
     window.syncConstraintGeometryOnSave();
 #endif
+    // BEGIN qgis-native-layout-convergence
+    // Layouts ride the SAME project save (no composition-save + project-
+    // save double write): the authority serializes its QgsPrintLayouts
+    // into the document's "layouts" section right before prepare_save.
+    window.syncLayoutsOnSave();
+    // END qgis-native-layout-convergence
     pwb::project::ProjectManager manager(store->project_file());
     auto prepared = manager.prepare_save(store->document());
     if (!prepared.is_ok()) {
@@ -140,6 +155,9 @@ QString save_open_project(MainWindow& window, QString* saved_to) {
     }
     manager.commit_save(store->document(), prepared.value(),
                         executed.value());
+    // Layouts became clean only now — the write actually committed
+    // (unconditional: syncLayoutsOnSave above is unconditional too).
+    window.markLayoutsSaved();
     if (saved_to != nullptr) {
         *saved_to = QString::fromStdString(store->project_file().string());
     }

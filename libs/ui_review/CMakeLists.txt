@@ -71,7 +71,7 @@ target_link_libraries(pwb_ui_review
 
 if(TARGET Qt6::Widgets)
     foreach(_required Pwb::UiWidgets Pwb::UiShellQt Pwb::UiPagesDataQt
-                      Pwb::UiDataCore Pwb::JobQt)
+                      Pwb::UiDataCore Pwb::QgisProcessing)
         if(NOT TARGET ${_required})
             message(FATAL_ERROR
                 "libs/ui_review qt shells require ${_required} — enable "
@@ -119,7 +119,7 @@ if(TARGET Qt6::Widgets)
     target_link_libraries(pwb_ui_review_qt
         PUBLIC Pwb::UiReview Pwb::UiWidgets Pwb::UiShellQt
                Pwb::UiPagesDataQt Qt6::Widgets
-        PRIVATE Pwb::UiDataCore Pwb::JobQt Qt6::Gui)
+        PRIVATE Pwb::UiDataCore Pwb::QgisProcessing Qt6::Gui)
 endif()
 
 # [NON-PRODUCTION] workstation_composite_prototype.py — the three-layout

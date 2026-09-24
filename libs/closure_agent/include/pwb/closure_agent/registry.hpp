@@ -75,4 +75,29 @@ private:
     std::map<std::string, ActionSpec> actions_;
 };
 
+// ---- Processing algorithm tools --------------------------------------------
+//
+// Pure-data description of one Processing algorithm the product wants
+// exposed as an agent action. This library is Qt-free and QGIS-free: the
+// apps layer converts from its registry vocabulary (paleo_algorithm_infos)
+// into these plain structs — never link QGIS in here.
+
+struct AlgorithmToolInfo {
+    std::string id;       // algorithm id, e.g. "paleo:seismic_envelope"
+    std::string display;  // human-readable name, e.g. "Envelope"
+    std::string group;    // group id, e.g. "seismic"
+};
+
+// One ActionSpec per algorithm: compute-risk, provider-delegated
+// (provider_id "paleo_processing", no handler — execution goes through the
+// Processing runner on the host side), deterministic, cancellable between
+// stages. action_id is the algorithm id with ':' -> '.'
+// ("paleo.seismic_envelope" — the registry's '<domain>.<name>' pattern;
+// the LLM tool name derives as "paleo__seismic_envelope"). The description
+// carries display name + group + the paleo id so an agent can address the
+// algorithm unambiguously. Registering the results is the caller's job
+// (duplicate ids against existing actions throw as usual).
+std::vector<ActionSpec> processing_algorithm_specs(
+    const std::vector<AlgorithmToolInfo>& infos);
+
 }  // namespace pwb::closure_agent

@@ -9,15 +9,20 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
-#include <QPainter>
-#include <QPen>
 #include <QToolButton>
 #include <QVBoxLayout>
+
+#include <pwb/qgis_plot/domain_plots.hpp>
+#include <pwb/qgis_plot/numeric_formats.hpp>
+#include <pwb/qgis_plot/plot_canvas.hpp>
+#include <pwb/qgis_plot/plot_item.hpp>
+#include <pwb/qgis_plot/plot_panel.hpp>
 
 namespace pwb::app {
 
 namespace {
 
+using pwb::qgis_plot::PwbIntervalStripPlot;
 using pwb::ui_review::CompareBand;
 using pwb::ui_review::CompareMode;
 
@@ -39,24 +44,66 @@ QString band_label(const CompareBand& band) {
                               : QString::fromStdString(band.klass);
 }
 
-// The painted surface: depth axis + the mode's columns for one well.
-class CompareCanvas : public QWidget {
-public:
-    explicit CompareCanvas(ComparisonView* view) : QWidget(view), view_(view) {
-        setObjectName(QStringLiteral("CompareCanvas"));
-        setMouseTracking(true);
+PwbIntervalStripPlot::IntervalBand strip_band(const CompareBand& band,
+                                            int alpha) {
+    return {band.top, band.bottom, band_label(band),
+            class_color(band_label(band)), alpha};
+}
+
+QColor verdict_color(const pwb::ui_review::BandPair& pair) {
+    if (!pair.in_prediction || !pair.in_interpretation) {
+        return QColor(0xc6, 0x28, 0x28, 140);  // presence mismatch
     }
+    if (pair.comparable) {
+        return pair.match ? QColor(0x2e, 0x7d, 0x32, 140)
+                          : QColor(0xc6, 0x28, 0x28, 140);
+    }
+    return QColor(0x9a, 0xa4, 0xad, 100);  // incomparable
+}
 
-    double depth_at_y(int y) const;
+QString verdict_text(const pwb::ui_review::BandPair& pair) {
+    if (!pair.in_prediction) return QStringLiteral("预测缺失");
+    if (!pair.in_interpretation) return QStringLiteral("解释缺失");
+    if (!pair.comparable) return QStringLiteral("不可比（未标注类别）");
+    if (pair.match) return QStringLiteral("一致");
+    return QStringLiteral("不一致：%1 ≠ %2")
+        .arg(QString::fromStdString(pair.interpreted_class),
+             QString::fromStdString(pair.predicted_class));
+}
 
-protected:
-    void paintEvent(QPaintEvent* event) override;
-
-private:
-    std::pair<double, double> depth_range() const;
-
-    ComparisonView* view_;
-};
+// One verdict column shared by SideBySide (col 3) and Difference (full
+// width): located pairs land on their prediction extent, unlocated pairs
+// split the depth range evenly — the same honest fallback as before.
+QVector<PwbIntervalStripPlot::IntervalBand> verdict_bands(
+    const std::vector<pwb::ui_review::BandPair>& pairs, const QString& well,
+    double depth_min, double depth_max) {
+    QVector<PwbIntervalStripPlot::IntervalBand> bands;
+    int unlocated = 0;
+    for (const auto& pair : pairs) {
+        if (QString::fromStdString(pair.well_id) != well) continue;
+        if (pair.in_prediction && pair.bottom > pair.top) {
+            const QColor color = verdict_color(pair);
+            bands.push_back({pair.top, pair.bottom, verdict_text(pair),
+                             color, color.alpha()});
+        } else {
+            ++unlocated;
+        }
+    }
+    if (unlocated > 0) {
+        const double slice = (depth_max - depth_min) / unlocated;
+        int index = 0;
+        for (const auto& pair : pairs) {
+            if (QString::fromStdString(pair.well_id) != well) continue;
+            if (pair.in_prediction && pair.bottom > pair.top) continue;
+            const QColor color = verdict_color(pair);
+            bands.push_back({depth_min + slice * index,
+                             depth_min + slice * (index + 1),
+                             verdict_text(pair), color, color.alpha()});
+            ++index;
+        }
+    }
+    return bands;
+}
 
 }  // namespace
 
@@ -102,14 +149,16 @@ ComparisonView::ComparisonView(QWidget* parent) : QWidget(parent) {
     selectors->addWidget(link_toggle_);
     outer->addLayout(selectors);
 
-    canvas_ = new CompareCanvas(this);
+    canvas_ = new pwb::qgis_plot::PwbPlotPanel(this);
+    canvas_->setObjectName(QStringLiteral("CompareCanvas"));
+    canvas_->canvas()->viewport()->setMouseTracking(true);
     outer->addWidget(canvas_, 1);
 
     summary_ = new QLabel(this);
     summary_->setObjectName(QStringLiteral("CompareSummary"));
     outer->addWidget(summary_);
 
-    canvas_->installEventFilter(this);
+    canvas_->canvas()->viewport()->installEventFilter(this);
     for (auto* combo : {object_, baseline_, prediction_}) {
         connect(combo, &QComboBox::currentIndexChanged, this,
                 [this](int) { refresh_bands(); });
@@ -142,7 +191,7 @@ void ComparisonView::reload() {
 void ComparisonView::set_mode(CompareMode mode) {
     mode_ = mode;
     cursor_depth_ = -1.0;
-    canvas_->update();
+    rebuild_plot();
 }
 
 bool ComparisonView::set_link_enabled(bool on) {
@@ -151,7 +200,7 @@ bool ComparisonView::set_link_enabled(bool on) {
         const QSignalBlocker block(link_toggle_);
         link_toggle_->setChecked(false);
         cursor_depth_ = -1.0;
-        canvas_->update();
+        update_cursor_guide();
         emit link_changed(false);
         return true;
     }
@@ -165,7 +214,7 @@ bool ComparisonView::set_link_enabled(bool on) {
         return false;
     }
     link_ = true;
-    canvas_->update();
+    update_cursor_guide();
     emit link_changed(true);
     return true;
 }
@@ -193,6 +242,8 @@ QString ComparisonView::empty_reason() const {
 QString ComparisonView::selected_well_id() const {
     return object_->currentData().toString();
 }
+
+QWidget* ComparisonView::canvas() const { return canvas_; }
 
 void ComparisonView::rebuild_selectors() {
     SourceSet set;
@@ -317,8 +368,7 @@ void ComparisonView::refresh_bands() {
                           .arg(summary.prediction_only));
     const QString reason = empty_reason();
     summary_->setVisible(reason.isEmpty());
-    canvas_->setVisible(reason.isEmpty());
-    canvas_->update();
+    rebuild_plot();
     refresh_link_gate();
 }
 
@@ -339,27 +389,31 @@ void ComparisonView::refresh_link_gate() {
     if (!calibrated && link_) {
         link_ = false;
         cursor_depth_ = -1.0;
+        update_cursor_guide();
         const QSignalBlocker block(link_toggle_);
         link_toggle_->setChecked(false);
     }
 }
 
 bool ComparisonView::eventFilter(QObject* watched, QEvent* event) {
-    if (watched == canvas_ && event->type() == QEvent::MouseMove && link_) {
+    if (watched == canvas_->canvas()->viewport() &&
+        event->type() == QEvent::MouseMove && link_) {
         auto* mouse = static_cast<QMouseEvent*>(event);
-        cursor_depth_ =
-            static_cast<CompareCanvas*>(canvas_)->depth_at_y(mouse->pos().y());
-        canvas_->update();
+        const double depth = depth_at_canvas_pos(mouse->position());
+        if (depth != cursor_depth_) {
+            cursor_depth_ = depth;
+            update_cursor_guide();
+        }
     }
     return QWidget::eventFilter(watched, event);
 }
 
 // ---------------------------------------------------------------------------
-// canvas painting
+// QGIS-plot strip columns
 // ---------------------------------------------------------------------------
 
-std::pair<double, double> CompareCanvas::depth_range() const {
-    const QString well = view_->selected_well_id();
+std::pair<double, double> ComparisonView::depth_range() const {
+    const QString well = selected_well_id();
     double top = 0.0;
     double bottom = 1.0;
     bool any = false;
@@ -376,225 +430,131 @@ std::pair<double, double> CompareCanvas::depth_range() const {
             }
         }
     };
-    grow(view_->interpretation_bands());
-    grow(view_->prediction_bands());
+    grow(interpretation_bands_);
+    grow(prediction_bands_);
     if (!any || bottom <= top) {
         return {0.0, 1.0};
     }
     return {top, bottom};
 }
 
-double CompareCanvas::depth_at_y(int y) const {
-    const auto [top, bottom] = depth_range();
-    const int h = height() - 8;
-    if (h <= 0) {
-        return top;
+double ComparisonView::depth_at_canvas_pos(QPointF canvas_pos) const {
+    const auto items = canvas_->canvas()->plotItems();
+    for (auto* item : items) {
+        const QRectF area = item->plotArea();
+        if (area.isEmpty())
+            continue;
+        // All columns share the depth axis; clamp so cursor presses in the
+        // top/bottom margins still resolve (old depth_at_y clamped too).
+        const double cy = std::clamp(canvas_pos.y(), area.top(), area.bottom());
+        const auto yr = item->yRange();
+        const double plot_y =
+            yr.lower() + (area.bottom() - cy) / area.height() *
+                             (yr.upper() - yr.lower());
+        return -plot_y;  // data y = -depth
     }
-    const double fraction =
-        std::clamp((y - 4) / static_cast<double>(h), 0.0, 1.0);
-    return top + (bottom - top) * fraction;
+    return -1.0;
 }
 
-void CompareCanvas::paintEvent(QPaintEvent* event) {
-    QWidget::paintEvent(event);
-    QPainter painter(this);
-    painter.fillRect(rect(), QColor(0xff, 0xff, 0xff));
+void ComparisonView::update_cursor_guide() {
+    canvas_->canvas()->setHorizontalGuide(
+        link_ && cursor_depth_ >= 0.0
+            ? std::optional<double>(-cursor_depth_)
+            : std::nullopt);
+}
 
-    const QString reason = view_->empty_reason();
+void ComparisonView::rebuild_plot() {
+    auto* canvas = canvas_->canvas();
+    canvas->clearPlots();
+    cursor_depth_ = -1.0;
+    const QString reason = empty_reason();
     if (!reason.isEmpty()) {
-        painter.setPen(QColor(0x53, 0x61, 0x6c));
-        painter.drawText(rect(), Qt::AlignCenter, reason);
+        canvas_->showUnavailable(reason);
         return;
     }
+    canvas_->showPlot();
 
-    const QString well = view_->selected_well_id();
+    const QString well = selected_well_id();
     const auto [depth_min, depth_max] = depth_range();
-    const double span = depth_max - depth_min;
-    const int axis_w = 56;
-    const int w = width() - axis_w - 8;
-    const int h = height() - 8;
-    auto y_of = [&](double depth) {
-        return 4 + static_cast<int>(
-                       (depth - depth_min) / span * (h - 8.0));
-    };
-
-    painter.setPen(QColor(0xcc, 0xd1, 0xd6));
-    painter.setPen(QColor(0x53, 0x61, 0x6c));
-    for (int i = 0; i <= 4; ++i) {
-        const double depth = depth_min + span * i / 4.0;
-        const int y = y_of(depth);
-        painter.drawLine(axis_w - 4, y, width() - 4, y);
-        painter.drawText(4, y - 6, axis_w - 10, 12,
-                         Qt::AlignRight | Qt::AlignVCenter,
-                         QString::number(depth, 'f', 0) +
-                             QStringLiteral(" m"));
-    }
-
-    auto band_rect = [&](const CompareBand& band) {
-        const double y0 = static_cast<double>(y_of(band.top));
-        const double y1 =
-            std::max(y0 + 2.0, static_cast<double>(y_of(band.bottom)));
-        return QRectF(0, y0, 0, y1 - y0);
-    };
-    auto draw_band = [&](double x0, double x1, const CompareBand& band,
-                         int alpha) {
-        const QRectF r = band_rect(band);
-        const QRectF target(x0, r.y(), x1 - x0, r.height());
-        const QColor base = class_color(band_label(band));
-        QColor fill = base;
-        fill.setAlpha(alpha);
-        painter.fillRect(target, fill);
-        painter.setPen(base.darker(120));
-        painter.drawRect(target);
-        painter.setPen(QColor(0x25, 0x31, 0x3d));
-        painter.drawText(target, Qt::AlignHCenter | Qt::AlignVCenter,
-                         band_label(band));
-    };
 
     std::vector<CompareBand> interp;
     std::vector<CompareBand> pred;
-    for (const auto& band : view_->interpretation_bands()) {
+    for (const auto& band : interpretation_bands_) {
         if (QString::fromStdString(band.well_id) == well) {
             interp.push_back(band);
         }
     }
-    for (const auto& band : view_->prediction_bands()) {
+    for (const auto& band : prediction_bands_) {
         if (QString::fromStdString(band.well_id) == well) {
             pred.push_back(band);
         }
     }
 
-    auto verdict_color = [](const pwb::ui_review::BandPair& pair) {
-        if (!pair.in_prediction || !pair.in_interpretation) {
-            return QColor(0xc6, 0x28, 0x28, 140);  // presence mismatch
-        }
-        if (pair.comparable) {
-            return pair.match ? QColor(0x2e, 0x7d, 0x32, 140)
-                              : QColor(0xc6, 0x28, 0x28, 140);
-        }
-        return QColor(0x9a, 0xa4, 0xad, 100);  // incomparable
+    struct Column {
+        QString title;
+        QVector<PwbIntervalStripPlot::IntervalBand> bands;
     };
-    auto verdict_text = [](const pwb::ui_review::BandPair& pair) {
-        if (!pair.in_prediction) return QStringLiteral("预测缺失");
-        if (!pair.in_interpretation) return QStringLiteral("解释缺失");
-        if (!pair.comparable) return QStringLiteral("不可比（未标注类别）");
-        if (pair.match) return QStringLiteral("一致");
-        return QStringLiteral("不一致：%1 ≠ %2")
-            .arg(QString::fromStdString(pair.interpreted_class),
-                 QString::fromStdString(pair.predicted_class));
-    };
-
-    const CompareMode mode = view_->mode();
-    if (mode == CompareMode::SideBySide) {
-        const double col = w / 3.0;
-        painter.setPen(QColor(0x53, 0x61, 0x6c));
-        painter.drawText(QRectF(axis_w, 0, col, 14), Qt::AlignHCenter,
-                         QStringLiteral("解释"));
-        painter.drawText(QRectF(axis_w + col, 0, col, 14), Qt::AlignHCenter,
-                         QStringLiteral("预测"));
-        painter.drawText(QRectF(axis_w + 2 * col, 0, col, 14),
-                         Qt::AlignHCenter, QStringLiteral("差异"));
+    QList<Column> columns;
+    if (mode_ == CompareMode::SideBySide) {
+        Column c_interp{QStringLiteral("解释"), {}};
         for (const auto& band : interp) {
-            draw_band(axis_w + 2, axis_w + col - 2, band, 110);
+            c_interp.bands.push_back(strip_band(band, 110));
+        }
+        Column c_pred{QStringLiteral("预测"), {}};
+        for (const auto& band : pred) {
+            c_pred.bands.push_back(strip_band(band, 160));
+        }
+        columns.push_back(std::move(c_interp));
+        columns.push_back(std::move(c_pred));
+        columns.push_back({QStringLiteral("差异"),
+                           verdict_bands(pairs_, well, depth_min, depth_max)});
+    } else if (mode_ == CompareMode::Overlay) {
+        Column c_overlay{
+            QStringLiteral("半透明叠加（解释 淡 / 预测 浓）"), {}};
+        for (const auto& band : interp) {
+            c_overlay.bands.push_back(strip_band(band, 80));
         }
         for (const auto& band : pred) {
-            draw_band(axis_w + col + 2, axis_w + 2 * col - 2, band, 160);
+            c_overlay.bands.push_back(strip_band(band, 130));
         }
-        // Difference column: one verdict row per pair; pairs without a
-        // prediction extent split the column evenly (honest, visible).
-        int unlocated = 0;
-        for (const auto& pair : view_->pairs()) {
-            if (QString::fromStdString(pair.well_id) != well) continue;
-            if (pair.in_prediction && pair.bottom > pair.top) {
-                const QRectF row(axis_w + 2 * col + 2, y_of(pair.top),
-                                 col - 4,
-                                 std::max(2.0, static_cast<double>(y_of(pair.bottom) - y_of(pair.top))));
-                painter.fillRect(row, verdict_color(pair));
-                painter.setPen(QColor(0x25, 0x31, 0x3d));
-                painter.drawText(row, Qt::AlignHCenter | Qt::AlignVCenter,
-                                 verdict_text(pair));
-            } else {
-                ++unlocated;
-            }
-        }
-        if (unlocated > 0) {
-            const double slice =
-                (h - 8.0) / static_cast<double>(unlocated);
-            int index = 0;
-            for (const auto& pair : view_->pairs()) {
-                if (QString::fromStdString(pair.well_id) != well) continue;
-                if (pair.in_prediction && pair.bottom > pair.top) continue;
-                const QRectF row(axis_w + 2 * col + 2,
-                                 4 + slice * index, col - 4, slice);
-                painter.fillRect(row, verdict_color(pair));
-                painter.setPen(QColor(0x25, 0x31, 0x3d));
-                painter.drawText(row, Qt::AlignHCenter | Qt::AlignVCenter,
-                                 verdict_text(pair));
-                ++index;
-            }
-        }
-    } else if (mode == CompareMode::Overlay) {
-        const double col = w / 2.0;
-        painter.setPen(QColor(0x53, 0x61, 0x6c));
-        painter.drawText(QRectF(axis_w, 0, col, 14), Qt::AlignHCenter,
-                         QStringLiteral("半透明叠加（解释 淡 / 预测 浓）"));
-        painter.drawText(QRectF(axis_w + col, 0, col, 14), Qt::AlignHCenter,
-                         QStringLiteral("预测为主"));
-        for (const auto& band : interp) {
-            draw_band(axis_w + 2, axis_w + col - 2, band, 80);
-        }
+        Column c_pred{QStringLiteral("预测为主"), {}};
         for (const auto& band : pred) {
-            draw_band(axis_w + 2, axis_w + col - 2, band, 130);
-        }
-        for (const auto& band : pred) {
-            draw_band(axis_w + col + 2, axis_w + 2 * col - 2, band, 160);
+            c_pred.bands.push_back(strip_band(band, 160));
         }
         for (const auto& band : interp) {
-            draw_band(axis_w + col + 2, axis_w + 2 * col - 2, band, 70);
+            c_pred.bands.push_back(strip_band(band, 70));
         }
+        columns.push_back(std::move(c_overlay));
+        columns.push_back(std::move(c_pred));
     } else {  // Difference
-        painter.setPen(QColor(0x53, 0x61, 0x6c));
-        painter.drawText(QRectF(axis_w, 0, w, 14), Qt::AlignHCenter,
-                         QStringLiteral("差异：绿=一致 红=不一致/缺失"));
-        int unlocated = 0;
-        for (const auto& pair : view_->pairs()) {
-            if (QString::fromStdString(pair.well_id) != well) continue;
-            if (pair.in_prediction && pair.bottom > pair.top) {
-                const QRectF row(axis_w + 2, y_of(pair.top), w - 4,
-                                 std::max(2.0, static_cast<double>(y_of(pair.bottom) - y_of(pair.top))));
-                painter.fillRect(row, verdict_color(pair));
-                painter.setPen(QColor(0x25, 0x31, 0x3d));
-                painter.drawText(row, Qt::AlignHCenter | Qt::AlignVCenter,
-                                 verdict_text(pair));
-            } else {
-                ++unlocated;
-            }
-        }
-        if (unlocated > 0) {
-            const double slice =
-                (h - 8.0) / static_cast<double>(unlocated);
-            int index = 0;
-            for (const auto& pair : view_->pairs()) {
-                if (QString::fromStdString(pair.well_id) != well) continue;
-                if (pair.in_prediction && pair.bottom > pair.top) continue;
-                const QRectF row(axis_w + 2, 4 + slice * index, w - 4,
-                                 slice);
-                painter.fillRect(row, verdict_color(pair));
-                painter.setPen(QColor(0x25, 0x31, 0x3d));
-                painter.drawText(row, Qt::AlignHCenter | Qt::AlignVCenter,
-                                 verdict_text(pair));
-                ++index;
-            }
-        }
+        columns.push_back(
+            {QStringLiteral("差异：绿=一致 红=不一致/缺失"),
+             verdict_bands(pairs_, well, depth_min, depth_max)});
     }
 
-    // Shared depth cursor while linked (m domain only — ms coupling never
-    // happens without a calibration, F:75).
-    if (view_->link_enabled() && view_->cursor_depth() >= 0.0) {
-        const int y = y_of(view_->cursor_depth());
-        painter.setPen(QPen(QColor(0x00, 0x78, 0xd4), 1, Qt::DashLine));
-        painter.drawLine(axis_w, y, width() - 4, y);
+    bool first = true;
+    for (const Column& column : columns) {
+        auto strip = std::make_unique<PwbIntervalStripPlot>();
+        strip->setBands(column.bands);
+        strip->xAxis().setType(Qgis::PlotAxisType::Categorical);
+        strip->yAxis().setNumericFormat(
+            new pwb::qgis_plot::PwbDepthNumericFormat());
+        strip->yAxis().setLabelSuffix(QStringLiteral(" m"));
+        auto* item = canvas->addPlot(std::move(strip));
+        // Strip columns are categorical in X; the shared axis is depth
+        // (stored negated so shallow renders on top). Bands live outside
+        // QgsPlotData, so the full extent is declared explicitly — this is
+        // also what makes the panel's Fit action meaningful.
+        item->setFullExtent(0.0, 1.0, -depth_max, -depth_min);
+        item->setShareX(false);
+        item->setShareY(true);
+        item->setTopTitle(column.title);
+        item->setAxisTitles(QString(),
+                            first ? QStringLiteral("深度") : QString());
+        first = false;
     }
+    canvas->zoomFull();
+    update_cursor_guide();
 }
 
 }  // namespace pwb::app

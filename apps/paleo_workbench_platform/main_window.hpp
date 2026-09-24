@@ -44,7 +44,7 @@
 // reconcile + stage switches + save-time user-edit adoption; real-time
 // tree-model signal write-back is the Prompt-2 integration point
 // (08-known-limitations §2).
-#include <pwb/qgis/layer_tree_stack.hpp>
+#include <pwb/qgis/layer_tree_composer.hpp>
 #include <pwb/ui_composite/layer_group_controller.hpp>
 #include <pwb/ui_composite/layer_presentation.hpp>
 #include <pwb/ui_composite/layer_stage_controller.hpp>
@@ -176,6 +176,11 @@ public:
     // actions trigger; no parallel logic).
     QString openVectorLayer(const QString& path);
     QString openRasterLayer(const QString& path);
+    // Provider-driven admission (QGIS-native convergence): asks
+    // QgsProviderRegistry which layers live in the URI and admits every
+    // sublayer with the provider's own key — no extension sniffing, no
+    // fabricated layers on unrecognized sources.
+    QString openDataFile(const QString& path);
     // Opens a .paleo project session through B: real store (refuses
     // unreadable/read-only), startup journal recovery, then every bound
     // GeoJSON layer is materialized as an EXPLICIT WORKING COPY under
@@ -308,13 +313,15 @@ public:
 #endif
 #if defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
     // Submits one attribute run over a PWBVOL1 version into the real B
-    // store (register -> payload -> publish). Returns the request id or ""
-    // + *error.
+    // store (register -> payload -> publish). The submit is SYNCHRONOUS
+    // (registry run + publication complete before it returns); hosts that
+    // need a non-modal surface wrap it in superviseAttributeRun. Returns
+    // the request id or "" + *error.
     std::string runAttribute(
         const std::string& algorithm_id,
         const std::map<std::string, std::string>& params,
         const std::string& input_version_id, std::string* error);
-    // Polls a runAttribute request ("" status = unknown id).
+    // Terminal outcome of a runAttribute request ("" status = unknown id).
     pwb::application::AlgorithmRunner::Outcome attributeOutcome(
         const std::string& request_id);
 #endif
@@ -472,6 +479,24 @@ private:
     void openVolumeDialog();
 #endif
     void exportLayoutDialog();
+
+// BEGIN qgis-native-layout-convergence
+public:
+    // Persist every QgsPrintLayout into the project document's "layouts"
+    // section (save hook — one write flow with the ProjectManager path).
+    void syncLayoutsOnSave();
+    // Clear layout dirty flags — called by the save flow ONLY after
+    // commit_save succeeded (failed saves keep layouts dirty).
+    void markLayoutsSaved();
+    // Rebuild layouts from the freshly opened project document (drop the
+    // previous project's layouts first).
+    void restoreLayoutsFromDocument();
+    // The export dialog body; `preferred` is the caller's active layout
+    // (editor export button) or null (governed action → first layout).
+    void export_layout_dialog(QgsPrintLayout* preferred);
+
+private:
+    // END qgis-native-layout-convergence
     void armPan();
     void armIdentify();
     void armMeasure();
@@ -503,10 +528,14 @@ private:
     void runAttributeDialog();
 #endif
 #if defined(PWB_WITH_CONV_30) && defined(PWB_WITH_SEISMIC_ATTRIBUTES) && defined(PWB_WITH_DATA_INTEGRATION)
-    // CONV-30 — non-modal supervision of one attribute run: polls the
-    // runner outcome on a scheduler job, reports progress to the dialog
-    // and propagates cooperative cancel into the run.
-    void superviseAttributeRun(const std::string& request_id);
+    // CONV-30 + phase 4 — non-modal supervision of one attribute run: the
+    // synchronous registry run + catalog publication execute inside the
+    // job body (task thread); the job token bridges cooperative cancel
+    // into the kernel, the finish slot applies the published version.
+    void superviseAttributeRun(
+        const std::string& algorithm_id,
+        const std::map<std::string, std::string>& params,
+        const std::string& input_version_id);
 #endif
 #ifdef PWB_WITH_CONV_01
     void geologicalFactorMapDialog();
@@ -641,23 +670,44 @@ public:
     void syncLayerControlOnSave();
 
 private:
-    // Build/attach the control plane over the freshly opened project's
-    // live workspace state + session map, reconcile the desired tree and
-    // restore the stage view (openProject success path).
-    void applyLayerControlForOpen();
-    pwb::qgis::QgsLayerTreeStack* layerTreeStackForTest() {
-        return layer_tree_stack_.get();
+    // Build the QGIS-native layer control plane over the freshly opened
+    // project's live workspace state + session map (sidecar restore /
+    // legacy migration / template routing) and restore the stage view
+    // (openProject success path). When the GIS state came back from the
+    // sibling .qgs file the restored tree IS the structure — the
+    // composer ADOPTS it instead of rebuilding from the sidecar.
+    void applyLayerControlForOpen(bool restored_from_qgis = false);
+    // Drop the layer control plane (recorder connection first, then the
+    // tree executors, then the referenced workspace state). Called on
+    // reopen and project close; idempotent.
+    void resetLayerControlPlane();
+    pwb::qgis::LayerTreeComposer* layerTreeComposerForTest() {
+        return layer_composer_.get();
     }
+    // QGIS-native tree sidecar path for the open project (empty when no
+    // project is open): <artifacts>/layer-tree.xml, written by
+    // syncLayerControlOnSave through QgsLayerTree::writeXml.
+    std::filesystem::path layerTreeSidecarPath() const;
+    // Native-tree checkbox echo -> per-stage overlay recorder
+    // (disconnected/rebound per project open).
+    QMetaObject::Connection group_visibility_connection_;
     std::unique_ptr<pwb::workspace::MappingWorkspaceState> layer_workspace_;
-    std::unique_ptr<pwb::qgis::QgsLayerTreeStack> layer_tree_stack_;
+    std::unique_ptr<pwb::qgis::LayerTreeComposer> layer_composer_;
     std::unique_ptr<pwb::ui_composite::LayerGroupController> layer_groups_;
     std::unique_ptr<pwb::ui_composite::LayerStageController> layer_stage_;
     std::unique_ptr<pwb::ui_composite::LayerTargets> layer_targets_;
-    // Last composition snapshots (drives the save-time re-reconcile that
-    // persists adopted user tree edits).
-    std::vector<pwb::ui_composite::LayerSnapshotInput> layer_snapshots_;
 #endif
     // END V14-QGIS-CONTROL
+public:
+    // QGIS-native persistence handoff (save path, BEFORE
+    // syncLayerControlOnSave; only compiled/used with PWB_WITH_CONV_27):
+    // write the live session QgsProject to the sibling .qgs file and
+    // record the pointer (+ tree de-duplication) in the mapping_workspace
+    // state. A failed write returns the honest error and MUST abort the
+    // project save (no half-success).
+    QString persistQgisProjectOnSave();
+
+private:
     std::function<int()> dirty_close_responder_;
     std::function<int()> discard_confirm_responder_;
     std::function<void(const QString&)> properties_responder_;
@@ -671,10 +721,10 @@ private:
     QAction* theme_actions_[3] = {nullptr, nullptr, nullptr};
     QAction* density_action_ = nullptr;
 #ifdef PWB_WITH_CONV_30
-    // CONV-30 — product job runtime: bounded scheduler + page ownership
-    // (close protocol) + app-quit drain. Declared last so it is
+    // CONV-30 — product task bridge: QgsTaskManager-backed owners + page
+    // ownership (close protocol) + app-quit drain. Declared last so it is
     // DESTROYED FIRST (reverse member order): its owner vector frees the
-    // QObject-child JobOwners while the surfaces above are still alive.
+    // QObject-child task owners while the surfaces above are still alive.
     std::unique_ptr<JobCenter> job_center_;
 #endif
 #ifdef PWB_WITH_UI_PAGES_PREVIEW_QT

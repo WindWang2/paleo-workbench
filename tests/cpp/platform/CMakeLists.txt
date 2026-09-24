@@ -44,18 +44,18 @@ endif()
 
 # CONV-30 — any target compiling main_window.cpp MUST call
 # pwb_link_job_runtime(<target>) so it builds the real product
-# configuration (job runtime wired). A new target that forgets the call
+# configuration (task bridge wired). A new target that forgets the call
 # compiles in CONV_30-OFF mode — a silent downgrade — so keep this call
 # next to the main_window.cpp source line.
 function(pwb_link_job_runtime tgt)
     if(PWB_BUILD_CONV_30)
-        if(NOT TARGET Pwb::JobQt)
+        if(NOT TARGET Pwb::QgisProcessing)
             message(FATAL_ERROR
-                "PWB_BUILD_CONV_30=ON requires Pwb::JobQt (libs/job_runtime)")
+                "PWB_BUILD_CONV_30=ON requires Pwb::QgisProcessing (libs/qgis_processing)")
         endif()
         target_sources(${tgt} PRIVATE
             ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/job_center.cpp)
-        target_link_libraries(${tgt} PRIVATE Pwb::JobQt)
+        target_link_libraries(${tgt} PRIVATE Pwb::QgisProcessing)
         target_compile_definitions(${tgt} PRIVATE PWB_WITH_CONV_30=1)
     endif()
 endfunction()
@@ -100,6 +100,14 @@ endif()
 pwb_add_platform_test(toolpolicy_matrix test_tool_policy.cpp)
 pwb_add_platform_test(toolpolicy_golden test_tool_policy_golden.cpp)
 pwb_add_platform_test(qgis_smoke test_qgis_smoke.cpp)
+# QGIS-native project persistence (data-management convergence):
+# QgsProject write/read round-trip, workspace .qgs handoff codec,
+# provider-registry layer factory.
+pwb_add_platform_test(qgis_project_store test_qgis_project_store.cpp)
+# QGIS-NATIVE-LAYER-CONTROL: the real QgsLayerTree as the single layer
+# control plane (compose/sidecar roundtrip/stage visibility/placement/
+# user groups/legacy migration/1000-layer scale/teardown).
+pwb_add_platform_test(layer_tree_composer test_layer_tree_composer.cpp)
 pwb_add_platform_test(edit_cycle test_edit_cycle.cpp)
 pwb_add_platform_test(lifecycle_cycles test_lifecycle.cpp)
 pwb_add_platform_test(export_layout test_export.cpp)
@@ -151,11 +159,9 @@ if(TARGET Pwb::Data AND TARGET Pwb::UiPagesDataQt AND PWB_V14_WELLSEIS)
         TIMEOUT 300)
 endif()
 # END PWB-V14-DATA-LINEAGE
-# BEGIN CONV-29
-if(PWB_BUILD_CONV_29)
-    pwb_add_platform_test(composition_export test_composition_export.cpp)
-endif()
-# END CONV-29
+# BEGIN qgis-native-layout-convergence
+pwb_add_platform_test(layout_convergence test_layout_convergence.cpp)
+# END qgis-native-layout-convergence
 pwb_add_platform_test(adapters_substitutes test_adapters.cpp)
 
 # Composition-root unit battery (native-product closure): service audit +
@@ -170,6 +176,12 @@ if(TARGET Pwb::SeismicAttributes AND TARGET Pwb::Data
     target_link_libraries(platform_app_context PRIVATE Pwb::SeismicAttributes)
     target_compile_definitions(platform_app_context PRIVATE
         PWB_WITH_SEISMIC_ATTRIBUTES=1)
+    # CONV-QGIS-PROCESSING phase 4: the capability probe reads the Paleo
+    # Processing registry, so the macro-pair build needs its link (tests
+    # are mounted after libs/, the alias exists here).
+    if(TARGET Pwb::QgisProcessing)
+        target_link_libraries(platform_app_context PRIVATE Pwb::QgisProcessing)
+    endif()
 endif()
 # CONV-PROVIDERS: the generated capability table reports provider_runtime
 # hard/in_closure once Pwb::Providers exists, so this battery needs the

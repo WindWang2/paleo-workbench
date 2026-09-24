@@ -15,11 +15,17 @@ target_compile_definitions(ui_workers.oracle PRIVATE
 add_test(NAME ui_workers.oracle COMMAND ui_workers.oracle)
 set_tests_properties(ui_workers.oracle PROPERTIES TIMEOUT 180)
 
-add_executable(ui_workers.lifecycle ui_workers_lifecycle_test.cpp)
-target_compile_features(ui_workers.lifecycle PRIVATE cxx_std_20)
-target_link_libraries(ui_workers.lifecycle PRIVATE Pwb::UiWorkers Pwb::Domain)
-add_test(NAME ui_workers.lifecycle COMMAND ui_workers.lifecycle)
-set_tests_properties(ui_workers.lifecycle PROPERTIES TIMEOUT 180)
+# The lifecycle battery hosts a real JobScheduler (submit/cancel/shutdown
+# checkpoints), so it requires the optional scheduler target; scheduler-less
+# configures skip it (the library itself needs contracts only).
+if(TARGET Pwb::JobRuntime)
+    add_executable(ui_workers.lifecycle ui_workers_lifecycle_test.cpp)
+    target_compile_features(ui_workers.lifecycle PRIVATE cxx_std_20)
+    target_link_libraries(ui_workers.lifecycle PRIVATE
+        Pwb::UiWorkers Pwb::Domain Pwb::JobRuntime)
+    add_test(NAME ui_workers.lifecycle COMMAND ui_workers.lifecycle)
+    set_tests_properties(ui_workers.lifecycle PROPERTIES TIMEOUT 180)
+endif()
 
 # BEGIN 05 — XML well-log core + shared well identity (Qt-free; the XML
 # core exists only when pwb_ingest participates in this configure).

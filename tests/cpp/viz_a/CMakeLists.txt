@@ -90,7 +90,7 @@ endif()
 # vendored QGIS SDK does not configure on every host — see run-viz-a-gate
 # step 7). Exercises the no-dock/no-jobs early-outs at runtime.
 if(TARGET Pwb::IngestLasWle AND TARGET Pwb::UiWorkersWleLoad
-   AND TARGET Pwb::JobQt AND TARGET Pwb::VisualizationWellLog)
+   AND TARGET Pwb::QgisProcessing AND TARGET Pwb::VisualizationWellLog)
     viz_a_test(viz_a.install_cover install_cover_test.cpp
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/viz_a_install.cpp
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/job_center.cpp)
@@ -98,7 +98,7 @@ if(TARGET Pwb::IngestLasWle AND TARGET Pwb::UiWorkersWleLoad
         ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform)
     target_link_libraries(viz_a.install_cover PRIVATE
         Pwb::Ingest Pwb::IngestLasWle Pwb::UiWorkers Pwb::UiWorkersWleLoad
-        Pwb::VisualizationWellLog Pwb::JobQt Qt6::Widgets)
+        Pwb::VisualizationWellLog Pwb::QgisProcessing Qt6::Widgets)
     set_tests_properties(viz_a.install_cover PROPERTIES ENVIRONMENT
         "${VIZ_A_GL_ENV}")
 endif()

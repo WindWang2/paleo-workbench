@@ -216,7 +216,7 @@ private:
     // ---- async prep pipeline (one lane, coalesced) ----------------------
     // The JobCenter creates owners parented to this host; a finished job
     // frees the owner slot so the next request reuses make_owner once.
-    pwb::job::qtbridge::JobOwner* prep_owner_ = nullptr;
+    pwb::qgis_processing::PwbTaskOwner* prep_owner_ = nullptr;
     bool prep_running_ = false;
     bool shutdown_done_ = false;  // request_prep() is a no-op after it
     // One deferred-reissue chain at a time (#1471): collapsing repeated
@@ -226,7 +226,7 @@ private:
     // The request the applied payload was produced for (diff target).
     std::optional<JointPrepRequest> prep_applied_;
     JointPrepData prepared_;
-    pwb::job::qtbridge::JobOwner* volume_owner_ = nullptr;
+    pwb::qgis_processing::PwbTaskOwner* volume_owner_ = nullptr;
 };
 
 }  // namespace pwb::app::viz_c

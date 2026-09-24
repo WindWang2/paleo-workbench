@@ -151,7 +151,7 @@ class VizBCrossWellDock : public QDockWidget {
     // END V14-FACTOR
 
     // Jobs.
-    JobCenter* job_center_ = nullptr;  // fresh JobOwner per submission
+    JobCenter* job_center_ = nullptr;  // fresh task owner per submission
     std::uint64_t session_generation_ = 1;
     QTimer* persist_timer_ = nullptr;
     bool persist_dirty_ = false;

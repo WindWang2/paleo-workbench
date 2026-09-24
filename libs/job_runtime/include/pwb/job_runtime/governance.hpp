@@ -21,11 +21,16 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 
-#include "pwb/job_runtime/job_scheduler.hpp"
+#include "pwb/job_runtime/job_contract.hpp"
 #include "pwb/job_runtime/resource_governor.hpp"
 
 namespace pwb::job {
+
+class JobScheduler;  // bound only by ensure_global_governance (defined in
+                     // the pwb_job_runtime target — Wave D split); this
+                     // header stays scheduler-free.
 
 // Build the governor's claim from a JobSpec (Python _request_for_spec):
 // estimates ride in spec.resources; categories derive from kind; missing
@@ -34,7 +39,10 @@ namespace pwb::job {
                                            const std::string& job_id);
 
 // Admission hook adapting the governor to the scheduler lease protocol.
-[[nodiscard]] JobScheduler::AdmissionHook
+// Same std::function type as JobScheduler::AdmissionHook (job_scheduler.hpp)
+// — spelled out here so governance links without the scheduler target.
+[[nodiscard]] std::function<std::shared_ptr<AdmissionLease>(
+    const JobSpec&, const std::string&)>
 scheduler_admission_hook(ResourceGovernor& governor);
 
 // One question for every parallelism knob: how many workers fit the
@@ -53,7 +61,9 @@ std::map<std::string, bool> apply_all_budgets(const ResourceBudget& budget,
                                               const BudgetSinks& sinks);
 
 // Idempotent: apply budgets (via sinks), bind monitor, install scheduler
-// admission. Returns the process governor.
+// admission. Returns the process governor. Defined in the scheduler target
+// (job_scheduler.cpp) because it binds a JobScheduler — link
+// Pwb::JobRuntime (or Pwb::JobQt) to call it.
 [[nodiscard]] ResourceGovernor& ensure_global_governance(
     const ResourceBudget* budget_or_null = nullptr,
     JobScheduler* scheduler = nullptr,

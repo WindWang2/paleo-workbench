@@ -11,7 +11,8 @@ add_test(NAME ui_controllers.core_smoke COMMAND ui_controllers.core_smoke)
 set_tests_properties(ui_controllers.core_smoke PROPERTIES TIMEOUT 120)
 
 # Qt smoke (offscreen): the QObject shells construct, signal-emit, wire
-# pages by metaobject name and drive a JobOwnerRunner job to completion.
+# pages by metaobject name and drive a JobOwnerRunner task to completion
+# on the real QgsTaskManager (QgsApplication fixture inside the test).
 if(TARGET pwb_ui_controllers_qt)
     add_executable(ui_controllers.qt_smoke qt_smoke_test.cpp)
     target_compile_features(ui_controllers.qt_smoke PRIVATE cxx_std_20)
@@ -24,5 +25,8 @@ if(TARGET pwb_ui_controllers_qt)
              COMMAND ui_controllers.qt_smoke)
     set_tests_properties(ui_controllers.qt_smoke PROPERTIES
         TIMEOUT 120
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        # QGIS vendor runtime closure — the task bridge reaches
+        # QgsApplication::taskManager().
+        ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}")
 endif()

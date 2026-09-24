@@ -85,7 +85,8 @@ public:
 
     void export_svg(const QString& filepath);
     void export_pdf(const QString& filepath);
-    // Explicit-canvas variants (see plot_widget.h).
+    // Explicit-canvas variants (renders into a caller-chosen logical size
+    // rather than the live widget size).
     void export_svg(const QString& filepath, QSize canvas);
     void export_pdf(const QString& filepath, QSize canvas);
     void render_surface(QPainter* painter, int width, int height);

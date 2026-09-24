@@ -40,12 +40,10 @@ Result<ProjectSnapshotV1> DataFacade::open_snapshot() const {
     snapshot.workspace = workspace::MappingWorkspaceState::from_json(
         document.mapping_workspace(), snapshot.diagnostics);
     snapshot.layer_bindings = snapshot.workspace.catalog_bindings();
-    snapshot.map_qgis_project_xml =
-        document.find_section("map_qgis_project_xml") != nullptr &&
-                document.find_section("map_qgis_project_xml")->is_string()
-            ? document.find_section("map_qgis_project_xml")
-                  ->get<std::string>()
-            : "";
+    // QGIS state handoff: the GIS tree/sources live in the sibling .qgs
+    // file named by workspace.qgis_project_file (the legacy inline
+    // map_qgis_project_xml envelope is retired — never written by the
+    // native shell; legacy documents round-trip it verbatim).
 
     for (const auto& resolved :
          project::resolve_resource_paths(document, project_file_)) {

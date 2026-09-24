@@ -13,6 +13,7 @@
 #include <pwb/seismic_service/tiled_volume.hpp>
 #include <pwb/geo3d_viz/joint/color_scales.hpp>
 #include <pwb/geo3d_viz/joint/segy_survey.hpp>
+#include <pwb/qgis_processing/job_compat.hpp>
 
 #include "viz_c_joint_volume.hpp"
 #include "viz_c_time_map.hpp"
@@ -163,9 +164,9 @@ bool VizCJointHost::open_volume(
         staged->descriptor = opened.descriptor;
         return staged;
     };
-    owner.start(
-        job_center_.scheduler(), std::move(spec),
-        [this, generation, path](const pwb::job::qtbridge::JobOutcome& outcome) {
+    pwb::qgis_processing::start_job_spec(
+        owner, std::move(spec),
+        [this, generation, path](const pwb::qgis_processing::CompatJobOutcome& outcome) {
             // Only the owner this callback belongs to may clear the slot
             // (a superseded open may already have installed a new one).
             if (volume_owner_ != nullptr && generation == volume_generation_) {
@@ -844,20 +845,19 @@ void VizCJointHost::request_prep() {
     if (prep_owner_ == nullptr) {
         prep_owner_ = &job_center_.make_owner(this);
     }
-    // #1471: the scheduler's frozen contract delivers the finished
-    // callback BEFORE the job's terminal state lands, so this reissue
-    // (running inside that callback) can see is_running() still true —
-    // start() would throw logic_error out of a queued slot. Defer to a
-    // later GUI turn through the terminal-aware seam instead; the flag
-    // keeps repeated reissues collapsed into one defer chain. The OWNER
-    // is the hop context: it dies with the host (QObject child) or with
-    // the JobCenter (unique_ptr), whichever happens first — either death
-    // drops the pending hop, so no teardown order can leave the chain
-    // firing against a dead owner.
+    // #1471: the task manager may still be delivering the finished
+    // callback while this reissue (running inside that callback) checks
+    // is_running() — start() would throw logic_error out of a queued
+    // slot. Defer to a later GUI turn through the terminal-aware seam
+    // instead; the flag keeps repeated reissues collapsed into one defer
+    // chain. The OWNER is the hop context: it dies with the host
+    // (QObject child) or with the JobCenter (unique_ptr), whichever
+    // happens first — either death drops the pending hop, so no teardown
+    // order can leave the chain firing against a dead owner.
     if (prep_owner_->is_running()) {
         if (!prep_reissue_pending_) {
             prep_reissue_pending_ = true;
-            pwb::job::qtbridge::reissue_when_terminal(
+            pwb::qgis_processing::reissue_when_terminal(
                 *prep_owner_, prep_owner_, [this] {
                     prep_reissue_pending_ = false;
                     request_prep();
@@ -905,10 +905,10 @@ void VizCJointHost::request_prep() {
         }
         return data;
     };
-    prep_owner_->start(
-        job_center_.scheduler(), std::move(spec),
+    pwb::qgis_processing::start_job_spec(
+        *prep_owner_, std::move(spec),
         [this, generation, request](
-            const pwb::job::qtbridge::JobOutcome& outcome) {
+            const pwb::qgis_processing::CompatJobOutcome& outcome) {
             prep_running_ = false;
             prep_in_flight_.reset();
             if (outcome.state == pwb::job::JobState::cancelled ||

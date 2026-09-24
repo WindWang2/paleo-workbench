@@ -190,7 +190,7 @@ void focus_lineage_tab(const Ctx& c, int tab_index) {
 
 bool running_tasks(const Ctx& c) {
 #ifdef PWB_WITH_CONV_30
-    return c.jobs != nullptr && !c.jobs->scheduler().statuses().empty();
+    return c.jobs != nullptr && c.jobs->task_count() > 0;
 #else
     (void)c;
     return false;

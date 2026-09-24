@@ -21,9 +21,9 @@ add_library(pwb_ui_composite STATIC
     src/layer_groups.cpp
     src/layer_group_controller.cpp
     src/layer_presentation.cpp
+    src/layer_ordering.cpp
     src/layer_stage_controller.cpp
     src/layer_targets.cpp
-    src/layer_tree_plan.cpp
     src/map_interaction.cpp
     src/map_snapshot.cpp
     src/map_styles.cpp

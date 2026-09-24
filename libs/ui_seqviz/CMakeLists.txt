@@ -1,7 +1,7 @@
 # UI-10 — sequence/factor/visualization pages cluster: Qt-free semantic
 # cores (state_language, page_tokens, sequence_state, factor_state,
-# geoviz_provider, viz_page_state, correlation_state, composition_state,
-# curve_ops_state, lithology_state) and the Qt Widgets shells in
+# geoviz_provider, viz_page_state, correlation_state, curve_ops_state,
+# lithology_state) and the Qt Widgets shells in
 # pwb_ui_seqviz_qt (built only when Qt6::Widgets is available).
 #
 # Worker semantics come from libs/ui_workers (UI-04) — this cluster only
@@ -15,7 +15,6 @@ add_library(pwb_ui_seqviz STATIC
     src/geoviz_provider.cpp
     src/viz_page_state.cpp
     src/correlation_state.cpp
-    src/composition_state.cpp
     src/curve_ops_state.cpp
     src/lithology_state.cpp
 )
@@ -25,7 +24,7 @@ target_include_directories(pwb_ui_seqviz PUBLIC
 target_compile_features(pwb_ui_seqviz PUBLIC cxx_std_20)
 
 foreach(dep IN ITEMS domain ui_data_core ui_workers job_runtime
-                     mapping_document well_science)
+                     well_science)
     if(NOT TARGET pwb_${dep})
         add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../${dep}
                          ${CMAKE_CURRENT_BINARY_DIR}/${dep})
@@ -36,15 +35,15 @@ target_link_libraries(pwb_ui_seqviz PUBLIC
     Pwb::Domain
     Pwb::UiDataCore
     Pwb::UiWorkers
-    Pwb::JobRuntime
-    Pwb::MappingDocument
+    Pwb::JobContracts
     Pwb::WellScience
 )
 
 # Qt Widgets shells (UI-10): sequence panels + framework page, factor
 # panels + create-factor-map dialog, visualization summary/trace/workspace/
-# page, correlation page, composition panel, lithology crossplot dialog,
-# curve operation dialog.
+# page, correlation page, lithology crossplot dialog, curve operation
+# dialog. (The composition panel is retired — Stage 3 edits the native
+# QGIS layout through pwb::qgis::LayoutEditorPanel.)
 if(TARGET Qt6::Widgets)
     if(NOT TARGET Pwb::UiShellQt)
         add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ui_shell
@@ -54,12 +53,12 @@ if(TARGET Qt6::Widgets)
         add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ui_widgets
                          ${CMAKE_CURRENT_BINARY_DIR}/ui_widgets)
     endif()
-    # Pwb::JobQt (job::qtbridge::JobOwner — OwnedWorkerJob parity) comes
-    # from the same job_runtime subdirectory the core already pulled in;
-    # it exists whenever Qt6::Core was found there.
-    if(NOT TARGET Pwb::JobQt)
-        message(STATUS "UI-10: pwb_ui_seqviz_qt built without Pwb::JobQt — "
-                "dialogs keep the injected-service synchronous path")
+    # Pwb::QgisProcessing (PwbTaskOwner / QgsTaskManager bridge) is
+    # required for the worker-backed widgets; guarded so pure-Qt hosts
+    # without the QGIS SDK admission keep configuring.
+    if(NOT TARGET Pwb::QgisProcessing)
+        add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../qgis_processing
+                         ${CMAKE_CURRENT_BINARY_DIR}/qgis_processing)
     endif()
 
     add_library(pwb_ui_seqviz_qt STATIC
@@ -68,13 +67,6 @@ if(TARGET Qt6::Widgets)
         src/qt/factor_panels.cpp
         src/qt/viz_panels.cpp
         src/qt/dialogs.cpp
-        # 08-line closure: composition_panel now compiles against the
-        # mapping_document composition kernels (composition_state core +
-        # CompositionEditSession) and document_io atomic save/load.
-        src/qt/composition_panel.cpp
-        # V14-COMPILATION-PUBLISH — Qt PNG/PDF replay device for the native
-        # composer export (composer/export.py parity).
-        src/qt/composition_replay.cpp
         src/qt/correlation_page.cpp
         src/qt/preview_controller.cpp
         src/qt/visualization_page.cpp
@@ -85,8 +77,6 @@ if(TARGET Qt6::Widgets)
         include/pwb/ui_seqviz/qt/sequence_framework_page.hpp
         include/pwb/ui_seqviz/qt/panel_float_button.hpp
         include/pwb/ui_seqviz/qt/factor_panels.hpp
-        include/pwb/ui_seqviz/qt/composition_panel.hpp
-        include/pwb/ui_seqviz/qt/composition_replay.hpp
         include/pwb/ui_seqviz/qt/viz_panels.hpp
         include/pwb/ui_seqviz/qt/dialogs.hpp
         include/pwb/ui_seqviz/qt/correlation_page.hpp
@@ -100,8 +90,8 @@ if(TARGET Qt6::Widgets)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_compile_features(pwb_ui_seqviz_qt PUBLIC cxx_std_20)
     target_link_libraries(pwb_ui_seqviz_qt
-        PUBLIC Pwb::UiSeqviz Pwb::UiShellQt Pwb::UiWidgets Pwb::JobQt
-               Qt6::Widgets Qt6::Svg
+        PUBLIC Pwb::UiSeqviz Pwb::UiShellQt Pwb::UiWidgets
+               Pwb::QgisProcessing Pwb::JobQt Qt6::Widgets Qt6::Svg
         PRIVATE Pwb::UiWorkers Pwb::UiDataCore Qt6::Gui)
 endif()
 

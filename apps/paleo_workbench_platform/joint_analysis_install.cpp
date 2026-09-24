@@ -34,7 +34,7 @@
 #include <pwb/geo3d_viz/joint/color_scales.hpp>
 #include <pwb/geo3d_viz/joint/registration.hpp>
 #include <pwb/geo3d_viz/scene_object_manager.hpp>
-#include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/qgis_processing/job_compat.hpp>
 #include <pwb/seismic_viewer/crossplot_core.hpp>
 #include <pwb/seismic_viewer/horizon_core.hpp>
 #include <pwb/ui_workers/geological_modeling.hpp>
@@ -692,11 +692,11 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
                     : nullptr;
             auto spec = pwb::ui_workers::make_stratal_job_spec(
                 std::move(input));
-            owner.start(
-                state->jobs->scheduler(), std::move(spec),
+            pwb::qgis_processing::start_job_spec(
+                owner, std::move(spec),
                 [state, page, demo, directory_at_request,
                  registration_at_request](
-                    const pwb::job::qtbridge::JobOutcome& outcome) {
+                    const pwb::qgis_processing::CompatJobOutcome& outcome) {
                     const QString directory_now =
                         state->project_directory
                             ? state->project_directory()
@@ -934,9 +934,9 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
             return pwb::viz::well_tie::tie_logs_to_seismic(
                 tie_input, [&ctx] { return ctx.token().is_cancelled(); });
         };
-        owner.start(
-            state->jobs->scheduler(), std::move(spec),
-            [page, well_name](const pwb::job::qtbridge::JobOutcome& outcome) {
+        pwb::qgis_processing::start_job_spec(
+            owner, std::move(spec),
+            [page, well_name](const pwb::qgis_processing::CompatJobOutcome& outcome) {
                 if (page == nullptr) {
                     return;
                 }
@@ -1084,9 +1084,9 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
         auto& owner = state->jobs->make_owner(parent);
         auto spec = pwb::ui_workers::make_export_job_spec(
             std::move(input));
-        owner.start(
-            state->jobs->scheduler(), std::move(spec),
-            [page](const pwb::job::qtbridge::JobOutcome& outcome) {
+        pwb::qgis_processing::start_job_spec(
+            owner, std::move(spec),
+            [page](const pwb::qgis_processing::CompatJobOutcome& outcome) {
                 if (page == nullptr) {
                     return;
                 }
@@ -1132,9 +1132,9 @@ Geo3DAnalysisHooks make_hooks(const JointAnalysisInstall& deps) {
         auto& owner = state->jobs->make_owner(parent);
         auto spec = pwb::ui_workers::make_advisor_job_spec(
             std::move(input));
-        owner.start(
-            state->jobs->scheduler(), std::move(spec),
-            [parent, page](const pwb::job::qtbridge::JobOutcome& outcome) {
+        pwb::qgis_processing::start_job_spec(
+            owner, std::move(spec),
+            [parent, page](const pwb::qgis_processing::CompatJobOutcome& outcome) {
                 if (page == nullptr) {
                     return;
                 }

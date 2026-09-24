@@ -7,12 +7,12 @@
 #
 # Every worker is a callable over host-collected input slices; scheduling,
 # cooperative cancellation, progress and teardown ride the CONV-30 job
-# runtime (Pwb::JobRuntime). Engine-owned pieces (contourpy extraction,
+# contracts vocabulary (Pwb::JobContracts). Engine-owned pieces (contourpy extraction,
 # DTW correlate, LAS/XML parse, .dat horizon parsing, PCG64 demo noise)
 # stay behind injected seams — never substituted with different
 # algorithms. Frozen against tools/oracle/generate_ui_workers_fixtures.py.
 
-foreach(_required Pwb::JobRuntime Pwb::Domain Pwb::GeoModel)
+foreach(_required Pwb::JobContracts Pwb::Domain Pwb::GeoModel)
     if(NOT TARGET ${_required})
         message(FATAL_ERROR
             "libs/ui_workers requires ${_required} — under "
@@ -50,7 +50,7 @@ target_compile_features(pwb_ui_workers PUBLIC cxx_std_20)
 # PUBLIC: the headers expose pwb::job::JobSpec/JobContext and
 # pwb::domain::Json / pwb::geomodel::DomainObject types.
 target_link_libraries(pwb_ui_workers PUBLIC
-    Pwb::JobRuntime Pwb::Domain Pwb::GeoModel)
+    Pwb::JobContracts Pwb::Domain Pwb::GeoModel)
 
 # BEGIN 05: XML well-log load core. The bounded XML scanner lives in
 # pwb_ingest (already present in every DATA/PLATFORM/SCIENCE configure);

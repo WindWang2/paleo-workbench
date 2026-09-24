@@ -8,6 +8,8 @@
 #include "app_shell.hpp"
 #include "job_center.hpp"
 
+#include <pwb/qgis_processing/job_compat.hpp>
+
 #ifdef PWB_WITH_V14_DATA_LINEAGE
 #include "closure_data_workspace.hpp"
 #endif
@@ -205,22 +207,23 @@ QWidget* create_seismic_page(const QString& path, QWidget* parent,
             return *payload;
         };
         const QPointer<QWidget> page_ref(page);
-        owner.start(jobs->scheduler(), std::move(spec),
-                    [bind = std::move(bind), page_ref](
-                        const pwb::job::qtbridge::JobOutcome& o) {
-                        if (!page_ref) return;
-                        if (o.state == pwb::job::JobState::done ||
-                            o.state == pwb::job::JobState::degraded) {
-                            if (auto* payload = std::any_cast<std::tuple<
-                                    pwb::viz::VolumeGeometryV1,
-                                    std::vector<float>>>(&o.result)) {
-                                bind(std::move(std::get<0>(*payload)),
-                                     std::move(std::get<1>(*payload)));
-                            }
-                        }
-                        // failed/cancelled: the page keeps its honest
-                        // no-volume state.
-                    });
+        pwb::qgis_processing::start_job_spec(
+            owner, std::move(spec),
+            [bind = std::move(bind), page_ref](
+                const pwb::qgis_processing::CompatJobOutcome& o) {
+                if (!page_ref) return;
+                if (o.state == pwb::job::JobState::done ||
+                    o.state == pwb::job::JobState::degraded) {
+                    if (auto* payload = std::any_cast<std::tuple<
+                            pwb::viz::VolumeGeometryV1,
+                            std::vector<float>>>(&o.result)) {
+                        bind(std::move(std::get<0>(*payload)),
+                             std::move(std::get<1>(*payload)));
+                    }
+                }
+                // failed/cancelled: the page keeps its honest
+                // no-volume state.
+            });
     } else {
         if (auto payload = read_volume()) {
             bind(std::move(std::get<0>(*payload)),

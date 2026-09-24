@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-#include <pwb/job_runtime/qt/job_bridge.hpp>
+#include <pwb/qgis_processing/task_bridge.hpp>
 #include <pwb/ui_seqviz/qt/viz_workspace.hpp>
 #include <pwb/ui_seqviz/viz_page_state.hpp>
 #include <pwb/ui_workers/well_log_load.hpp>
@@ -185,8 +185,8 @@ private:
     VisualizationSummaryPanel* summary_ = nullptr;
     VisualizationTracePanel* trace_ = nullptr;
     PreviewRequestController* preview_controller_ = nullptr;
-    job::qtbridge::JobOwner* well_log_job_ = nullptr;
-    job::qtbridge::JobOwner* export_job_ = nullptr;
+    pwb::qgis_processing::PwbTaskOwner* well_log_job_ = nullptr;
+    pwb::qgis_processing::PwbTaskOwner* export_job_ = nullptr;
     ui_shell::LayoutPersistence* persistence_ = nullptr;
     std::unique_ptr<ui_shell::FloatController> float_controller_;
     std::vector<std::pair<std::string, QWidget*>> floatable_;

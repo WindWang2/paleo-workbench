@@ -1,92 +1,96 @@
-> **HISTORICAL / scratch** — agent scratch / historical progress. Not product documentation authority; see [`docs/README.md`](docs/README.md).
+# Progress — QGIS Native Plot Convergence
 
-# 当前进度入口 — C++ 全面转换收尾
+## Session 1 — 2026-09-23
 
-当前执行日志：[C++ progress](docs/development/cpp-conversion-planning/progress.md)；
-计划：[task_plan](docs/development/cpp-conversion-planning/task_plan.md)。
-以下保留 #1302 Python 工作台历史，旧阶段完成不代表当前 C++ 收尾完成。
+| 时间 | 动作 | 结果 |
+|------|------|------|
+| 启动 | fetch --all --prune; baseline=192422c60 | ✓ |
+| 启动 | gh pr/issue 审计：open PR #1482(data) #1483(layer)；open issue #1472 #1429 | ✓ |
+| 启动 | worktree 创建 /home/kevin/projects/paleo-qgis-plot @ feat/qgis-native-plot-scientific-visualization | ✓ |
+| 审计 | QGIS 4.2.0 vendored; plot API 面确认（core+gui plot 目录） | ✓ |
+| 审计 | QgsPlotCanvas=框架基类; QgsElevationProfileCanvas=官方参考实现 | ✓ |
+| 审计 | SDK 复用路径+deps prefix+Qt 前缀确认 | ✓ |
+| 审计 | 3 个 background subagent 启动：API map / 产品清单 / 子模块边界 | 进行中 |
 
----
+## 遇到的错误
 
-# Progress — Paleo UI Workbench
+| 错误 | 尝试次数 | 解决方案 |
+|------|---------|---------|
+| - | - | - |
 
-## Session 2026-09-14
+## Session 2 — libs/qgis_plot landed, smoke green
 
-### PHASE 0 (complete)
-- worktree ../paleo-workbench-paleo-ui @ feat/paleo-ui-workbench (off main e7214566)
-- geo-viz-engine 子模块本地 reference 初始化成功
-- 复用主仓 .venv 冒烟通过：tests/test_facies_taxonomy.py 15 passed (offscreen)
+- New library `libs/qgis_plot` -> `Pwb::QgisPlot`, wired after libs/qgis.
+  - PwbPlotCanvas (QgsPlotCanvas subclass): column layout of PwbPlotItems,
+    pan/zoom/x-zoom/wheel zoom/marquee zoom via STOCK QGIS tools, linked
+    shareX/shareY axes (uniform data-space translation — fixes track drift),
+    equal-aspect option, hover->nearestPoint->PointHit(domain id) with
+    crosshair overlay, identifyRect, PNG/SVG/PDF vector export, autofit.
+  - PwbPlotItem (QgsPlotCanvasItem): holds Qgs2DPlot + QgsPlotData, image
+    cache, axis titles in margins (upstream axes have none), canvas<->data
+    mapping incl. flipAxes, nearestSeriesPoint/pointsInRect.
+  - Tools: PwbPlotToolXAxisZoom (QgsPlotToolZoom + full-height constraint),
+    PwbPlotToolIdentify (click pick + rect identify), PwbPlotToolLasso
+    (freehand polygon, canvas coords).
+  - Domain plots: PwbScatterPlot (per-point z-ramp colours + labels),
+    PwbColumnPlot (numeric-x column bands for QC strips).
+  - PwbDepthNumericFormat: |depth| labels for negated-depth axes.
+  - PwbPlotPanel: toolbar + actions -> QGIS plot tools (single state machine).
+- Gotchas found: qgs2dplot.h does not exist (Qgs2DXyPlot lives in qgsplot.h);
+  QgsPlotToolZoom ctor takes canvas only; AUTOMOC needs headers in sources;
+  QPdfWriter painter breaks calculateOptimisedIntervals (infinite loop on
+  label metrics) -> intervals computed on a scratch-image context; wheel-zoom
+  factor is 1.25^(delta/120) (positive delta = zoom in).
+- Test: qgis_plot.smoke — 26/26 PASS offscreen (render, mapping, real tool
+  drags, hover, identify, lasso, multi-track link, flipAxes, exports, teardown).
 
-### PHASE 1 (complete)
-- Explore×2 完成（workstation UI / domain+canvas），要点入 findings.md
-- 5 份文档落盘 docs/development/paleo-ui-workbench/：00-decisions(13 条)、
-  01-interaction-specs(S1-S5 storyboards)、02-state-machine(5 态 FSM 转移表)、
-  03-tdd-ui-test-plan(≈112 用例矩阵)、04-known-limitations(22 条)
+## Session 3 — Wave A migrations landed (compile-clean)
 
-### 测试记录
-| 命令 | 结果 |
-|---|---|
-| pytest tests/test_facies_taxonomy.py (worktree, offscreen) | 15 passed |
+- XyScatterHost (viz_e_hosts.*): PlotWidget -> PwbPlotCanvas + PwbScatterPlot;
+  toolbar = stock QgsPlotToolPan/Zoom + PwbPlotToolIdentify; oracle colour
+  #409cff + size 6.0 preserved (SVG `<circle>` assertions still valid —
+  same QPainter drawEllipse primitive). viewBounds()/export_svg_to/
+  export_pdf_to test contract kept.
+- TimeDepthPreviewPage + WellLogPreviewPage -> PwbPlotPanel; well-log =
+  N x PwbRangeBandPlot columns, shareX linked buckets, per-column y-range.
+- ComparisonView (QC 对比页): CompareCanvas QPainter -> PwbPlotPanel +
+  N x PwbIntervalStripPlot (new domain item: labelled depth bands,
+  y=-depth + PwbDepthNumericFormat). 3 modes preserved (并排3列/叠加2列/
+  差异1列); unlocated verdict rows keep the even-split fallback; link
+  cursor -> canvas->setHorizontalGuide (new PwbHGuideItem); honest empty
+  state now actually visible via panel->showUnavailable (old code painted
+  the reason on a hidden canvas — dead code).
+- CMake: Pwb::QgisPlot added to all 8 targets compiling
+  comparison_view.cpp + viz_e_hosts.cpp closures (pwb-platform shell
+  block, app_shell, three_stage_flow, constraint_authoring,
+  closure_review_install, closure_mapping, ribbon_visual,
+  closure_preview, viz_e test).
+- TU-level compile verified out-of-ninja (build dir busy with full dep
+  build): comparison_view.cpp / well_log_preview_presenter.cpp /
+  time_depth_preview_presenter.cpp / viz_e_hosts.cpp all EXIT:0.
+- Fixed: marker colour must be oracle #409cff (was matplotlib #1f77b4);
+  hpp `canvas()` moved out-of-line (incomplete PwbPlotPanel);
+  namespace-shadowed forward decls in viz_e_hosts.hpp.
 
-### PHASE 2 / Ticket 1 (complete)
-- 新增 workflow/stratigraphic_epochs.py（内置年代方案+目录合并）、
-  mapping_workspace/epoch_switching.py（差分计划器+洋葱皮集合）、
-  ui/components/stratigraphic_timeline_slider.py（部件+执行器）
-- layer_groups.py 增 epoch 组 id 助手；composite_document.py 挂载时间轴+
-  控制器接线+set_project 目录刷新；shell.py 期次→层位条同步
-- 外科修复 canvas_shim 半构造残件 resizeEvent AttributeError（_canvas_created
-  防护）——同时解除了既有 test_mapping_stage_ui 在本机的环境性失败
-- tests/ui/test_stratigraphic_timeline.py 24/24 绿；回归 63 passed
+## Session 4 — 退役 + Round-2 review 修复
 
-### PHASE 3 / Ticket 2 (complete)
-- facies_selector.py + FaciesBrushContext（幂等装备/清空）；stage_actions 抽出
-  facies_category_color 单一取色真源；新组件 facies_palette_widget /
-  facies_eyedropper（pick_facies_at 纯函数双栈一致）
-- composite_document：画刷优先捕获赋值（单一撤销命令零模态）、吸色管点击
-  （fallback map_clicked / Python identify_all）、数字键 1-9 绘图期动态注册
-- app_shell：hub 页导航"绘图期"守卫（D6 双保险；offscreen 无法实证路由）
-- dock：facies_palette 描述符 + shell 停靠 + 面板菜单
-- tests/ui/test_facies_palette.py 18/18；回归 97 passed
+- Generic 层退役完成：`plot_widget.*`、`cross_plot_widget.*`、`qt/series.hpp`
+  已从 libs/viz_charts 删除；qt_widgets_smoke 收敛到 Surface/Colorbar。
+- PwbPlotItem::setFullExtent —— 无 QgsPlotData 序列的域内容项
+  （PwbIntervalStripPlot）声明显式全幅；zoomFull/resize 首 autofit 走
+  item->extent()。ComparisonView Fit 从此可用。
+- 双轴 subagent review（standards+spec）完成；P0 一个
+  （pa_flow_test 残留已删头文件 include）+ ~15 项 P1/P2 全部修复：
+  深度格式千分位、padRange 退化语义对齐旧版、resize 等比重锁定、
+  clearPlots 复位 has_view_、guide 死参数、verdict alpha 透传、
+  PDF 回 A4 整页、viz_e/preview CMake 链接、smoke 测试 runtime env、
+  面板 chrome 中文化、PwbColumnPlot/setColumnWeights 零消费删除、
+  文档 heredoc 垃圾清理、三处过时注释。
+- qgis_plot.smoke 30/30 PASS（新增 interval-strip/hguide 断言）。
 
-### PHASE 4 / Ticket 3 (complete)
-- ui/components/constraint_factor_hud.py：O(1) 采样纯函数（双线性/钳制差分坡度/
-  方差置信度/线性最近井）+ HUD 部件（画布子控件、鼠标穿透、8 标签固定）+
-  HudController（60ms 合并节流、井位联动发布、300ms 延迟清除、同井去重）
-- view_coordination：set_section_cursor_sink/publish_section_cursor（去重+单次
-  清除，clear 不节流）；CompositeDocument 挂 HUD+网格缓存；app_shell 注入
-  view_coordination + sink → CompositeVisualizationPanel.show_section_cursor
-  （井位级竖带指示；引擎无 crosshair API，04 #11 已更新）
-- tests/ui/test_constraint_hud.py 15/15；回归（含 view_coordination/visualization
-  panel/workstation shell）151 passed
+## Still open
 
-### PHASE 5 / Ticket 4 (complete)
-- mapping/qc_quickfix.py：sliver_merge（共享边最长/并列面积优势相，单命令合并
-  +整体撤销）/ tangent_close（切线延伸步长=容差×0.5 上限容差×8，不可修诚实禁用）
-- ui/components/interactive_qc_hub.py：SmoothPanController（180ms ease-in-out、
-  4-12 帧、历史恰 1 条、用户可打断）+ InteractiveQCHub（来源聚合/双击定位/
-  Enter 定位/F 修复键盘流/修复按钮 availability+tooltip）
-- composite_document：qc_hub 挂画布下（拓扑 chip 激活时与拓扑面板同开）、
-  修复执行→单一撤销命令→mark_resolved→即时重组；cartographic_qa 增
-  issues_for_interactive_hub 适配器（bbox/layer_id 定位字段）
-- tests/ui/test_interactive_qc_hub.py 15/15；回归（ui/topo/stage）全绿
-
-### PHASE 6 / Ticket 5 (complete)
-- workstation/mode_state.py：5 态 FSM（02 转移表全实现 + 瞬态 pan_held +
-  mode_before_travel 回退）+ MODE_HINTS 查找表
-- workstation/keybinding_manager.py：composite/canvas 双挂事件过滤器
-  （Space 临时平移/Tab 循环/Z-X 中心缩放/Ctrl+D 吸属性/Esc 退出链）+
-  提示条 KeybindingHintBar；文本输入聚焦全让路
-- shortcuts.py：register_shortcut 增 context 参数（默认应用域不变）
-- composite_document：tab_cycle_selection/ctrl_d_pick_facies + FSM 事件桥
-  （工具/时间轴/QC 面板显隐）；修复中发现并修正 VectorLayer.selection
-  为 property 的调用形态
-- tests/ui/test_mode_state 8 + test_keybinding_flow 10 全绿；
-  全壳回归（workstation_shell/keyboard_shortcuts/dock_framework）59 passed
-
-### PHASE 7 (审查修复 + 视觉验证)
-- 双轴审查（2 agents）：Standards 双 gate PASS（memory/echo）；Spec 4 阻断+
-  8 摩擦 → 修复 B1-B4/F2/F3/F6/F8/P1-1..P1-5/P2/P3（洋葱皮层序获像素级证据
-  #8ead9f=30% 精确混合色）
-- 视觉回归 6 用例（结构/状态 gate + 测量记录，D13-rev2 回归 V5 D8 政策）；
-  4 张证据截图 assets/；04-visual-qa-verification.md 落盘
-- tests/ui 98/98 全绿；全量套件第二轮后台复跑中
+- Full `ninja` build finishing（重启后进行中）。
+- viz_e.pa_flow SVG export assertions（`<circle` count、#409cff）。
+- Preview presenter tests；platform_closure_* link check。
+- `git diff --check` → commit → push → PR。

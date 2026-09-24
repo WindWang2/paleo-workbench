@@ -3,12 +3,13 @@
 // QT_QPA_PLATFORM=offscreen. Complements core_state_test.cpp (the
 // Qt-free cores) by proving the Qt shells construct and respond.
 
-#include <QApplication>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QThread>
+
+#include <qgsapplication.h>
 
 #include <cstdio>
 #include <memory>
@@ -48,7 +49,9 @@ StratigraphySlice sample_stratigraphy() {
 }  // namespace
 
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    // QgsApplication (not plain QApplication): CreateFactorMapDialog's
+    // factor-map job runs on QgsApplication::taskManager().
+    QgsApplication app(argc, argv, true);
 
     // --- SequenceBoundaryTable -------------------------------------------
     {
@@ -201,7 +204,7 @@ int main(int argc, char** argv) {
                              created = true;
                          });
         check(dialog.start_job(), "dialog starts job");
-        // JobOwner delivers via queued invocation — pump events briefly.
+        // PwbTaskOwner delivers via queued invocation — pump events briefly.
         for (int i = 0; i < 200 && !created; ++i) {
             QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
             QThread::msleep(10);

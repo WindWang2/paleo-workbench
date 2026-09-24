@@ -1,4 +1,4 @@
-// V14 LayerStageController — the layer-side policy of stage switching.
+// LayerStageController — the layer-side policy of stage switching.
 // Port of the layer-relevant subset of
 // paleo_workbench/mapping_workspace/controller.py (MappingStageController:
 // set_stage / restore_stage_view / active-target reassignment, V13 W-P).
@@ -9,13 +9,17 @@
 // never triggers recomputation, never recreates layers, never rewrites
 // order (contracts 03 §6).
 //
-// The layer manager UI / page composition (Prompt 2) consumes the
-// signals; this controller stays Qt-free with std::function hooks.
+// QGIS-native convergence: the controller computes WHAT should change
+// (visibility policy from the profile + per-stage overlay) and applies it
+// through host-wired execution hooks onto the real QgsLayerTree
+// (pwb::qgis::LayerTreeComposer). No layer objects are touched, no tree
+// state is kept here. Qt-free, std::function hooks.
 #pragma once
 
 #include "pwb/ui_composite/layer_group_controller.hpp"
 
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 
@@ -36,15 +40,25 @@ public:
         std::function<std::optional<std::string>(const std::string& role)>
             resolver);
 
+    // Tree execution hooks onto the real QGIS layer tree (host wires
+    // these to pwb::qgis::LayerTreeComposer; a null hook degrades
+    // honestly — the stage still switches, the tree just is not told).
+    // ensure_groups: create the union-tree system groups missing from
+    // the live tree (create-only, idempotent).
+    void set_tree_execution(
+        std::function<void()> ensure_groups,
+        std::function<void(const std::map<std::string, bool>&)>
+            apply_group_visibility);
+
     // Switch the stage (transient). Returns false for unknown/duplicate
-    // requests. Order: write current stage -> rematerialize empty system
-    // groups of the new stage (bridge failures never break the switch) ->
-    // full-push effective group visibility -> reassign the active edit
-    // target (stored -> profile roles -> none; NEVER inherited across
-    // stages) -> notify.
+    // requests. Order: write current stage -> ensure the new stage's
+    // system groups exist on the live tree (hook failures never break
+    // the switch) -> full-push effective group visibility -> reassign
+    // the active edit target (stored -> profile roles -> none; NEVER
+    // inherited across stages) -> notify.
     bool set_stage(MappingStage stage);
     // Restore the stage context after project reopen: visibility +
-    // expand states + edit target.
+    // edit target.
     void restore_stage_view();
 
     const std::string& current_stage() const { return state_.current_stage; }
@@ -62,6 +76,7 @@ public:
 
 private:
     void reassign_active_target();
+    void push_stage_visibility();
 
     pwb::workspace::MappingWorkspaceState& state_;
     LayerGroupController& groups_;
@@ -69,6 +84,9 @@ private:
     std::function<bool(const std::string&)> target_validator_;
     std::function<std::optional<std::string>(const std::string& role)>
         target_resolver_;
+    std::function<void()> ensure_groups_;
+    std::function<void(const std::map<std::string, bool>&)>
+        apply_group_visibility_;
 
     bool target_layer_exists(const std::string& layer_id) const;
 };

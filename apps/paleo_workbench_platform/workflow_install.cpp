@@ -629,7 +629,7 @@ public:
         : QObject(window),
           window_(window), shell_(shell), context_(context) {
         controller_ = new ui_controllers::qt::WorkflowController(
-            jobs->scheduler(), this);
+            jobs->gate(), this);
         controller_->bind_dialogs(window_);
         bind_pages_();
         bind_services_();

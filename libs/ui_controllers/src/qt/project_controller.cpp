@@ -33,10 +33,8 @@ void post_next_turn(std::function<void()> fn) {
     QTimer::singleShot(0, app, [fn = std::move(fn)]() mutable { fn(); });
 }
 
-ProjectController::ProjectController(job::JobScheduler& scheduler,
-                                     QObject* parent)
-    : QObject(parent), scheduler_(scheduler) {
-    save_runner_ = std::make_unique<JobOwnerRunner>(scheduler_, this);
+ProjectController::ProjectController(QObject* parent) : QObject(parent) {
+    save_runner_ = std::make_unique<JobOwnerRunner>(this);
     host_.post_next_turn = post_next_turn;
 }
 

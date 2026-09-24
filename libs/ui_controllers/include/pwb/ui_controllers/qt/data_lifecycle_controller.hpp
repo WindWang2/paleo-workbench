@@ -24,9 +24,6 @@
 
 class QWidget;
 
-namespace pwb::job {
-class JobScheduler;
-}
 namespace pwb::ui_shell {
 class OperationRegistry;
 }
@@ -37,10 +34,10 @@ namespace pwb::ui_controllers::qt {
 class DataLifecycleController : public QObject {
     Q_OBJECT
 public:
-    // `scheduler` must outlive the runners (app-lifetime).
     // `operations` may be nullptr (the verify booking then stays local).
+    // The catalog-copy/verify jobs run through JobOwnerRunners over the
+    // QGIS task bridge (process-shared gate when installed).
     explicit DataLifecycleController(
-        job::JobScheduler& scheduler,
         ui_shell::OperationRegistry* operations = nullptr,
         QObject* parent = nullptr);
     ~DataLifecycleController() override;
@@ -107,7 +104,6 @@ public slots:
     }
 
 private:
-    job::JobScheduler& scheduler_;
     ui_shell::OperationRegistry* operations_;
     std::unique_ptr<JobOwnerRunner> catalog_job_;
     std::unique_ptr<JobOwnerRunner> verify_job_;

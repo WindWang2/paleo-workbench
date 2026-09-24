@@ -1,0 +1,176 @@
+/************************************************************************
+ * This file has been generated automatically from                      *
+ *                                                                      *
+ * src/core/qgsmatrix4x4.h                                              *
+ *                                                                      *
+ * Do not edit manually ! Edit header and run scripts/sipify.py again   *
+ ************************************************************************/
+
+
+
+
+
+class QgsMatrix4x4
+{
+%Docstring(signature="appended")
+A simple 4x4 matrix implementation useful for transformation in 3D
+space.
+
+It is similar to QMatrix4x4, but working with double precision values.
+Most of the time, doing transform using QMatrix4x4 is fine, however
+:py:class:`QgsMatrix4x4` is useful in situations where single precision
+floats are not enough. For example, when using transform matrix where
+translation component has values in order of millions.
+
+.. warning::
+
+   Non-stable API, exposed to Python for unit testing only.
+
+.. versionadded:: 3.34
+%End
+
+%TypeHeaderCode
+#include "qgsmatrix4x4.h"
+%End
+  public:
+    QgsMatrix4x4();
+%Docstring
+Initializes identity matrix
+%End
+    QgsMatrix4x4(
+      double m11, double m12, double m13, double m14,
+      double m21, double m22, double m23, double m24,
+      double m31, double m32, double m33, double m34,
+      double m41, double m42, double m43, double m44
+    );
+%Docstring
+Initializes matrix by setting all values in row-major order
+%End
+
+    bool operator==( const QgsMatrix4x4 &other ) const;
+
+    bool operator!=( const QgsMatrix4x4 &other ) const;
+
+
+    bool fuzzyEqual( const QgsMatrix4x4 &other, double epsilon = 1e-8 ) const /HoldGIL/;
+%Docstring
+Performs fuzzy comparison between this matrix and ``other`` using an
+``epsilon``.
+
+.. versionadded:: 4.2
+%End
+
+    QList< double > dataList() const /PyName=data,HoldGIL/;
+%Docstring
+Returns matrix data (in column-major order)
+%End
+
+    void translate( const QgsVector3D &vector );
+%Docstring
+Multiplies this matrix by another that translates coordinates by the
+components of a ``vector``.
+%End
+
+    QgsVector3D map( const QgsVector3D &vector ) const /HoldGIL/;
+%Docstring
+Matrix-vector multiplication (vector is converted to homogeneous
+coordinates [X,Y,Z,1] and back)
+
+.. seealso:: :py:func:`mapVector`
+
+.. note::
+
+   This function is not the same as :py:func:`~QgsMatrix4x4.mapVector`.
+   For points, always use :py:func:`~QgsMatrix4x4.map`. :py:func:`~QgsMatrix4x4.mapVector` is suitable for vectors (directions) only.
+%End
+
+    QgsVector3D mapVector( const QgsVector3D &vector ) const /HoldGIL/;
+%Docstring
+Maps vector by multiplying the top 3x3 portion of this matrix by
+``vector``. The translation and projection components of this matrix are
+ignored. The matrix is applied pre-vector.
+
+:param vector: input vector to transform
+
+.. seealso:: :py:func:`map`
+
+.. versionadded:: 4.2
+%End
+
+
+    bool isIdentity() const /HoldGIL/;
+%Docstring
+Returns whether this matrix is an identity matrix
+%End
+    void setToIdentity() /HoldGIL/;
+%Docstring
+Sets matrix to be identity matrix
+%End
+
+    void scale( const QgsVector3D &vector );
+%Docstring
+Multiplies this matrix by another that scales coordinates by the
+components of a ``vector``.
+
+.. versionadded:: 4.2
+%End
+
+    void rotate( double angle, double x, double y, double z );
+%Docstring
+Multiples this matrix by another that rotates coordinates through
+``angle`` degrees about the vector (``x``, ``y``, ``z``).
+
+.. versionadded:: 4.2
+%End
+
+    void rotate( double angle, const QgsVector3D &vector );
+%Docstring
+Multiples this matrix by another that rotates coordinates through
+``angle`` degrees about ``vector``.
+
+.. versionadded:: 4.2
+%End
+
+    double determinant() const;
+%Docstring
+Returns the determinant of this matrix.
+
+.. versionadded:: 4.2
+%End
+
+    SIP_PYOBJECT __repr__();
+%MethodCode
+    QString str = QStringLiteral( "<QgsMatrix4x4(%1, %2, %3, %4, %5, %6, %7, %8, %9, %10, %11, %12, %13, %14, %15, %16)>" )
+                  .arg( sipCpp->data()[0] )
+                  .arg( sipCpp->data()[4] )
+                  .arg( sipCpp->data()[8] )
+                  .arg( sipCpp->data()[12] )
+                  .arg( sipCpp->data()[1] )
+                  .arg( sipCpp->data()[5] )
+                  .arg( sipCpp->data()[9] )
+                  .arg( sipCpp->data()[13] )
+                  .arg( sipCpp->data()[2] )
+                  .arg( sipCpp->data()[6] )
+                  .arg( sipCpp->data()[10] )
+                  .arg( sipCpp->data()[14] )
+                  .arg( sipCpp->data()[3] )
+                  .arg( sipCpp->data()[7] )
+                  .arg( sipCpp->data()[11] )
+                  .arg( sipCpp->data()[15] );
+    sipRes = PyUnicode_FromString( str.toUtf8().constData() );
+%End
+
+
+};
+
+QgsVector3D operator*( const QgsMatrix4x4 &matrix, const QgsVector3D &vector );
+QgsMatrix4x4 operator*( const QgsMatrix4x4 &m1, const QgsMatrix4x4 &m2 );
+
+
+/************************************************************************
+ * This file has been generated automatically from                      *
+ *                                                                      *
+ * src/core/qgsmatrix4x4.h                                              *
+ *                                                                      *
+ * Do not edit manually ! Edit header and run scripts/sipify.py again   *
+ ************************************************************************/

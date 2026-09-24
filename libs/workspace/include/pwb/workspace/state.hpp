@@ -58,6 +58,13 @@ struct MappingWorkspaceState {
     std::map<std::string, StageViewState> stage_states;
     std::map<std::string, LayerBinding> memberships;
     domain::Json tree = domain::Json::object();          // verbatim carrier
+    // QGIS-native persistence handoff (relative POSIX path, "" = none).
+    // Non-empty means the sibling .qgs file (QgsProject::write) is the
+    // persistence authority for the GIS tree/source/style state: to_json()
+    // then serializes `tree` as an EMPTY object (no double-write) and the
+    // open path restores structure from the QGIS project instead of this
+    // section. Bindings/stage views stay domain-persisted here.
+    std::string qgis_project_file;
     std::map<std::string, std::string> artifact_maturity;
     std::map<std::string, std::string> compilation_input_set;
     // Unknown keys at ANY level, preserved verbatim and re-emitted on

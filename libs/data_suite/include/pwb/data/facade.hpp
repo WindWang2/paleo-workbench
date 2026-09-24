@@ -39,7 +39,10 @@ struct ProjectSnapshotV1 {
     workspace::MappingWorkspaceState workspace;
     std::vector<ResourceStatusV1> resources;
     std::vector<workspace::LayerBinding> layer_bindings;
-    std::string map_qgis_project_xml;  // verbatim envelope
+    // GIS tree/source/style state lives in the sibling .qgs file named by
+    // workspace.qgis_project_file ("" = legacy project without the
+    // QGIS-native handoff). The retired inline map_qgis_project_xml
+    // envelope is gone from this snapshot.
     domain::DiagnosticList diagnostics;
     bool read_only = false;  // future schema / degraded open
     bool recovered = false;

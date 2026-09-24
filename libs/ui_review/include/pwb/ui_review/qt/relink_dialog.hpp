@@ -2,7 +2,7 @@
 
 // UI-11 — relink_dialog.py Qt shell: missing-source list + per-row /
 // folder-batch relink (fail-closed identity proof). Scan AND relink run
-// on separate JobOwners (one job per role — never torn down and reused
+// on separate PwbTaskOwners (one task per role — never torn down and reused
 // mid-session; shutdown only on close). The dialog never touches managed
 // payloads and never mutates the catalog beyond explicit relink writes.
 
@@ -14,12 +14,9 @@
 #include <memory>
 #include <vector>
 
-namespace pwb::job {
-class JobScheduler;
-}  // namespace pwb::job
-namespace pwb::job::qtbridge {
-class JobOwner;
-}  // namespace pwb::job::qtbridge
+namespace pwb::qgis_processing {
+class PwbTaskOwner;
+}  // namespace pwb::qgis_processing
 namespace pwb::ui_widgets {
 class ObjectTableModel;
 class PwbEmptyState;
@@ -40,8 +37,7 @@ class RelinkSourcesDialog : public QDialog {
 public:
     RelinkSourcesDialog(
         QWidget* parent,
-        std::function<ICatalogApi*()> service_provider,
-        std::shared_ptr<job::JobScheduler> scheduler = nullptr);
+        std::function<ICatalogApi*()> service_provider);
     ~RelinkSourcesDialog() override;
 
     // start_scan parity — stat-only missing-source scan on a worker.
@@ -78,9 +74,8 @@ private:
     void update_empty_state();
 
     std::function<ICatalogApi*()> service_provider_;
-    std::shared_ptr<job::JobScheduler> scheduler_;
-    std::unique_ptr<job::qtbridge::JobOwner> scan_job_;
-    std::unique_ptr<job::qtbridge::JobOwner> relink_job_;
+    std::unique_ptr<pwb::qgis_processing::PwbTaskOwner> scan_job_;
+    std::unique_ptr<pwb::qgis_processing::PwbTaskOwner> relink_job_;
     // Explicit busy flag instead of job->is_running() — the thread can
     // still be draining when a queued result slot fires.
     bool busy_ = false;

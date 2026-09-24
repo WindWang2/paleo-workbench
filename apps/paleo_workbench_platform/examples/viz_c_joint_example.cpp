@@ -17,17 +17,6 @@
 #include <cstdio>
 #include <memory>
 
-#if defined(Q_OS_UNIX) && defined(VIZ_C_HAVE_X11)
-#include <X11/Xlib.h>
-// Broken/absent GLX hosts die inside QOpenGLContext creation before the
-// honest GL-less degradation can report; ignore X protocol errors so the
-// context failure is soft (working-GL hosts still take the real path).
-#undef KeyPress
-#undef KeyRelease
-#undef FocusIn
-#undef FocusOut
-#undef None  // Xlib's None macro collides with enum names in pwb headers
-#endif
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -41,6 +30,34 @@
 #include <pwb/geo3d_viz/joint/segy_survey.hpp>
 #include <pwb/geo3d_viz/workspace_controller.hpp>
 #include <pwb/seismic_service/volume_service.hpp>
+
+#if defined(Q_OS_UNIX) && defined(VIZ_C_HAVE_X11)
+// LAST on purpose: X11 #defines unscoped token names (None/Success/
+// Always/Bool/Above/…) that collide with Qgis enum members pulled in by
+// the QGIS task bridge headers above (job_center.hpp → task_bridge.hpp →
+// qgis.h). Including X11 after them, then undefining the worst
+// offenders, keeps both worlds parseable for the code below.
+#include <X11/Xlib.h>
+// Broken/absent GLX hosts die inside QOpenGLContext creation before the
+// honest GL-less degradation can report; ignore X protocol errors so the
+// context failure is soft (working-GL hosts still take the real path).
+#undef KeyPress
+#undef KeyRelease
+#undef FocusIn
+#undef FocusOut
+#undef None
+#undef Success
+#undef Always
+#undef Bool
+#undef Status
+#undef True
+#undef False
+#undef Above
+#undef Below
+#undef Left
+#undef Right
+#undef Over
+#endif
 
 namespace fs = std::filesystem;
 using pwb::geo3d_viz::Geo3DViewportWidget;
@@ -99,11 +116,11 @@ int main(int argc, char** argv) {
     Geo3DWorkspaceController controller(
         [&viewport]() { return &viewport.scene_manager(); });
     controller.set_viewport(&viewport);
-    // Destruction order (review C): JobOwner is dual-owned (JobCenter
-    // unique_ptr + QObject parent on the host), so the JobCenter must be
-    // destroyed BEFORE the host — the unique_ptr declaration order below
-    // reproduces the MainWindow member ordering (job_center_ declared
-    // last, destroyed first).
+    // Destruction order (review C): the task owner is dual-owned
+    // (JobCenter unique_ptr + QObject parent on the host), so the
+    // JobCenter must be destroyed BEFORE the host — the unique_ptr
+    // declaration order below reproduces the MainWindow member ordering
+    // (job_center_ declared last, destroyed first).
     std::unique_ptr<pwb::app::viz_c::VizCJointHost> host;
     auto job_center = std::make_unique<pwb::app::JobCenter>();
     host = std::make_unique<pwb::app::viz_c::VizCJointHost>(

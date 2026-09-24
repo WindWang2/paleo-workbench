@@ -415,7 +415,7 @@ private:
     pwb::ui_review::qt::ReviewExportPage* review_page_ = nullptr;
     pwb::ui_seqviz::qt::VisualizationPage* visualization_page_ = nullptr;
     // #1455: the adopted preparation page must be reachable at shutdown —
-    // its WorkerHost (factor prepare / contour draft) joins through
+    // its worker lanes (factor prepare / contour draft) join through
     // shutdown_workers() like every other page-owned worker.
     pwb::ui_pages_data::qt::PreparationPage* preparation_page_ = nullptr;
 };

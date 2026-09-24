@@ -6,7 +6,7 @@ target_compile_features(ui_seqviz.core_state PRIVATE cxx_std_20)
 target_include_directories(ui_seqviz.core_state PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ui_seqviz.core_state PRIVATE
-    Pwb::UiSeqviz Pwb::Domain Pwb::UiWorkers Pwb::JobRuntime
+    Pwb::UiSeqviz Pwb::Domain Pwb::UiWorkers Pwb::JobContracts
     Pwb::MappingDocument Pwb::WellScience Pwb::UiDataCore)
 add_test(NAME ui_seqviz.core_state COMMAND ui_seqviz.core_state)
 set_tests_properties(ui_seqviz.core_state PROPERTIES TIMEOUT 120)
@@ -27,19 +27,4 @@ if(TARGET pwb_ui_seqviz_qt)
         # UiShellQt); prepend so libodbc/libcryptopp etc. resolve.
         ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}")
 
-    # 08-line closure — the previously-never-compiled composition panel
-    # driving the real mapping_document session (undo/redo/schema/series).
-    # QSignalSpy lives in Qt6::Test — not part of the platform component list.
-    find_package(Qt6 COMPONENTS Test)
-    add_executable(ui_seqviz.composition_panel composition_panel_test.cpp)
-    target_compile_features(ui_seqviz.composition_panel PRIVATE cxx_std_20)
-    set_target_properties(ui_seqviz.composition_panel PROPERTIES AUTOMOC ON)
-    target_link_libraries(ui_seqviz.composition_panel PRIVATE
-        Pwb::UiSeqvizQt Pwb::UiShellQt Qt6::Widgets Qt6::Test)
-    add_test(NAME ui_seqviz.composition_panel
-             COMMAND ui_seqviz.composition_panel)
-    set_tests_properties(ui_seqviz.composition_panel PROPERTIES
-        TIMEOUT 180
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-        ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}")
 endif()
