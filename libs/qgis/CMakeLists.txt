@@ -61,6 +61,17 @@ if(TARGET Pwb::MappingDocument)
     target_link_libraries(pwb_qgis PUBLIC Pwb::MappingDocument)
 endif()
 # END qgis-native-layout-convergence
+# BEGIN CONV-29
+# Composition/Layout/Export kernel wiring: the layout authority and export
+# service live in this target (Pwb::Qgis layout_*); the kernel lib joins
+# the product link closure through this PUBLIC link so pwb-platform picks
+# it up transitively (the retired CompositionLayoutService +
+# layout_spec_exec.cpp vendored-TU chain is gone — the bridge compiles
+# layout_spec_exec itself).
+if(PWB_BUILD_CONV_29)
+    target_link_libraries(pwb_qgis PUBLIC Pwb::LayoutExport)
+endif()
+# END CONV-29
 # Vendored prefix path baked at build time (SDK admission owns the value).
 target_compile_definitions(pwb_qgis PRIVATE
     PALEO_QGIS_PREFIX_PATH="${PALEO_QGIS_SDK_DIR}")
