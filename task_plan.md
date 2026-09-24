@@ -1,56 +1,43 @@
-# Task Plan — Prompt 6: QGIS Native Plot / Scientific 2D Visualization Convergence
+# Task Plan — ws0 数据治理闭环（link_well / set_role / tags / impact / trash）
 
 ## Goal (Oracle)
 
-产品内交互式二维 Plot 基础设施收敛到 `QgsPlotCanvas` / `QgsPlot` / `QgsPlotTool` / `QgsPlotRegistry`（QGIS 4.2 vendored SDK）。Paleo 只保留领域语义、数据绑定、计算、provenance。
+在最新 origin/main（c5b95f5e6）上把 ws0 五个 disabled 命令变为真实治理闭环：
+资产↔井关联、角色编辑、标签、下游影响分析、软删除回收站——全部走既有持久化权威
+（links/role → 项目 JSON via WritableSession；tags/trash → catalog.sqlite via
+CatalogClosureAdapter），写后真实刷新、reopen 一致、RAW 不可变、失败可见。
 
-**Verifiable DoD（本 session 可达子集标记 ✓session）:**
-1. ✓ 交互式 2D plot 统一走 `QgsPlotCanvas`（新 infra + 至少 3 类代表页面迁移）
-2. ✓ ≥3 类代表页面迁移：统计/QC 图 + 交会/散点图 + 测井/曲线页
-3. ✓ 通用 plot toolbar/tool 走 QGIS PlotTool，不自研双轨
-4. map ↔ plot ↔ data selection 联动 seam 建立
-5. 自研 generic plot canvas/chart engine 数量显著下降（有替代矩阵数字）
-6. plot 数据绑定/domain id 回查/style/export 路径统一
-7. 架构 gate：新页面不得新增第二套 plot 基础设施（lint 脚本或文档 gate）
-8. 生命周期：开关项目/面板无 UAF（测试覆盖）
-9. 性能测试：大样本散点/多序列无 O(N²) 重绘路径
-10. build/test `-j <= 6`（常态 -j4）
-11. 两轮 review，P0/P1 = 0
-12. branch push + PR 创建（不 merge）
+## DoD（全部满足才算完成）
 
-## Baseline
+1. 五命令 register_disabled → register_real，applicability 动态（project/selection）。
+2. link/unlink/set_role 写入 `.paleo.json` entity_asset_links（单链接删除与角色编辑内核新增）。
+3. tags 走 TagStore（正规化复用 catalog::normalize_tag_name），过滤（and/or）接入资产表，标签候选随行集刷新。
+4. impact 复用 delete_impact_summary，进 DataLineagePanel 第三页签（两实例/底签同步）。
+5. trash 走 trash_asset/restore_asset；软删保留 entity_asset_links；回收站对话框可查看+恢复；破坏性操作显式确认 + impact 预检；decision seam 可注入供测试。
+6. 治理状态 reopen 一致（save→close→reopen 测试）；RAW payload 不被治理动作改写（软删只搬目录不改内容）。
+7. headless core tests + Qt offscreen tests + 100k scale smoke 全绿（经资源门 -j2）。
+8. 两轮独立 review（A：数据一致性；B：UI/性能/错误路径）无新 P0/P1/P2 actionable finding。
+9. PR 已创建（base/head SHA、disabled→real 清单、数据模型、RAW 保证、性能证据、本地测试、未执行项、overlap 分析、residual risks）。
 
-- origin/main SHA: `192422c60c4eb99ee78a6a410676293ca09053cc`
-- Worktree: `/home/kevin/projects/paleo-qgis-plot`
-- Branch: `feat/qgis-native-plot-scientific-visualization`
-- QGIS: vendored 4.2.0 source `third_party/qgis`; prebuilt SDK 复用自 main worktree `native/qgis_render_bridge/build/qgis-vendor/output`（只读）
-- Qt: system Qt6 (`/usr`), Ninja, Release
-- Build dir: `build/native-product`（本 worktree 独立）
-- deps prefix: `/home/kevin/projects/paleo_project/main/build/qgis-deps-prefix`
+## 实施步骤（commit 划分）
 
-## Phases
+1. **commit 1 — domain kernel**：`libs/data_suite` entity_identity 新增
+   `remove_entity_asset_link` / `set_link_role`；facade snapshot 增 tags 携带；
+   `AssetSelectionBus::republish_current()`。
+2. **commit 2 — governance service**：`apps/.../data_governance_service.{hpp,cpp}`
+   （links via WritableSession；tags/trash via 短生命周期 adapter；读取函数）。
+3. **commit 3 — dialogs/panel**：`data_governance_dialogs.{hpp,cpp}`
+   （LinkWellDialog/SetRoleDialog/TagsDialog/TrashDialog + impact 确认）；
+   DataLineagePanel 第三页签（影响分析）+ m5 reparent 同步。
+4. **commit 4 — workspace wiring**：closure_preview_adapters 填 tags/role 列；
+   `data_governance_install.cpp`（tag 过滤/候选/管理、remove→trash 流、多选跟踪、
+   filter_fn 扩展 tags/role/trash）；从 closure_preview_install 一行接入。
+5. **commit 5 — ribbon wiring**：五命令 disabled → real（最小 diff）。
+6. **commit 6 — tests/docs**：tests/cpp/data/governance_ops_test.cpp、
+   governance_scale_test.cpp；tests/cpp/platform/test_data_governance.cpp；
+   findings/task_plan/progress/acceptance 更新。
 
-| Phase | 内容 | 状态 |
-|-------|------|------|
-| 0 | 审计 + 11 份文档 (`docs/development/qgis-native-plot-convergence/`) | done |
-| 1 | `libs/qgis_plot` infra: `PwbPlotCanvas`(QgsPlotCanvas 子类) + plot item + tool 装配 | done |
-| 2 | Wave A 迁移：XyScatterHost(散点) + ComparisonView(QC) + TimeDepth/WellLog(曲线) | done |
-| 3 | 统一 plot toolbar/actions（QGIS tool + QAction 绑定） | done (PwbPlotPanel) |
-| 4 | domain binding 约定（series_id → domain_object_id 回查） | done (SeriesBinding) |
-| 5 | map ↔ plot selection seam（不抢 Prompt 2 的 map truth） | deferred → Wave B（无现役 map↔plot 消费点） |
-| 7 | 退役被替代的 generic plot widget（wave A 范围） | done (plot_widget/cross_plot_widget/qt series.hpp) |
-| 8 | 测试：unit + integration + interaction + scale | done (smoke 30/30)；pa_flow/preview 回归进行中 |
-| - | review 2 轮 + 修复 + PR | R1 内置自查+R2 双轴 subagent 完成、修复完；全量构建+回归进行中 |
+## 明确不做
 
-## 边界（与其他 5 条 worktree）
-
-- 拥有：`QgsPlotCanvas` 派生、scientific 2D plots、plot tools、map↔plot 联动 seam
-- 不碰：main_window 装配（Prompt 1）、QgsMapCanvas/layer tree（Prompt 2）、project/data core（Prompt 3）、Processing/Task core（Prompt 4）、QgsLayout core（Prompt 5）
-- 跨边界只允许具名 seam，PR 中标注
-
-## 风险 / 待决
-
-- `QgsPlotCanvas` 是框架基类（虚函数默认空实现），需 `PwbPlotCanvas` 子类实现 plot-space↔canvas 映射 —— 官方模式（QgsElevationProfileCanvas）
-- QgsPlot 体系无 histogram/scatter/legend 专用 item —— 需 Paleo-specific thin adapter（允许）
-- well-log-engine 子模块边界待审计（subagent 进行中）
-- main worktree 有 ~94 个未提交改动（另一 session 在飞），可能与本方向文件重叠 —— 记录于 overlap ledger
+- 不新建平行 metadata DB；不接自动物理 purge；不改 #1492 冻结的表格/工具条外观
+  （只接既有信号/候选 seam）；不动旧栈（ui_controllers）行为；不做 100G 地震体专项。
