@@ -174,7 +174,6 @@
 #endif
 #ifdef PWB_WITH_APP_SHELL
 #include "app_shell.hpp"
-#include "data_management_page.hpp"
 #include "workspace_compose.hpp"
 #include "ribbon_command_install.hpp"
 #include "m5_validation_install.hpp"
@@ -195,7 +194,6 @@
 // M2 (UI-18) — the ribbon chrome: QAT binds the governed ToolActionSet
 // save/undo/redo actions (the SAME QAction objects the menus/shortcuts
 // reuse — D4, no parallel actions).
-#include <pwb/ui_ribbon/ribbon_spec.hpp>
 #include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
 // cpp-close-12 — palette tool-details come from the canonical explain()
 // formatter (UI-12 domain); no second state table in this shell.
@@ -631,15 +629,47 @@ void MainWindow::buildUi() {
     // (session canvas, validation compare canvas, mapping-page previews);
     // lookups by type+order are fragile, the session canvas is named.
     canvas_->setObjectName(QStringLiteral("session-map-canvas"));
+#ifdef PWB_WITH_GEO3D_VIZ
+    // 06 closure: the Geo3D dock (and its joint host) must exist BEFORE
+    // the AppShell builds its pages — the joint page receives the real
+    // host at construction (widget vs placeholder is a ctor decision).
+    // The JobCenter property lives on the DOCK because that is where
+    // Geo3DDock::joint_host() reads it (previously set on the window,
+    // which the dock never saw — the product host could not be created).
+    geo3d_dock_ = new Geo3DDock(this);
+  #ifdef PWB_WITH_CONV_30
+    geo3d_dock_->setProperty(
+        "pwb_job_center",
+        QVariant::fromValue(static_cast<pwb::app::JobCenter*>(
+            job_center_.get())));
+  #endif
+#endif
 #ifdef PWB_WITH_APP_SHELL
-    // QGIS-native two-page frame: the shell hosts 数据管理 + 编图 pages;
-    // the session canvas is the authoring page's central canvas (same
-    // widget, reparented — the session's attachCanvas pointer stays
-    // valid). 功能面板（Geo3D/地震/测井/验证…）全部退役出界面 —— 代码
-    // 保留在项目内但不再实例化进壳层。
-    app_shell_ = new AppShell(this);
+    // W5/UI-17 — the page-navigation shell hosts the composite document;
+    // the session canvas is its central canvas (same widget, reparented —
+    // the session's attachCanvas pointer stays valid).
+    // 注入 shell 的体数据服务指针（reduced build 无该服务 —— 传空，
+    // 页面保持诚实未绑定；类型只需前置声明，见文件头）。
+    pwb::seismic_service::SeismicVolumeService* const shell_volume_service =
+#if defined(PWB_WITH_SEISMIC_SERVICE) && defined(PWB_WITH_DATA_INTEGRATION)
+        seismic_volume_service_.get();
+#else
+        nullptr;
+#endif
+#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+    app_shell_ = new AppShell(this, geo3d_dock_->joint_host(),
+                              shell_volume_service);
+#else
+    app_shell_ = new AppShell(this, nullptr, shell_volume_service);
+#endif
     app_shell_->install_canvas(canvas_);
     setCentralWidget(app_shell_);
+// BEGIN CLOSURE-REVIEW
+#ifdef PWB_WITH_CLOSURE_REVIEW
+    pwb::app::closure_review::install_review_actions(app_shell_,
+                                                     &context_);
+#endif
+// END CLOSURE-REVIEW
 #else
     setCentralWidget(canvas_);
 #endif
@@ -664,12 +694,12 @@ void MainWindow::buildUi() {
     tree_ = context_.session().map().createLayerTree(dock);
     dock->setWidget(tree_);
 #endif
-#ifdef PWB_WITH_APP_SHELL
-    // QGIS idiom: the layer tree dock lives in the 编图 page's own dock
-    // area (the page is an inner QMainWindow), not the outer window.
-    app_shell_->adopt_layer_tree_dock(dock);
-#else
     addDockWidget(Qt::LeftDockWidgetArea, dock);
+#if defined(PWB_WITH_APP_SHELL) && defined(PWB_WITH_CONV_27)
+    // The native QgsLayerTreeView dock is adopted into the workstation
+    // host directly — the retired prototype LayerManagerPanel (and its
+    // dead active_layer bridge) no longer exists.
+    app_shell_->adopt_layer_tree_dock(dock);
 #endif
 #ifdef PWB_WITH_QGIS_BROWSER
     // QGIS-native generic data browser (data-management convergence seam;
@@ -686,13 +716,183 @@ void MainWindow::buildUi() {
     statusBar()->addPermanentWidget(cursor_label_);
 #endif
 
-// 界面框架收敛（QGIS-native 两页壳）：因子统计 / Geo3D / 连井 / 测井 /
-// 地震等窗口级功能 dock 一律不再实例化进界面 —— 功能代码保留在项目
-// 内（成员保持 nullptr，消费方全部带空保护）。
+#ifdef PWB_WITH_CONV_16
+    // conv-16: read-only factor statistics HUD (FactorGrid.statistics).
+    factor_dock_ = new FactorStatsDock(this);
+    addDockWidget(Qt::RightDockWidgetArea, factor_dock_);
+#endif
 
-// 界面框架收敛：测井/地震/连井/Geo3D/联合分析等窗口级功能 dock
-// 一律不实例化（成员保持 nullptr，消费方均带空保护或已跳过）。
-// 功能代码保留在项目内，不进界面。
+// BEGIN CONV-GEO3D
+#ifdef PWB_WITH_GEO3D_VIZ
+    // The dock itself was created at the top of buildUi (06 closure: it
+    // must precede the AppShell so the joint page receives the real
+    // host). Only the dock placement and its 2D-map seam stay here.
+    addDockWidget(Qt::RightDockWidgetArea, geo3d_dock_);
+    connect(geo3d_dock_, &Geo3DDock::well_selected, this,
+            [this](const QString& well) {
+                statusBar()->showMessage(tr("3D 选中井: %1").arg(well), 5000);
+            });
+#endif
+// END CONV-GEO3D
+
+// BEGIN VIZ-B
+#ifdef PWB_WITH_VIZ_B
+    // Cross-well correlation & well-tie dock (line B): section canvas +
+    // DTW propagation through the JobCenter + link editor/export
+    // bindings + sidecar persistence. All logic lives in the dock.
+    viz_b_dock_ = new pwb::app::VizBCrossWellDock(
+        job_center_.get(), this);
+    viz_b_dock_->setObjectName(QStringLiteral("viz-b-cross-well-dock"));
+    addDockWidget(Qt::RightDockWidgetArea, viz_b_dock_);
+    connect(viz_b_dock_, &pwb::app::VizBCrossWellDock::status_message,
+            this, [this](const QString& message) {
+                statusBar()->showMessage(message, 5000);
+            });
+#endif
+// END VIZ-B
+
+#ifdef PWB_WITH_WELL_LOG
+    // C's WLE-backed well-log host in a dock (same Qt ABI, one process;
+    // no Python). Same-session ownership: dies with the window.
+    auto* well_log_dock = new QDockWidget(tr("测井"), this);
+    well_log_dock->setObjectName(QStringLiteral("well-log-dock"));
+    auto* well_log_host = new pwb::viz::WellLogHostWidget(well_log_dock);
+    well_log_dock->setWidget(well_log_host);
+    addDockWidget(Qt::RightDockWidgetArea, well_log_dock);
+// BEGIN PWB-V14-THREE-STAGE — selection-bus sink target (dock raise).
+#ifdef PWB_WITH_STAGE_FLOW
+    stage_flow_well_log_dock_ = well_log_dock;
+#endif
+// END PWB-V14-THREE-STAGE
+
+    // Native track settings (this branch): layout/template/export panel
+    // bound to the host; interpretation events surface in the status bar.
+    auto* track_panel_dock = new QDockWidget(tr("测井轨道"), this);
+    track_panel_dock->setObjectName(QStringLiteral("well-log-track-panel"));
+    auto* track_panel = new WellLogTrackPanel(track_panel_dock);
+    track_panel_dock->setWidget(track_panel);
+    addDockWidget(Qt::RightDockWidgetArea, track_panel_dock);
+    track_panel->bind(well_log_host);
+    well_log_host->set_cursor_callback(
+        [this](const pwb::viz::WellLogCursorEvent& event) {
+            if (!event.valid) {
+                cursor_label_->hide();
+                return;
+            }
+            cursor_label_->setText(tr("深度 %1 %2")
+                                       .arg(event.depth)
+                                       .arg(QString::fromStdString(event.unit)));
+            cursor_label_->show();
+        });
+    well_log_host->set_interpretation_callback(
+        [this](const pwb::viz::WellLogInterpretationEvent& event) {
+            const QString label = QString::fromStdString(event.label);
+            // Transient message, NOT status_label_: the persistent label
+            // is rewritten by every refreshActionStates pass (工具可用
+            // N/M), which used to erase the readout within a tick
+            // (#1451).
+            QString text;
+            if (event.kind ==
+                pwb::viz::WellLogInterpretationEvent::Kind::marker_hit) {
+                text = tr("地层顶部: %1 @ %2").arg(label).arg(event.top);
+            } else {
+                text = tr("相带证据: %1 [%2, %3] %4")
+                           .arg(label)
+                           .arg(event.top)
+                           .arg(event.bottom)
+                           .arg(QString::fromStdString(event.unit));
+            }
+            statusBar()->showMessage(text, 6000);
+        });
+#if defined(PWB_WITH_VIZ_A) && defined(PWB_WITH_CONV_30)
+    // BEGIN VIZ-A — production wiring (preview provider + background LAS
+    // loads through the JobCenter). One call; the body lives in
+    // viz_a_install.cpp.
+    viz_a::install(this, job_center_.get());
+#endif
+    // END VIZ-A
+#endif
+// BEGIN 05 — well/time-depth external presenters into the viz-e data page
+// registry (05→04 contract; body lives in well_presenter_install.cpp).
+#if defined(PWB_WITH_WELL_PRESENTERS)
+    if (!well_presenters::install()) {
+        qWarning() << "well presenters: duplicate kind registration "
+                      "(wiring bug — first registration kept)";
+    }
+#endif
+// END 05
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+    // D's slice host in a dock (moc-free widget like the WLE host).
+    seismic_dock_ = new QDockWidget(tr("地震视图"), this);
+    seismic_dock_->setObjectName(QStringLiteral("seismic-dock"));
+    slice_widget_ = new pwb::seismic_viewer::SeismicSliceWidget(seismic_dock_);
+    seismic_dock_->setWidget(slice_widget_);
+    addDockWidget(Qt::RightDockWidgetArea, seismic_dock_);
+#endif
+// BEGIN VIZ-D — remember the advanced-display host for the menu install
+// (the widget itself owns the VD/wiggle/polarity/clip/pick machinery).
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+    viz_d_seismic_host_ = slice_widget_;
+#endif
+// END VIZ-D
+
+    // BEGIN VIZ-E — data page dock (asset selection → preview/chart →
+    // export loop; the page composes ui_pages_data + viz_charts hosts).
+#if defined(PWB_WITH_VIZ_E) && defined(PWB_WITH_CONV_30)
+    // BEGIN CLOSURE-PREVIEW (task 04) — one data page per window: with the
+    // AppShell the composed page ADOPTS the hub's management workspace
+    // (the dock was the duplicate selection entry); the reduced shell
+    // keeps the dock mount.
+#  if defined(PWB_WITH_CLOSURE_PREVIEW) && defined(PWB_WITH_APP_SHELL)
+    closure_preview::install(
+        pwb::closure_preview::Install{
+            this, app_shell_, job_center_.get(),
+            [this]() -> std::shared_ptr<pwb::application::PwbDataStore> {
+                return context_.projectStore();
+            }});
+#  else
+    viz_e_data_dock_ =
+        pwb::viz_e::install_data_dock(this, job_center_.get());
+#  endif
+    // END CLOSURE-PREVIEW
+#endif
+    // END VIZ-E
+// BEGIN JOINT-ANALYSIS (geoviz final closure) — the 井震联合 3D page's
+// analysis hooks (stratal demo/.dat, RGB fusion overlay, crossplot,
+// FLAC3D/Abaqus export, advisor, joint-analysis sidecar persistence).
+// Every kernel already existed natively; this is the product wiring the
+// empty-hook fallbacks ("未接入") were waiting for.
+#ifdef PWB_WITH_JOINT_ANALYSIS
+    if (geo3d_dock_ != nullptr && app_shell_ != nullptr &&
+        app_shell_->geomodel_page() != nullptr && job_center_ != nullptr) {
+        pwb::app::joint_analysis::JointAnalysisInstall joint_deps;
+        joint_deps.page = app_shell_->geomodel_page();
+        joint_deps.host = geo3d_dock_->joint_host();
+        joint_deps.scene_objects =
+            &geo3d_dock_->viewport()->scene_manager();
+        joint_deps.jobs = job_center_.get();
+        joint_deps.dialog_parent = this;
+        joint_deps.project_directory = [this] {
+            return joint_project_directory_;
+        };
+        joint_deps.project_document = [this] {
+            const auto store = context_.projectStore();
+            return store ? store->document().root() : pwb::domain::Json::object();
+        };
+#ifdef PWB_WITH_VIZ_B
+        // Real LAS curves for the joint auto-tie (copied on the GUI
+        // thread by the hook before the tie job starts). Without VIZ-B
+        // the hook keeps its honest "no logs" refusal.
+        joint_deps.well_logs = [this] {
+            return viz_b_dock_ != nullptr
+                       ? viz_b_dock_->well_columns()
+                       : std::vector<pwb::viz::cross_well::WellColumnData>{};
+        };
+#endif
+        pwb::app::joint_analysis::install(joint_deps);
+    }
+#endif
+// END JOINT-ANALYSIS
 
     // Tools are canvas-parented; MapSession teardown unsets them first.
     pan_tool_ = new QgsMapToolPan(canvas_);
@@ -731,9 +931,54 @@ void MainWindow::buildUi() {
 #ifdef PWB_WITH_APP_SHELL
     wire_app_shell();
 #endif
-// 界面框架收敛：closure_mapping / stage_flow / workflow_wiring /
-// workspace_compose 等功能安装器一律不接线 —— 代码保留在项目内，
-// 界面不实例化其面板。
+// BEGIN CLOSURE-MAPPING — 08-line product install (mapping-page adopt set
+// + preparation page + document bank). Requires the AppShell composition.
+#ifdef PWB_WITH_CLOSURE_MAPPING
+    if (app_shell_ != nullptr) {
+        pwb::app::closure_mapping::Install closure_install;
+        closure_install.window = this;
+        closure_install.shell = app_shell_;
+        closure_install.jobs = job_center_.get();
+        closure_install.store_getter = [this]()
+            -> std::shared_ptr<pwb::application::PwbDataStore> {
+            return context_.projectStore();
+        };
+        closure_install.export_layout_dialog =
+            [this](QgsPrintLayout* layout) { export_layout_dialog(layout); };
+        pwb::app::closure_mapping::install(closure_install);
+    }
+#endif
+// END CLOSURE-MAPPING
+// BEGIN PWB-V14-THREE-STAGE — three-stage workbench install: stage bar
+// mount + controller seams + production commands + task-center
+// providers + selection bus. Last so every adopted surface exists.
+#ifdef PWB_WITH_STAGE_FLOW
+    installStageFlow();
+#endif
+// END PWB-V14-THREE-STAGE
+// BEGIN UI-14 WORKFLOW-WIRING — the composition root: WorkflowController
+// with every seam bound to the real services/pages + the per-project
+// catalog closure + stage-action/shelf routing. Last: it consumes the
+// preparation page, document bank and factor grid store the mapping
+// closure installed.
+#ifdef PWB_WITH_WORKFLOW_WIRING
+    if (app_shell_ != nullptr && job_center_ != nullptr) {
+        pwb::app::workflow_wiring::install(
+            this, app_shell_, &context_, job_center_.get());
+    }
+#endif
+// END UI-14 WORKFLOW-WIRING
+// BEGIN UI-18 M3 — five-workspace composition (P0): fills the science-host
+// per-stage bottom stack (ws1 两联 / ws2 连井+制备 / ws3 参考带) and the
+// validation page pane. After every closure install so every adopted
+// surface exists; per-slice guards keep reduced builds honest.
+#ifdef PWB_WITH_APP_SHELL
+    if (app_shell_ != nullptr) {
+        workspace_compose::compose({this, app_shell_, &context_,
+                                    job_center_.get()});
+    }
+#endif
+// END UI-18 M3
 // BEGIN UI-18 M4 — the ribbon command band: 58 placeholder ids become real
 // CommandRegistry commands (or honest disabled entries), then the ribbon
 // binds governed QActions + the session-aware evaluator.
@@ -745,7 +990,28 @@ void MainWindow::buildUi() {
     }
 #endif
 // END UI-18 M4
-// 界面框架收敛：M5 验证/版式/数据装配安装器同样不接线。
+// BEGIN UI-18 M5 — the validation workspace gaps: 解释 vs 预测对比视图 +
+// 问题级人工复核状态机 (compiled where ClosureReview is linked).
+#if defined(PWB_WITH_M5_VALIDATION)
+    if (app_shell_ != nullptr) {
+        m5_validation::install({this, app_shell_, &context_});
+    }
+#endif
+// END UI-18 M5
+// BEGIN UI-18 M5-2 — 版式轻量页 + 上下文 Ribbon 组（编图切片构建）。
+#if defined(PWB_WITH_CLOSURE_MAPPING)
+    if (app_shell_ != nullptr) {
+        m5_compose::install({this, app_shell_, &context_});
+    }
+#endif
+// END UI-18 M5-2
+// BEGIN UI-18 M5-3 — 数据管理属性/血缘装配 + hub 轴解散（页面住进工作区）。
+#ifdef PWB_WITH_APP_SHELL
+    if (app_shell_ != nullptr) {
+        m5_data::install({this, app_shell_, &context_});
+    }
+#endif
+// END UI-18 M5-3
 #ifdef PWB_WITH_APP_SHELL
     if (app_shell_ != nullptr) {
         // qt_ribbon_native parity: the AppShell's own dock surfaces
@@ -799,12 +1065,23 @@ void MainWindow::wire_app_shell() {
     connect(app_shell_, &AppShell::exit_requested, this,
             [this] { close(); });
 
-#ifdef PWB_WITH_CONV_27
-    // 编图模式写路径（两页壳层）：mode.* 命令 → 唯一 stage 权威
-    // applyStageValue（原 stage_flow 的 seam 角色，框架收敛后直绑）。
-    app_shell_->set_stage_apply(
-        [this](const std::string& value) { applyStageValue(value); });
+// BEGIN CLOSURE-SCIENCE (line 03) — production science/prediction page
+// binding: the well-log + seismic prediction pages receive the
+// catalog-backed inference hooks (real ONNX runtime, catalog runs +
+// result versions, task journal, project-identity guard). Parented to the
+// shell — no AppShell member changes. Lease: 03-line.json
+// named_block_leases; assembled under PWB_BUILD_CLOSURE_SCIENCE by 12.
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+    pwb::closure_science::qt::attach_prediction_pages(
+        *app_shell_->well_log_page(), *app_shell_->seismic_page(),
+        [this]() -> std::filesystem::path {
+            auto store = context_.projectStore();
+            if (store == nullptr) return std::filesystem::path();
+            return store->project_file();
+        },
+        app_shell_);
 #endif
+// END CLOSURE-SCIENCE
 
     connect(app_shell_, &AppShell::status_message, this,
             [this](const QString& message) {
@@ -2130,10 +2407,6 @@ QString MainWindow::openProject(const QString& project_file) {
                                                            &context_);
 #endif
 // END CLOSURE-REVIEW
-#ifdef PWB_WITH_APP_SHELL
-    // 数据管理页：重推目录快照（列表 + 详情）。
-    sync_data_page();
-#endif
     return QString();
 }
 #endif  // PWB_WITH_DATA_INTEGRATION (openProject definition)
@@ -2235,67 +2508,9 @@ QString MainWindow::closeProject() {
     refresh_readiness();
 #endif
     statusBar()->showMessage(tr("工程已关闭"), 8000);
-#ifdef PWB_WITH_APP_SHELL
-    sync_data_page();
-#endif
     return QString();
 }
 #endif  // PWB_WITH_DATA_INTEGRATION (closeProject definition)
-
-#ifdef PWB_WITH_APP_SHELL
-void MainWindow::sync_data_page() {
-    if (app_shell_ == nullptr) return;
-    QVector<DataEntry> entries;
-    const auto store = context_.projectStore();
-    if (store != nullptr) {
-        auto snapshot = store->snapshot();
-        if (snapshot.is_ok()) {
-            const auto& snap = snapshot.value();
-            for (const auto& asset : snap.catalog_assets) {
-                if (asset.trashed) continue;
-                DataEntry entry;
-                entry.name = QString::fromStdString(
-                    asset.name.empty() ? asset.id.str() : asset.name);
-                entry.kind = QString::fromStdString(asset.type);
-                entry.location = QString::fromStdString(asset.id.str());
-                QString detail = QStringLiteral(
-                    "<b>%1</b><br/>资产 ID：%2<br/>类型：%3<br/>"
-                    "创建：%4<br/>更新：%5")
-                    .arg(entry.name.toHtmlEscaped(),
-                         QString::fromStdString(asset.id.str())
-                             .toHtmlEscaped(),
-                         entry.kind.toHtmlEscaped(),
-                         QString::fromStdString(asset.created_at)
-                             .toHtmlEscaped(),
-                         QString::fromStdString(asset.updated_at)
-                             .toHtmlEscaped());
-                // 版本行并入详情（catalog_versions.asset_id → 资产）。
-                for (const auto& version : snap.catalog_versions) {
-                    if (version.asset_id.str() != asset.id.str()) continue;
-                    detail += QStringLiteral(
-                        "<br/>&nbsp;&nbsp;版本 %1：%2 · %3 · %4")
-                        .arg(version.version_number)
-                        .arg(QString::fromStdString(version.format)
-                                 .toHtmlEscaped(),
-                             QString::fromStdString(version.path)
-                                 .toHtmlEscaped(),
-                             QString::fromStdString(version.created_at)
-                                 .toHtmlEscaped());
-                }
-                if (!asset.description.empty()) {
-                    detail += QStringLiteral("<br/>描述：%1")
-                                  .arg(QString::fromStdString(
-                                           asset.description)
-                                           .toHtmlEscaped());
-                }
-                entry.detail = detail;
-                entries.push_back(std::move(entry));
-            }
-        }
-    }
-    app_shell_->set_data_entries(entries);
-}
-#endif  // PWB_WITH_APP_SHELL (sync_data_page)
 
 void MainWindow::armPan() {
     canvas_->setMapTool(pan_tool_);
@@ -3492,11 +3707,6 @@ QString MainWindow::openVolumeVersion(const std::string& version_id) {
         }
         const std::filesystem::path payload_path =
             project_dir / version.path;
-        // 界面框架收敛：地震视图 dock 已退役出界面 —— 体版本仍可读，
-        // 但无显示宿主时诚实报告，不解引用空指针。
-        if (slice_widget_ == nullptr || seismic_dock_ == nullptr) {
-            return tr("地震视图界面未启用（两页壳层不含该面板）");
-        }
 #if defined(PWB_WITH_SEISMIC_SERVICE)
         // Native tiled service: metadata-only inspect, samples stream in
         // through the tile cache — no full-volume copy.
@@ -4328,9 +4538,35 @@ bool facies_polygon_role(const std::string& role) {
 }  // namespace
 
 void MainWindow::install_conv27_surface() {
-    // 界面框架收敛：StageDock / ConstraintPanel 等域面板不实例化（成员
-    // 保持 nullptr，消费方均带空保护）；编图页即原版 QGIS 工作区，
-    // stage 权威仍由 Ribbon 模式 toggle / 会话写入。
+    // Stage dock: three-stage workflow switcher + readiness checklist.
+    stage_dock_ = new pwb::ui::StageDock(this);
+    addDockWidget(Qt::LeftDockWidgetArea, stage_dock_);
+    connect(stage_dock_, &pwb::ui::StageDock::stage_change_requested, this,
+            [this](const QString& value) {
+                applyStageValue(value.toStdString());
+            });
+
+    // Constraint stage summary panel (read-side navigation).
+    constraint_dock_ = new pwb::ui::ConstraintPanel(
+        [this](const std::string& id) {
+            const auto it = facts_.find(id);
+            return it == facts_.end()
+                ? std::optional<pwb::application::DomainLayerFacts>{}
+                : std::optional<pwb::application::DomainLayerFacts>(
+                      it->second);
+        }, this);
+    addDockWidget(Qt::RightDockWidgetArea, constraint_dock_);
+    connect(constraint_dock_, &pwb::ui::ConstraintPanel::activate_layer_requested,
+            this, [this](const QString& layer_id) {
+                const auto it = facts_.find(layer_id.toStdString());
+                if (it == facts_.end()) return;
+                context_.session().set_active_layer(it->second);
+                if (layer_panel_ != nullptr) {
+                    layer_panel_->set_active_layer(it->first);
+                }
+                refreshActionStates();
+            });
+
     // Edit tools: QGIS select + digitize, applied through the one edit
     // authority.
     edit_tools_ = new pwb::ui::EditToolController(canvas_, &context_.session(),
@@ -4432,23 +4668,6 @@ void MainWindow::applyStageValue(const std::string& value) {
     }
 // END V14-QGIS-CONTROL
     if (stage_dock_ != nullptr) stage_dock_->set_current_stage(*stage);
-#ifdef PWB_WITH_APP_SHELL
-    // 两页壳层：编图页模式 toggle 跟随 stage 权威（objectName =
-    // mode.<stage>，由 ribbon_commands::mode_commands 创建的互斥
-    // QActionGroup 承载 —— setChecked(true) 自动落下其余两项）。
-    if (app_shell_ != nullptr) {
-        if (auto* mode_action = app_shell_->findChild<QAction*>(
-                pwb::ui_ribbon::authoring_mode_command_id(*stage));
-            mode_action != nullptr) {
-            mode_action->setChecked(true);
-        }
-        // 模式镜像（Ribbon 上下文组）跟随 stage 权威 —— 任何写者
-        // （恢复/goto/菜单）都投影；不回写 stage（set_authoring_mode
-        // 只投影不写）。
-        app_shell_->sync_workspace_for_stage(
-            pwb::tool_policy::stage_value(*stage));
-    }
-#endif
     refreshActionStates();
     refresh_readiness();
     // V14-THREE-STAGE-UX: every stage surface follows the authority —

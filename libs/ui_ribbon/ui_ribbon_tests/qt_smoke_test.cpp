@@ -1,6 +1,6 @@
 // UI-18 — Qt offscreen smoke (QT_QPA_PLATFORM=offscreen, pinned by
 // ctest): the real RibbonBar over the real core table. Covers the M1
-// contract: two workspace tabs, tab switching swaps the command band,
+// contract: five workspace tabs, tab switching swaps the command band,
 // three-mode heights inside the R:21-23 logical-pixel ranges, the three
 // collapse entries (button / double-click active tab / Ctrl+F1 through
 // the host ShortcutRegistry with the conflicts() guard), temporary
@@ -81,28 +81,30 @@ PWB_TEST(icon_resolution_and_gap_report) {
         // Resolvable asset: not a gap.
         CHECK(!missing.contains("data.import"));
         // Absent asset: runtime gap, QStyle fallback engaged.
-        CHECK(missing.contains("data.scan"));
-        // 编图静态带（模式 toggle + 输出组）同样走运行期缺口报告；
-        // rb-send.svg 不在覆盖根 → map.submit 记为运行时 miss。
-        CHECK(missing.contains("map.submit"));
-        CHECK(missing.contains("mode.predict"));
+        CHECK(missing.contains("predict.cancel"));
+        // rb-opacity.svg is absent from the override root → runtime miss
+        // (M6 closed the DECLARED gap; the runtime report still works).
+        CHECK(missing.contains("map.opacity"));
     }
     qunsetenv("PALEO_RESOURCES_DIR");
 }
 
-PWB_TEST(construction_two_workspace_tabs) {
+PWB_TEST(construction_five_workspace_tabs) {
     RibbonBar bar;
     bar.resize(1400, 300);
     bar.show();
     pump();
     auto* tabs = bar.findChild<QTabBar*>("ribbonTabs");
     CHECK(tabs != nullptr);
-    CHECK(tabs->count() == 2);
+    CHECK(tabs->count() == 5);
     CHECK(tabs->tabText(0) == "数据管理");
-    CHECK(tabs->tabText(1) == "编图");
+    CHECK(tabs->tabText(1) == "1 智能预测");
+    CHECK(tabs->tabText(2) == "2 约束与单因素");
+    CHECK(tabs->tabText(3) == "3 综合编图");
+    CHECK(tabs->tabText(4) == "验证");
     auto* band = bar.findChild<QStackedWidget*>("ribbonBand");
     CHECK(band != nullptr);
-    CHECK(band->count() == 2);
+    CHECK(band->count() == 5);
     CHECK(band->currentIndex() == 0);
     CHECK(bar.current_workspace() == 0);
     CHECK(bar.mode() == RibbonMode::Standard);
@@ -110,10 +112,9 @@ PWB_TEST(construction_two_workspace_tabs) {
     CHECK(find_button(bar, "ribbonSearch") != nullptr);
     CHECK(find_button(bar, "ribbonCompact") != nullptr);
     CHECK(find_button(bar, "ribbonCollapse") != nullptr);
-    // Every workspace page carries its groups' command buttons — 编图's
-    // static band is the mode toggles + the output group.
+    // Every workspace page carries its groups' command buttons.
     CHECK(find_button(bar, "ribbonCommand_data.import") != nullptr);
-    CHECK(find_button(bar, "ribbonCommand_mode.predict") != nullptr);
+    CHECK(find_button(bar, "ribbonCommand_verify.run") != nullptr);
     CHECK(find_button(bar, "ribbonCommand_map.export") != nullptr);
 }
 
@@ -130,14 +131,14 @@ PWB_TEST(workspace_switching_switches_band) {
                          activated = index;
                          ++emissions;
                      });
-    bar.set_current_workspace(1);
+    bar.set_current_workspace(3);
     pump();
-    CHECK(bar.current_workspace() == 1);
-    CHECK(band->currentIndex() == 1);
-    CHECK(activated == 1);
+    CHECK(bar.current_workspace() == 3);
+    CHECK(band->currentIndex() == 3);
+    CHECK(activated == 3);
     CHECK(emissions == 1);
     // Same index: no re-emission (true-change contract).
-    bar.set_current_workspace(1);
+    bar.set_current_workspace(3);
     pump();
     CHECK(emissions == 1);
     // The active page's commands are the visible ones.
@@ -147,7 +148,7 @@ PWB_TEST(workspace_switching_switches_band) {
     bar.set_current_workspace(9);
     bar.set_current_workspace(-1);
     pump();
-    CHECK(bar.current_workspace() == 1);
+    CHECK(bar.current_workspace() == 3);
 }
 
 PWB_TEST(three_mode_band_heights) {
@@ -195,10 +196,8 @@ PWB_TEST(three_mode_band_heights) {
 }
 
 PWB_TEST(collapse_three_entries) {
-    // Registry outlives the bar: register_shortcut's destroyed-hook runs
-    // against `this` when a child QShortcut dies, so a stack registry must
-    // be declared BEFORE the widget (reverse destruction order) — same
-    // contract the static shortcut_registry() singleton guarantees.
+    // The registry must outlive the bar: destroyed-hooks dereference it
+    // during ~QObject. Declare it first so it destructs last.
     pwb::ui_shell::ShortcutRegistry registry;
     RibbonBar bar;
     bar.resize(1400, 300);
@@ -262,22 +261,22 @@ PWB_TEST(temporary_expand_then_retract) {
     CHECK(!band->isVisible());
 
     // Tab click while collapsed: temporary expansion (R:23).
-    emit tabs->tabBarClicked(1);
+    emit tabs->tabBarClicked(2);
     pump();
     CHECK(band->isVisible());
     CHECK(bar.current_workspace() == 0);  // the click alone does not switch
-    tabs->setCurrentIndex(1);
+    tabs->setCurrentIndex(2);
     pump();
     CHECK(band->isVisible());
-    CHECK(bar.current_workspace() == 1);
+    CHECK(bar.current_workspace() == 2);
 
     // Choosing a command retracts the band.
-    find_button(bar, "ribbonCommand_map.export")->click();
+    find_button(bar, "ribbonCommand_factor.compute")->click();
     pump();
     CHECK(!band->isVisible());
 
     // Esc retracts as well.
-    emit tabs->tabBarClicked(0);
+    emit tabs->tabBarClicked(1);
     pump();
     CHECK(band->isVisible());
     QShortcut* esc = find_shortcut(bar, "Esc");
@@ -506,7 +505,7 @@ PWB_TEST(context_groups_inject_clear_and_layout_stable) {
     RibbonBar bar;
     bar.resize(1400, 300);
     bar.show();
-    bar.set_current_workspace(1);  // 编图 — the context host workspace
+    bar.set_current_workspace(3);  // the context host workspace
     pump();
 
     // A static group's frame geometry — the R:33 stability reference.
@@ -515,20 +514,20 @@ PWB_TEST(context_groups_inject_clear_and_layout_stable) {
     const QRect before = static_frame->geometry();
     CHECK(before.isValid());
 
-    // Inject a context group into ws1 (编图) only — the two-page shell's
-    // mode groups ride this exact mechanism. The probe id is NOT in the
-    // static table so the lookups address the context instance.
+    // Inject a context group into ws3 (编图) only. The probe id is NOT in
+    // the static table (map.annotate IS — M1 图件整饰组) so the lookups
+    // address the context instance unambiguously.
     pwb::ui_ribbon::RibbonGroup spec;
     spec.id = "ctx_annotation";
     spec.label = "标注";
     spec.commands.push_back(pwb::ui_ribbon::RibbonCommand{
         "ctx.probe", "标注", "menu-new.svg",
         pwb::ui_ribbon::CommandKind::Secondary, false});
-    bar.set_context_group(1, QStringLiteral("annotation"), spec);
+    bar.set_context_group(3, QStringLiteral("annotation"), spec);
     pump();
 
-    CHECK(bar.context_group_keys(1) == QStringList{"annotation"});
-    CHECK(bar.context_group_keys(0).isEmpty());
+    CHECK(bar.context_group_keys(3) == QStringList{"annotation"});
+    CHECK(bar.context_group_keys(2).isEmpty());
     // The context command renders as a real button and routes through
     // the SAME intent path as static commands.
     auto* annotate = find_button(bar, "ribbonCommand_ctx.probe");
@@ -553,26 +552,25 @@ PWB_TEST(context_groups_inject_clear_and_layout_stable) {
     CHECK(during.topLeft() == before.topLeft());
 
     // Same-key replace: no duplicate, still one group.
-    bar.set_context_group(1, QStringLiteral("annotation"), spec);
+    bar.set_context_group(3, QStringLiteral("annotation"), spec);
     pump();
-    CHECK(bar.context_group_keys(1) == QStringList{"annotation"});
+    CHECK(bar.context_group_keys(3) == QStringList{"annotation"});
 
     // Clear: the group and its separator are gone; static groups still
     // unmoved.
-    bar.clear_context_group(1, QStringLiteral("annotation"));
+    bar.clear_context_group(3, QStringLiteral("annotation"));
     pump();
-    CHECK(bar.context_group_keys(1).isEmpty());
+    CHECK(bar.context_group_keys(3).isEmpty());
     CHECK(find_button(bar, "ribbonCommand_ctx.probe") == nullptr);
     const QRect after = static_frame->geometry();
     CHECK(after.topLeft() == before.topLeft());
 
-    // Second workspace slot is independent (two-page shell: the only
-    // other band is ws0 数据管理).
-    bar.set_context_group(0, QStringLiteral("constraint"), spec);
+    // Second workspace slot is independent.
+    bar.set_context_group(2, QStringLiteral("constraint"), spec);
     pump();
-    CHECK(bar.context_group_keys(0) == QStringList{"constraint"});
-    CHECK(bar.context_group_keys(1).isEmpty());
-    bar.clear_context_group(0, QStringLiteral("constraint"));
+    CHECK(bar.context_group_keys(2) == QStringList{"constraint"});
+    CHECK(bar.context_group_keys(3).isEmpty());
+    bar.clear_context_group(2, QStringLiteral("constraint"));
 }
 
 int main(int argc, char** argv) {

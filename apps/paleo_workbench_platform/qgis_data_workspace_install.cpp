@@ -22,10 +22,7 @@
 #include <pwb/qgis/layer_factory.hpp>
 
 #include "app_context.hpp"
-#include "app_shell.hpp"
 #include "main_window.hpp"
-
-#include <pwb/ui_workstation/workstation_frame.hpp>
 
 namespace pwb::app::qgis_data_workspace {
 
@@ -76,13 +73,9 @@ void admit_browser_layer(::pwb::app::MainWindow& window, QgsLayerItem* item) {
 }  // namespace
 
 void install_data_browser(::pwb::app::MainWindow& window) {
-    auto* shell = window.appShell();
-    if (shell == nullptr || shell->authoring_page() == nullptr ||
-        window.findChild<QDockWidget*>(kDockName) != nullptr) {
-        return;
-    }
+    if (window.findChild<QDockWidget*>(kDockName) != nullptr) return;
 
-    auto* dock = new QDockWidget(MainWindow::tr("浏览器"), &window);
+    auto* dock = new QDockWidget(MainWindow::tr("QGIS 数据浏览器"), &window);
     dock->setObjectName(QString::fromLatin1(kDockName));
     // The GUI browser model (provider items + gui providers' context);
     // browser models are NOT auto-populated — initialize() is required
@@ -93,12 +86,14 @@ void install_data_browser(::pwb::app::MainWindow& window) {
     view->setModel(model);
     view->setHeaderHidden(true);
     dock->setWidget(view);
-    // QGIS 原版惯例：Browser 面板与 Layers 面板同区 tab 化（qgisapp.cpp
-    // tabifyDockWidget(mLayerTreeDock, mBrowserWidget)）。收编进编图页
-    // 的 dock 宿主，不再是窗口级/工作站级自由 dock。
-    auto* layers =
-        window.findChild<QDockWidget*>(QStringLiteral("layer-tree-dock"));
-    shell->adopt_authoring_dock(dock, Qt::LeftDockWidgetArea, layers);
+    window.addDockWidget(Qt::LeftDockWidgetArea, dock);
+    // Keep the left area usable: tabify behind the layer tree dock when
+    // it exists (no layout fight with the shell's own docks).
+    if (QDockWidget* layer_dock =
+            window.findChild<QDockWidget*>(QStringLiteral("layer-tree-dock"))) {
+        window.tabifyDockWidget(layer_dock, dock);
+        dock->hide();
+    }
 
     MainWindow::connect(
         view, &QTreeView::doubleClicked, &window,

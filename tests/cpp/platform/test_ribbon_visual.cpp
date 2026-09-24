@@ -1,9 +1,9 @@
 // platform.ribbon_visual — M6 visual/QA harness (plan 00-plan.md §4-M6):
 // offscreen drives the REAL MainWindow/AppShell/RibbonBar, captures the
-// acceptance matrix (two pages + three 编图 modes, three ribbon modes,
-// 1280×720 compact, 1920×1080 wide, validation dock surfaces, compose
+// acceptance matrix (five workspaces, three ribbon modes, 1280×720
+// compact, 1920×1080 wide, validation compare/review surfaces, compose
 // mode in/out) into the build-tree evidence dir, and hard-gates the
-// STRUCTURAL contract (§5): two tabs in fixed order, command-band heights
+// STRUCTURAL contract (§5): five tabs in fixed order, command-band heights
 // inside the R:21-23 logical-pixel ranges, status bar present, 主图:底部
 // ≈ 65:35, no ribbon-button clipping, per-workspace primary present.
 // Pixel diffs are evidence only, never the gate.
@@ -40,9 +40,7 @@
 #include <pwb/ui_workstation/workstation_frame.hpp>
 
 #include "app_shell.hpp"
-#include "data_management_page.hpp"
 #include "main_window.hpp"
-#include "qgis_authoring_page.hpp"
 #include "validation_workspace_page.hpp"
 
 #include "test_framework.hpp"
@@ -105,8 +103,8 @@ void structural_gate(AppShell* shell, const QString& phase) {
     check(ribbon != nullptr, phase + QStringLiteral(": ribbon present"));
     if (ribbon == nullptr) return;
     auto* tabs = ribbon->findChild<QTabBar*>(QStringLiteral("ribbonTabs"));
-    check(tabs != nullptr && tabs->count() == 2,
-          phase + QStringLiteral(": two workspace tabs"));
+    check(tabs != nullptr && tabs->count() == 5,
+          phase + QStringLiteral(": five workspace tabs"));
     check(tabs != nullptr && tabs->height() >= 24,
           phase + QStringLiteral(": tab row >= 24px"));
     // Band height inside the R:21-23 logical-pixel range (current mode).
@@ -124,38 +122,58 @@ void structural_gate(AppShell* shell, const QString& phase) {
     check(shell->status_bar() != nullptr &&
               shell->status_bar()->isVisibleTo(shell),
           phase + QStringLiteral(": status bar present"));
-    // QGIS-native two-page frame: the 编图 page is an inner QMainWindow
-    // — message bar over the session canvas centrally, layer-tree dock
-    // adopted into the page's own dock area. 只在编图页当前时几何
-    // 有意义（其他页断言页面本体而非画布）。
-    const bool authoring_current =
-        shell->workspace_host()->currentIndex() ==
-        pwb::app::WorkspaceHostWidget::kPageAuthoring;
-    if (authoring_current) {
-        check(shell->authoring_page() != nullptr &&
-                  shell->authoring_page()->canvas() != nullptr,
-              phase + QStringLiteral(": authoring canvas present"));
-        check(shell->authoring_page() != nullptr &&
-                  shell->authoring_page()->message_bar() != nullptr,
-              phase + QStringLiteral(": message bar present"));
-        auto* layer_dock =
-            shell->findChild<QDockWidget*>(QStringLiteral("layer-tree-dock"));
-        check(layer_dock != nullptr,
-              phase + QStringLiteral(": layer tree dock adopted"));
-        if (layer_dock != nullptr) {
-            check(layer_dock->parentWidget() ==
-                      static_cast<QWidget*>(shell->authoring_page()),
-                  phase + QStringLiteral(": layer dock inside page host"));
+    // 面板化改订 —— 画布:阶段行比例。科学页 = 纯画布；阶段面板是底
+    // 部 row0 dock（resizeDocks 播种行高，用户可拖）。工具行
+    // （任务|日志）是常驻第二行，不计入比值。
+    if (qEnvironmentVariableIsSet("PWB_VIS_DEBUG")) {
+        for (const char* id :
+             {"data_preview", "pair_link", "crosswell", "data_prep",
+              "factor_refs"}) {
+            if (auto* d = shell->workstation()->dock(id)) {
+                std::fprintf(stderr,
+                             "[probe] dock %s vis=%d h=%d min=%dx%d\n",
+                             id, d->isVisible() ? 1 : 0, d->height(),
+                             d->minimumSizeHint().width(),
+                             d->minimumSizeHint().height());
+            }
         }
+    }
+    // 画布:阶段行 ≈ 原型占比 —— 面板化后阶段面板是底部 row0 dock,
+    // 工具行常驻不计入比值。只在科学页当前时有意义（其他页几何退化）;
+    // skip 显式记录（G5: 静默跳过不能冒充覆盖）。
+    const bool science_current =
+        shell->workspace_host()->currentIndex() ==
+        pwb::app::WorkspaceHostWidget::kPageScience;
+    int stage_row_h = 0;
+    for (const char* id :
+         {"pair_link", "predict_task", "seismic_predict", "crosswell",
+          "data_prep", "strat_compare", "seq_frame", "factor_refs"}) {
+        if (auto* d = shell->workstation()->dock(id);
+            d != nullptr && d->isVisible() && !d->isFloating()) {
+            stage_row_h = d->height();
+            break;
+        }
+    }
+    const int canvas_h = shell->composite()->height();
+    if (!science_current || stage_row_h <= 0 ||
+        canvas_h + stage_row_h <= 100) {
+        std::printf("  [skip] %s: canvas:stage-row ratio (science page not current)\n",
+                    phase.toUtf8().constData());
     } else {
-        check(shell->data_page() != nullptr,
-              phase + QStringLiteral(": data page present"));
+        const double ratio = static_cast<double>(canvas_h) /
+                             (canvas_h + stage_row_h);
+        check(ratio > 0.45 && ratio < 0.92,
+              phase +
+                  QStringLiteral(": canvas:stage-row ≈ 原型占比 (actual %1, %2/%3)")
+                      .arg(ratio, 0, 'f', 2)
+                      .arg(canvas_h)
+                      .arg(stage_row_h));
     }
     check_no_ribbon_clipping(shell);
-    // 两页固定顺序 + 页主动作/模式命令存在（registry presence）。
-    static const char* kPrimaries[] = {"data.import", "map.export",
-                                       "mode.predict", "mode.factor",
-                                       "mode.author"};
+    // 五区固定顺序 + 每区唯一主动作（registry presence）。
+    static const char* kPrimaries[] = {"data.import", "predict.run",
+                                       "factor.compute", "map.export",
+                                       "verify.run"};
     auto& registry = pwb::ui_shell::command_registry();
     for (const char* id : kPrimaries) {
         check(registry.get(id) != nullptr,
@@ -168,28 +186,14 @@ void run_matrix(MainWindow& window, const QString& tag) {
     PWB_CHECK_MSG(shell != nullptr, "AppShell missing");
     auto* ribbon = shell->ribbon();
 
-    // Two pages + three 编图 modes.
-    const char* kWsNames[] = {"ws0-data", "ws1-authoring"};
-    for (int ws = 0; ws < 2; ++ws) {
+    // Five workspaces.
+    const char* kWsNames[] = {"ws0-data", "ws1-predict", "ws2-factor",
+                              "ws3-map", "ws4-validation"};
+    for (int ws = 0; ws < 5; ++ws) {
         shell->navigate_workspace(ws);
         pump();
         capture(shell, QStringLiteral("%1-%2").arg(tag, kWsNames[ws]));
         structural_gate(shell, QStringLiteral("%1-%2").arg(tag, kWsNames[ws]));
-    }
-    const struct {
-        const char* name;
-        pwb::tool_policy::MappingStage stage;
-    } kModes[] = {
-        {"mode-predict", pwb::tool_policy::MappingStage::FaciesCalibration},
-        {"mode-factor", pwb::tool_policy::MappingStage::ConstraintFactor},
-        {"mode-author",
-         pwb::tool_policy::MappingStage::IntegratedCompilation},
-    };
-    for (const auto& mode : kModes) {
-        shell->request_authoring_mode(mode.stage);
-        pump();
-        capture(shell, QStringLiteral("%1-%2").arg(tag, mode.name));
-        structural_gate(shell, QStringLiteral("%1-%2").arg(tag, mode.name));
     }
 
     // Ribbon three modes.
@@ -206,37 +210,35 @@ void run_matrix(MainWindow& window, const QString& tag) {
     ribbon->set_compact(false);
     pump();
 
-    // Validation surface retired: the entry answers honestly — no page
-    // fabricates, no dock appears, the frame stays put.
-    const int page_before_validation =
-        shell->workspace_host()->currentIndex();
-    shell->show_validation_dock();
-    check(shell->validation_page() == nullptr,
-          tag + QStringLiteral(": validation surface honestly absent"));
-    check(shell->workspace_host()->currentIndex() ==
-              page_before_validation,
-          tag + QStringLiteral(": retired entry keeps the page"));
+    // Validation surfaces: compare view + review panel visible states.
+    shell->navigate_workspace(4);
+    if (auto* tabs = shell->validation_page()->findChild<QTabWidget*>(
+            QStringLiteral("ValidationRightTabs"))) {
+        tabs->setCurrentIndex(1);  // 对比视图
+    }
     pump();
-    capture(shell, QStringLiteral("%1-validation-absent").arg(tag));
+    capture(shell, QStringLiteral("%1-validation-compare").arg(tag));
+    if (auto* tabs = shell->validation_page()->findChild<QTabWidget*>(
+            QStringLiteral("ValidationRightTabs"))) {
+        tabs->setCurrentIndex(2);  // 复核记录
+    }
+    pump();
+    capture(shell, QStringLiteral("%1-validation-review").arg(tag));
 
-    // Compose mode in/out: the QGIS canvas authority must NOT be
-    // replaced — compose is a retired no-op flag on the frame.
-    shell->request_authoring_mode(
-        pwb::tool_policy::MappingStage::IntegratedCompilation);
+    // Compose mode in/out: the canvas must NOT be replaced (F:70) —
+    // 版式输出是右栏 dock，抬起它画布不动。
+    shell->navigate_workspace(3);
     pump();
-    QWidget* const canvas = shell->authoring_page()->canvas();
-    const bool canvas_visible_before = canvas->isVisible();
+    const bool canvas_visible_before = shell->composite()->isVisible();
     shell->set_compose_mode(true);
     pump();
     capture(shell, QStringLiteral("%1-compose-on").arg(tag));
-    check(shell->authoring_page()->canvas() == canvas &&
-              canvas->isVisible() == canvas_visible_before,
+    check(shell->composite()->isVisible() == canvas_visible_before,
           tag + QStringLiteral(": compose mode keeps the canvas host"));
     shell->set_compose_mode(false);
     pump();
     capture(shell, QStringLiteral("%1-compose-off").arg(tag));
-    check(shell->authoring_page()->canvas() == canvas &&
-              canvas->isVisible(),
+    check(shell->composite()->isVisible(),
           tag + QStringLiteral(": compose mode restores the default"));
 }
 
@@ -277,15 +279,19 @@ int main(int argc, char** argv) {
         capture(&window, QStringLiteral("%1-1280x720-compact").arg(tag));
         structural_gate(window.appShell(),
                         QStringLiteral("%1-1280x720").arg(tag));
-        // 窄视口：编图页的图层树 dock 仍在页内宿主中（inner
-        // QMainWindow 自管理 dock 折叠/溢出策略）。
-        auto* layer_dock = window.appShell()->findChild<QDockWidget*>(
-            QStringLiteral("layer-tree-dock"));
-        check(layer_dock != nullptr,
-              QStringLiteral("1280: layer tree dock exists"));
-        window.resize(1000, 720);
-        pump();
-        capture(&window, QStringLiteral("%1-1000x720").arg(tag));
+        auto* inspector =
+            window.appShell()->workstation()->dock("inspector");
+        check(inspector != nullptr, QStringLiteral("1280: inspector dock exists"));
+        if (inspector != nullptr) {
+            // Narrower than kInspectorHideBelow(1100) → viewport policy
+            // folds it without squeezing the science bottom.
+            window.resize(1000, 720);
+            pump();
+            check(!inspector->isVisible() ||
+                      window.appShell()->workstation()->dock_visible(
+                          "inspector"),
+                  QStringLiteral("1280: inspector policy engaged honestly"));
+        }
         window.appShell()->shutdown_workers();
     }
 
@@ -313,7 +319,7 @@ int main(int argc, char** argv) {
             window.show();
             pump();
             window.appShell()->ribbon()->set_compact(true);
-            window.appShell()->navigate_workspace(1);
+            window.appShell()->navigate_workspace(3);
             pump();
         }
         {
@@ -324,8 +330,8 @@ int main(int argc, char** argv) {
             check(window.appShell()->ribbon()->mode() ==
                       pwb::ui_ribbon::RibbonMode::Compact,
                   QStringLiteral("restore: ribbon mode compact"));
-            check(window.appShell()->ribbon()->current_workspace() == 1,
-                  QStringLiteral("restore: current workspace ws1"));
+            check(window.appShell()->ribbon()->current_workspace() == 3,
+                  QStringLiteral("restore: current workspace ws3"));
             window.appShell()->shutdown_workers();
         }
     }
@@ -342,36 +348,26 @@ int main(int argc, char** argv) {
         pump();
         window.openSampleProjectRequested();
         pump();
-        // 数据管理页 = 列表 + 信息：工程打开后 catalog 条目推入树的
-        // 模型（样例工程有真实资产时行数 >0）。
-        auto* tree = window.appShell()->data_page()
+        auto* tree = window.appShell()->workstation()->explorer()
                          ->findChild<QTreeView*>();
         check(tree != nullptr && tree->model() != nullptr,
-              QStringLiteral("project: data list tree present"));
-#if defined(PWB_WITH_DATA_INTEGRATION)
+              QStringLiteral("project: explorer tree present"));
+#if defined(PWB_WITH_WORKFLOW_WIRING)
+        // 本目标带全量 workflow 装配时才校验资源树投影（products-only
+        // 路径 WorkflowBinding::push_project_to_pages_ 未编入时树保持
+        // 空工程诚实态，不构成失败）。
         if (tree != nullptr && tree->model() != nullptr) {
             check(tree->model()->rowCount() > 0,
-                  QStringLiteral("project: data list populated"));
+                  QStringLiteral("project: explorer populated from facts"));
         }
 #endif
-        const char* kWsNames[] = {"ws0-data", "ws1-authoring"};
-        for (int ws = 0; ws < 2; ++ws) {
+        const char* kWsNames[] = {"ws0-data", "ws1-predict", "ws2-factor",
+                                  "ws3-map", "ws4-validation"};
+        for (int ws = 0; ws < 5; ++ws) {
             window.appShell()->navigate_workspace(ws);
             pump();
             capture(window.appShell(),
                     QStringLiteral("%1-proj-%2").arg(tag, kWsNames[ws]));
-        }
-        const pwb::tool_policy::MappingStage kModes[] = {
-            pwb::tool_policy::MappingStage::FaciesCalibration,
-            pwb::tool_policy::MappingStage::ConstraintFactor,
-            pwb::tool_policy::MappingStage::IntegratedCompilation,
-        };
-        const char* kModeNames[] = {"predict", "factor", "author"};
-        for (int m = 0; m < 3; ++m) {
-            window.appShell()->request_authoring_mode(kModes[m]);
-            pump();
-            capture(window.appShell(),
-                    QStringLiteral("%1-proj-mode-%2").arg(tag, kModeNames[m]));
         }
         window.appShell()->shutdown_workers();
     }

@@ -13,8 +13,6 @@
 #include <string>
 #include <utility>
 
-#include <QAction>
-#include <QActionGroup>
 #include <QCheckBox>
 #include <QMessageBox>
 #include <QPushButton>
@@ -39,9 +37,6 @@
 #include <pwb/ui_composite/composite_document.hpp>
 #include <pwb/ui_map/mapping_page.hpp>
 #include <pwb/ui_pages_data/qt/data_toolbar.hpp>
-#include <pwb/tool_policy/stages.hpp>
-#include <pwb/ui_ribbon/ribbon_spec.hpp>
-#include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
 #include <pwb/ui_review/qt/qc_issue_table.hpp>
 #include <pwb/ui_review/qt/review_export_page.hpp>
 #include <pwb/ui_review/review_core.hpp>
@@ -157,8 +152,7 @@ ui_pages_mapedit::MapEditScene* find_edit_scene(const Ctx& c) {
 }
 
 void enter_compose_mode(const Ctx& c) {
-    c.shell->request_authoring_mode(
-        pwb::tool_policy::MappingStage::IntegratedCompilation);
+    c.shell->navigate_workspace(3);
     c.shell->set_compose_mode(true);
 }
 #endif  // CLOSURE_MAPPING
@@ -522,8 +516,8 @@ void predict_commands(ui_shell::CommandRegistry& registry,
                   },
                   [c](const CommandContext&) { return needs_project(c); });
     register_real(registry, ids, "predict.submit", QStringLiteral("送交验证"),
-                  QStringLiteral("抬起验证面板"), QStringLiteral("验证 verify"),
-                  [c] { c.shell->show_validation_dock(); });
+                  QStringLiteral("切换到验证工作区"), QStringLiteral("验证 verify"),
+                  [c] { c.shell->navigate_workspace(4); });
 }
 
 // ---------------------------------------------------------------------------
@@ -620,8 +614,7 @@ void factor_commands(ui_shell::CommandRegistry& registry,
                   QStringLiteral("切到约束工作区并聚焦连井剖面"),
                   QStringLiteral("选井 well 连井"),
                   [c] {
-                      c.shell->request_authoring_mode(
-                          pwb::tool_policy::MappingStage::ConstraintFactor);
+                      c.shell->navigate_workspace(2);
                       c.shell->focus_stage_dock(
                           QStringLiteral("连井剖面"));
                   });
@@ -660,8 +653,8 @@ void factor_commands(ui_shell::CommandRegistry& registry,
                   },
                   [c](const CommandContext&) { return needs_project(c); });
     register_real(registry, ids, "factor.submit", QStringLiteral("送交验证"),
-                  QStringLiteral("抬起验证面板"), QStringLiteral("验证 verify"),
-                  [c] { c.shell->show_validation_dock(); });
+                  QStringLiteral("切换到验证工作区"), QStringLiteral("验证 verify"),
+                  [c] { c.shell->navigate_workspace(4); });
 }
 
 // ---------------------------------------------------------------------------
@@ -800,8 +793,8 @@ void map_commands(ui_shell::CommandRegistry& registry,
                   },
                   [c](const CommandContext&) { return needs_project(c); });
     register_real(registry, ids, "map.submit", QStringLiteral("送交验证"),
-                  QStringLiteral("抬起验证面板"), QStringLiteral("验证 verify"),
-                  [c] { c.shell->show_validation_dock(); });
+                  QStringLiteral("切换到验证工作区"), QStringLiteral("验证 verify"),
+                  [c] { c.shell->navigate_workspace(4); });
 }
 
 // ---------------------------------------------------------------------------
@@ -816,7 +809,7 @@ void verify_commands(ui_shell::CommandRegistry& registry,
                   QStringLiteral("固定验证对象（井）并聚焦对比视图"),
                   QStringLiteral("对象 object 井 well"),
                   [c] {
-                      c.shell->show_validation_dock();
+                      c.shell->navigate_workspace(4);
                       if (auto* view = find_compare_view(c); view != nullptr) {
                           focus_right_tab(c, view);
                           view->object_selector()->showPopup();
@@ -828,7 +821,7 @@ void verify_commands(ui_shell::CommandRegistry& registry,
                   QStringLiteral("固定基准解释版本"),
                   QStringLiteral("基准 baseline 解释"),
                   [c] {
-                      c.shell->show_validation_dock();
+                      c.shell->navigate_workspace(4);
                       if (auto* view = find_compare_view(c); view != nullptr) {
                           focus_right_tab(c, view);
                           view->baseline_selector()->showPopup();
@@ -960,7 +953,7 @@ void verify_commands(ui_shell::CommandRegistry& registry,
                   QStringLiteral("对选中问题录入人工复核结论"),
                   QStringLiteral("复核 record 结论"),
                   [c] {
-                      c.shell->show_validation_dock();
+                      c.shell->navigate_workspace(4);
                       if (auto* panel = find_review_panel(c);
                           panel != nullptr) {
                           focus_right_tab(c, panel);
@@ -989,55 +982,6 @@ void verify_commands(ui_shell::CommandRegistry& registry,
                   [c](const CommandContext&) { return needs_project(c); });
 }
 
-// ---------------------------------------------------------------------------
-// 编图页模式切换（mode.predict / mode.factor / mode.author）
-//
-// 三个 checkable QAction 共享一个互斥 QActionGroup —— check 状态的唯一权威。
-// 动作 objectName = command id（applyStageValue 按它同步勾选）。命令本体走
-// CommandRegistry，与菜单/搜索共用一个命令身份。
-// ---------------------------------------------------------------------------
-
-void mode_commands(ui_shell::CommandRegistry& registry,
-                   std::vector<std::string>* ids, const Ctx& c) {
-    auto* group = new QActionGroup(c.shell);
-    group->setExclusive(true);
-
-    const struct {
-        const char* command_id;
-        const char* label;
-        const char* hint;
-        pwb::tool_policy::MappingStage stage;
-    } modes[] = {
-        {"mode.predict", "智能预测", "智能预测模式",
-         pwb::tool_policy::MappingStage::FaciesCalibration},
-        {"mode.factor", "单因素图", "约束与单因素模式",
-         pwb::tool_policy::MappingStage::ConstraintFactor},
-        {"mode.author", "编图", "综合编图模式",
-         pwb::tool_policy::MappingStage::IntegratedCompilation},
-    };
-    for (const auto& m : modes) {
-        const QString label = QString::fromUtf8(m.label);
-        register_real(registry, ids, m.command_id, label,
-                      QString::fromUtf8(m.hint), label,
-                      [c, stage = m.stage] {
-                          c.shell->request_authoring_mode(stage);
-                      });
-        auto* action = new QAction(label, group);
-        action->setObjectName(QString::fromLatin1(m.command_id));
-        action->setCheckable(true);
-        group->addAction(action);
-        if (auto* ribbon = c.shell->ribbon(); ribbon != nullptr) {
-            ribbon->set_command_action(m.command_id, action);
-        }
-    }
-    // 初始勾选与当前 stage 对齐（stage 权威由 applyStageValue 持续同步）。
-    if (auto* action = c.shell->findChild<QAction*>(
-            ui_ribbon::authoring_mode_command_id(c.shell->authoring_mode()));
-        action != nullptr) {
-        action->setChecked(true);
-    }
-}
-
 }  // namespace
 
 void install(const Install& install) {
@@ -1057,7 +1001,6 @@ void install(const Install& install) {
     factor_commands(registry, install.registered_ids, ctx);
     map_commands(registry, install.registered_ids, ctx);
     verify_commands(registry, install.registered_ids, ctx);
-    mode_commands(registry, install.registered_ids, ctx);
 }
 
 }  // namespace pwb::app::ribbon_commands

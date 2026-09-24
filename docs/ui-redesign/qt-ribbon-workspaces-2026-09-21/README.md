@@ -1,6 +1,6 @@
 # Paleo Workbench：轻量 Ribbon 五工作区
 
-日期：2026-09-21。状态：**design authority (behaviour rules)** — production shell **adopted on `main`** (`fa9ba744` / `cebc9f0a`; see [`../../development/ribbon-five-workspaces/STATUS.md`](../../development/ribbon-five-workspaces/STATUS.md)).
+日期：2026-09-21。状态：**design authority (behaviour rules)** — production shell **adopted on `main`** (`fa9ba744` / `cebc9f0a`; see [`../../development/ribbon-five-workspaces/STATUS.md`](../../development/ribbon-five-workspaces/STATUS.md)). 2026-09-24 两页壳层实验已回退，本方案恢复为现行界面真源（revert of the two-page shell merge）。
 
 **Screenshots below**: `ACCEPTABLE_REFERENCE` / design mockups — **not** live product captures. Prefer UI-visible labels and command ids from `libs/ui_ribbon` when docs and images disagree.
 
