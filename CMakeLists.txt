@@ -1623,6 +1623,83 @@ if(TARGET pwb-platform
                 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
                 TIMEOUT 300)
         endif()
+        # 子方向 3 authoring/validation closure 回归：约束点 E2E、捕捉
+        # 限定/恢复、阶段 dirty gate、插值参数文档权威、IssueNavigator、
+        # 异步 QC 取消语义。
+        add_executable(platform_authoring_closure
+            tests/cpp/platform/test_authoring_closure.cpp
+            apps/paleo_workbench_platform/main_window.cpp
+            apps/paleo_workbench_platform/app_context.cpp
+            apps/paleo_workbench_platform/diagnostics.cpp
+            apps/paleo_workbench_platform/app_shell.cpp
+            apps/paleo_workbench_platform/stage_flow_install.cpp
+            apps/paleo_workbench_platform/constraint_authoring.cpp
+            apps/paleo_workbench_platform/validation_workspace_page.cpp
+            apps/paleo_workbench_platform/factor_method_config.cpp
+            apps/paleo_workbench_platform/job_center.cpp
+            apps/paleo_workbench_platform/factor_atlas_panel.cpp
+            apps/paleo_workbench_platform/compilation_layer_panel.cpp
+            apps/paleo_workbench_platform/profile_settings_panel.cpp
+            apps/paleo_workbench_platform/reference_legend_panel.cpp
+            apps/paleo_workbench_platform/factor_reference_strip.cpp
+            apps/paleo_workbench_platform/workspace_compose.cpp
+            apps/paleo_workbench_platform/ribbon_command_install.cpp
+            apps/paleo_workbench_platform/comparison_view.cpp
+            apps/paleo_workbench_platform/review_disposition_panel.cpp
+            apps/paleo_workbench_platform/m5_validation_install.cpp
+            apps/paleo_workbench_platform/data_lineage_panel.cpp
+            apps/paleo_workbench_platform/m5_data_install.cpp)
+        if(COMMAND pwb_link_job_runtime)
+            pwb_link_job_runtime(platform_authoring_closure)
+        endif()
+        set_target_properties(platform_authoring_closure
+            PROPERTIES AUTOMOC ON)
+        target_compile_features(platform_authoring_closure
+            PRIVATE cxx_std_20)
+        target_include_directories(platform_authoring_closure PRIVATE
+            tests/cpp/platform
+            apps/paleo_workbench_platform
+            ${CMAKE_BINARY_DIR}/generated)
+        target_link_libraries(platform_authoring_closure PRIVATE
+            Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
+            Pwb::PlatformServices Pwb::UiStageflowQt
+            Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
+            Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::QgisPlot Pwb::UiReviewQt
+            Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt
+            Pwb::QgisProcessing
+            Pwb::Visualization
+            Pwb::UiWidgets Pwb::FactorHost)
+        target_compile_definitions(platform_authoring_closure PRIVATE
+            PWB_WITH_APP_SHELL=1
+            PWB_WITH_STAGE_FLOW=1
+            PWB_WITH_CONV_27=1
+            PWB_WITH_CONV_30=1
+            PWB_TEST_SRC_DIR="${CMAKE_SOURCE_DIR}/tests/cpp/platform")
+        if(TARGET Pwb::UiWorkbench)
+            target_link_libraries(platform_authoring_closure PRIVATE
+                Pwb::UiWorkbench)
+        endif()
+        if(TARGET Pwb::UiControllersQt)
+            target_link_libraries(platform_authoring_closure PRIVATE
+                Pwb::UiControllers Pwb::UiControllersQt)
+            target_compile_definitions(platform_authoring_closure
+                PRIVATE PWB_WITH_UI_CONTROLLERS=1)
+        endif()
+        if(TARGET Pwb::Data AND TARGET Pwb::Science
+           AND TARGET Pwb::Visualization AND TARGET Pwb::Workflow)
+            target_link_libraries(platform_authoring_closure PRIVATE
+                Pwb::Data)
+            target_compile_definitions(platform_authoring_closure
+                PRIVATE PWB_WITH_DATA_INTEGRATION=1)
+            target_sources(platform_authoring_closure PRIVATE
+                apps/paleo_workbench_platform/shell_project_actions.cpp)
+        endif()
+        add_test(NAME platform.authoring_closure
+                 COMMAND platform_authoring_closure)
+        set_tests_properties(platform.authoring_closure PROPERTIES
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+            TIMEOUT 300)
         # END PWB-V14-THREE-STAGE
 
         # BEGIN CLOSURE-REVIEW (line 09)
