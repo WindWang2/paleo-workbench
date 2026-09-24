@@ -125,6 +125,7 @@ class ViewCoordinationController;
 namespace pwb::app {
 
 class VertexMoveMapTool;
+class MeasureDistanceTool;
 class AppContext;
 #ifdef PWB_WITH_APP_SHELL
 class AppShell;
@@ -497,6 +498,8 @@ public:
 private:
     // END qgis-native-layout-convergence
     void armPan();
+    void armIdentify();
+    void armMeasure();
     void armZoomIn();
     void armZoomOut();
     void zoomFullExtent();
@@ -581,6 +584,22 @@ private:
 #endif
     QgsLayerTreeView* tree_ = nullptr;
     QLabel* status_label_ = nullptr;
+    // B1（shell 收敛）：文件命令的单一 QAction identity —— 原生 文件
+    // 菜单、ribbon 文件菜单、快捷键共享同一组动作（同一命令不再有第
+    // 二个 QAction）。窗口拥有；converge_menus_into_ribbon 负责把带快
+    // 捷键的动作挂到窗口本身以保全 WindowContext 派发。
+#ifdef PWB_WITH_DATA_INTEGRATION
+    QAction* file_new_action_ = nullptr;
+    QAction* file_open_action_ = nullptr;
+    QAction* file_save_action_ = nullptr;
+    QAction* file_sample_action_ = nullptr;
+    QAction* file_properties_action_ = nullptr;
+#endif
+    QAction* file_exit_action_ = nullptr;
+    QAction* file_clear_recent_action_ = nullptr;
+    // MRU 共享动作（父对象为本窗口；两个 最近工程 菜单挂同一批）。
+    QList<QAction*> recent_project_actions_;
+    void buildFileActions();
 #ifdef PWB_WITH_CONV_27
     pwb::ui::StageDock* stage_dock_ = nullptr;
     pwb::ui::LayerTreePanel* layer_panel_ = nullptr;
@@ -633,6 +652,8 @@ private:
     // Map tools (canvas-owned via setMapTool; kept for re-arming).
     QgsMapTool* pan_tool_ = nullptr;
     QgsMapTool* zoom_in_tool_ = nullptr;
+    QgsMapTool* identify_tool_ = nullptr;  // QgsMapToolIdentifyFeature (public gui)
+    MeasureDistanceTool* measure_tool_ = nullptr;
     QgsMapTool* zoom_out_tool_ = nullptr;
     VertexMoveMapTool* vertex_tool_ = nullptr;
 

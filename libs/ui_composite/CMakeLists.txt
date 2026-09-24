@@ -64,22 +64,22 @@ if(TARGET Qt6::Widgets)
     add_library(pwb_ui_composite_qt STATIC
         src/composite_attribute_table.cpp
         src/composite_controller_qt.cpp
+        src/input_tree_panel.cpp
+        src/linked_views_panel.cpp
         src/composite_document.cpp
         src/composite_panels.cpp
         src/facies_selector.cpp
-        src/layer_manager_panel.cpp
-        src/mapping_stage_bar.cpp
         src/mapping_stage_panel.cpp
         src/merge_features_dialog.cpp
         src/tool_page_dialog.cpp
         src/topology_checker_panel.cpp
         include/pwb/ui_composite/composite_attribute_table.hpp
         include/pwb/ui_composite/composite_controller_qt.hpp
+        include/pwb/ui_composite/input_tree_panel.hpp
+        include/pwb/ui_composite/linked_views_panel.hpp
         include/pwb/ui_composite/composite_document.hpp
         include/pwb/ui_composite/composite_panels.hpp
         include/pwb/ui_composite/facies_selector.hpp
-        include/pwb/ui_composite/layer_manager_panel.hpp
-        include/pwb/ui_composite/mapping_stage_bar.hpp
         include/pwb/ui_composite/mapping_stage_panel.hpp
         include/pwb/ui_composite/merge_features_dialog.hpp
         include/pwb/ui_composite/tool_page_dialog.hpp

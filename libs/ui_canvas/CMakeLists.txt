@@ -1,7 +1,6 @@
 # UI-15 — root-canvas slice: Qt-free cores + Qt Widgets surfaces + the
 # QGIS-backed snapshot render backend / symbology bridge
-# (paleo_workbench/ui/{unified_map_canvas,native_map_canvas,
-# native_layer_tree,native_render_worker,map_layer_properties,
+# (paleo_workbench/ui/{unified_map_canvas,map_layer_properties,
 # map_symbology_bridge,map_export_worker,preview_settings_dialog}).
 #
 # Three targets, same split as ui_widgets/ui_map:
@@ -50,17 +49,11 @@ if(TARGET Qt6::Widgets AND TARGET Pwb::UiWidgets
     add_library(pwb_ui_canvas STATIC
         src/qt/fallback_map_backend.cpp
         src/qt/unified_map_canvas.cpp
-        src/qt/native_map_canvas.cpp
-        src/qt/native_raster_controller.cpp
-        src/qt/native_layer_tree.cpp
         src/qt/map_layer_properties.cpp
         src/qt/map_export_worker.cpp
         src/qt/preview_settings_dialog.cpp
         include/pwb/ui_canvas/qt/fallback_map_backend.hpp
         include/pwb/ui_canvas/qt/unified_map_canvas.hpp
-        include/pwb/ui_canvas/qt/native_map_canvas.hpp
-        include/pwb/ui_canvas/qt/native_raster_controller.hpp
-        include/pwb/ui_canvas/qt/native_layer_tree.hpp
         include/pwb/ui_canvas/qt/map_layer_properties.hpp
         include/pwb/ui_canvas/qt/map_export_worker.hpp
         include/pwb/ui_canvas/qt/preview_settings_dialog.hpp

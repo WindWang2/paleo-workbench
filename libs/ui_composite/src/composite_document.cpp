@@ -4,8 +4,8 @@
 #include <pwb/ui_composite/composite_controller_qt.hpp>
 #include <pwb/ui_composite/composite_panels.hpp>
 #include <pwb/ui_composite/facies_selector.hpp>
-#include <pwb/ui_composite/layer_manager_panel.hpp>
-#include <pwb/ui_composite/mapping_stage_bar.hpp>
+#include <pwb/ui_composite/input_tree_panel.hpp>
+#include <pwb/ui_composite/linked_views_panel.hpp>
 #include <pwb/ui_composite/mapping_stage_panel.hpp>
 #include <pwb/ui_composite/topology_checker_panel.hpp>
 #include <pwb/ui_shell/map_status_bar.hpp>
@@ -86,12 +86,12 @@ CompositeDocument::CompositeDocument(QWidget* parent) : QWidget(parent) {
     facies_palette->hide();
     facies_eyedropper = new pwb::ui_widgets::FaciesEyedropper(this);
 
-    // dock 面板（宿主注册）。
-    layer_manager = new LayerManagerPanel();
+    // dock 面板（宿主注册）。图层管理面（LayerManagerPanel）与阶段条
+    // （MappingStageBar）已退役：前者由 QGIS 原生 QgsLayerTreeView dock
+    // 取代，后者由 ribbon 阶段页签 + StatusBar 层位下拉取代。
     input_tree = new InputTreePanel();
     linked_views = new LinkedViewsPanel();
     stage_panel = new MappingStagePanel();
-    stage_bar = new MappingStageBar();
 
     // 内容变化（数字化 / 属性编辑）经 120ms debounce 重组快照；结构变
     // 化立即重组（Python 同语义）。
@@ -184,7 +184,6 @@ bool CompositeDocument::eventFilter(QObject* obj, QEvent* event) {
 
 void CompositeDocument::set_project_crs(const std::string& crs) {
     project_crs_ = crs;
-    layer_manager->set_project_crs(crs);
     edit_controller->project_crs = crs;
 }
 
@@ -209,11 +208,7 @@ void CompositeDocument::wire_panels() {
             &CompositeEditControllerObject::native_join_refused, this,
             &CompositeDocument::status_message);
 
-    // 阶段条/阶段面板 → 宿主请求信号。
-    connect(stage_bar, &MappingStageBar::stage_requested, this,
-            &CompositeDocument::stage_switch_requested);
-    connect(stage_bar, &MappingStageBar::horizon_requested, this,
-            &CompositeDocument::horizon_requested);
+    // 阶段面板 → 宿主请求信号。
     connect(stage_panel, &MappingStagePanel::stage_switch_requested, this,
             &CompositeDocument::stage_switch_requested);
     connect(stage_panel, &MappingStagePanel::action_requested, this,

@@ -10,12 +10,9 @@
 
 #include <pwb/ui_canvas/layer_scene.hpp>
 #include <pwb/ui_canvas/map_render_backend.hpp>
-#include <pwb/ui_canvas/qt/native_raster_controller.hpp>
 
 // RenderFrame crosses no queued boundary today (frames are polled, not
 // signalled) but declaring it keeps host-side queued connections safe.
-// NativeRasterRequest is declared in native_raster_controller.hpp (the
-// type's own header) — not repeated here.
 Q_DECLARE_METATYPE(pwb::ui_canvas::RenderFrame)
 // Extent is std::array<double,4> — the same metatype id.
 Q_DECLARE_METATYPE(pwb::ui_canvas::Extent)

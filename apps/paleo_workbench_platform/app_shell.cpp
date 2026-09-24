@@ -23,7 +23,8 @@
 #include <qgscoordinatereferencesystem.h>
 
 #include <pwb/ui_composite/composite_document.hpp>
-#include <pwb/ui_composite/layer_manager_panel.hpp>
+#include <pwb/ui_composite/input_tree_panel.hpp>
+#include <pwb/ui_composite/linked_views_panel.hpp>
 #include <pwb/ui_composite/linked_workspace.hpp>
 #include <pwb/ui_composite/mapping_stage_panel.hpp>
 #include <pwb/ui_data_core/preview_provider.hpp>
@@ -145,8 +146,11 @@ WorkspaceHostWidget::WorkspaceHostWidget(QWidget* parent)
 }
 
 AppShell::AppShell(QWidget* parent,
-                   ui_wellseis::qt::JointHostController* joint_host)
-    : QWidget(parent), joint_host_(joint_host) {
+                   ui_wellseis::qt::JointHostController* joint_host,
+                   seismic_service::SeismicVolumeService* seismic_volume_service)
+    : QWidget(parent),
+      joint_host_(joint_host),
+      seismic_volume_service_(seismic_volume_service) {
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->setSpacing(0);
@@ -255,18 +259,11 @@ AppShell::AppShell(QWidget* parent,
 AppShell::~AppShell() = default;
 
 void AppShell::adopt_layer_tree_dock(QDockWidget* dock) {
-    if (dock == nullptr || workstation_ == nullptr || composite_ == nullptr) {
+    // The native QgsLayerTreeView dock takes over the legacy
+    // "composite_layer" dock slot — the retired prototype LayerManagerPanel
+    // no longer exists to be hidden here (QGIS tree = the one layer list).
+    if (dock == nullptr || workstation_ == nullptr) {
         return;
-    }
-    if (auto* legacy_dock = workstation_->dock("composite_layer")) {
-        QWidget* manager = composite_->layer_manager;
-        if (legacy_dock->widget() == manager) {
-            legacy_dock->setWidget(new QWidget(legacy_dock));
-        }
-        if (manager != nullptr) {
-            manager->setParent(composite_);
-            manager->hide();
-        }
     }
     workstation_->adopt_dock("composite_layer", dock);
 }
@@ -306,10 +303,12 @@ void AppShell::build_pages() {
 // real seismic viewer stack (volume service + horizon-pick viewer). Without
 // the closure deps the panel keeps its honest empty-placeholder behavior.
 #if defined(PWB_WITH_CLOSURE_SEISMIC)
-    static pwb::seismic_service::SeismicVolumeService
-        closure_seismic_volume_service;
-    pwb::closure_seismic::install_seismic_page(
-        {seismic_page_, &closure_seismic_volume_service});
+    // D4：宿主注入的窗口级 volume service（无函数内 static —— 每窗口
+    // 壳不再暗藏进程级服务状态）；未注入时页面保持诚实的未绑定占位。
+    if (seismic_volume_service_ != nullptr) {
+        pwb::closure_seismic::install_seismic_page(
+            {seismic_page_, seismic_volume_service_});
+    }
 #endif
 // END CLOSURE-SEISMIC
     if (joint_host_ == nullptr) {
@@ -438,24 +437,10 @@ void AppShell::adopt_preparation_page(QWidget* page) {
 // END CLOSURE-MAPPING
 
 void AppShell::wire_ribbon() {
-    // File button: minimal menu reusing the AppShell project-action
-    // signals (the host window owns the implementations — no parallel
-    // QAction logic, D4). The full menu convergence lands in M4.
-    auto* file_menu = new QMenu(ribbon_);
-    file_menu->addAction(tr("新建工程…"), this,
-                         [this] { emit new_project_requested(); });
-    file_menu->addAction(tr("打开工程…"), this,
-                         [this] { emit open_project_requested(); });
-    file_menu->addAction(tr("打开样例工程"), this,
-                         [this] { emit open_sample_project_requested(); });
-    file_menu->addAction(tr("保存工程"), this,
-                         [this] { emit save_project_requested(); });
-    file_menu->addSeparator();
-    file_menu->addAction(tr("工程属性…"), this,
-                         [this] { emit properties_requested(); });
-    file_menu->addSeparator();
-    file_menu->addAction(tr("退出"), this, [this] { emit exit_requested(); });
-    ribbon_->set_file_menu(file_menu);
+    // B1（shell 收敛）：此处的临时最小文件菜单已删除——宿主
+    // MainWindow::wire_ribbon_commands 安装唯一文件菜单（同一批共享
+    // QAction，含 MRU/面板/布局）。这里不再制造第二个菜单 identity。
+    // 项目动作信号保留：WorkstationAppBar（隐藏的全局栏）仍经它们转发。
 
     // Ctrl+F1 collapse entry through the central registry (conflicts()
     // gate lives in the ribbon library).
@@ -465,17 +450,9 @@ void AppShell::wire_ribbon() {
     connect(ribbon_, &ui_ribbon::qt::RibbonBar::searchRequested, this,
             [this] { palette_->popup(); });
 
-    // Availability channel over the process CommandRegistry: a command the
-    // registry does not know stays enabled — the ribbon table still carries
-    // M4 semantic placeholders that the registry rebinds later; a known
-    // command answers with the registry verdict (fail-closed reason).
-    ribbon_->set_command_evaluator(
-        [](const std::string& command_id) -> ui_ribbon::CommandState {
-            auto& registry = ui_shell::command_registry();
-            if (registry.get(command_id) == nullptr) return {true, ""};
-            const auto verdict = registry.evaluate(command_id, nullptr);
-            return {verdict.enabled, verdict.reason};
-        });
+    // B3（shell 收敛）：壳层不再装临时 evaluator——宿主
+    // MainWindow::wire_ribbon_commands 装配带活体会话快照的正式版本
+    // （unregistered 命令保持启用的 fail-open 语义在宿主版本同样成立）。
 
     // Command routing: bound commands live in the registry (palette parity:
     // record recent + run the one callback); an unbound placeholder is an
@@ -575,11 +552,8 @@ void AppShell::wire_workstation() {
             return scroll;
         });
     // Composite sub-panels dock like Python's WorkstationFrame._add_dock.
-    workstation_->set_panel_factory(
-        "composite_layer",
-        [this](const std::string&, QWidget*) -> QWidget* {
-            return composite_->layer_manager;
-        });
+    // "composite_layer" hosts the host-adopted native QgsLayerTreeView dock
+    // (see adopt_layer_tree_dock) — no prototype factory.
     workstation_->set_panel_factory(
         "composite_input",
         [this](const std::string&, QWidget*) -> QWidget* {
@@ -610,13 +584,9 @@ void AppShell::wire_workstation() {
                 new ui_composite::LinkedInterpretationWorkspace(parent);
             return predict_compare_;
         });
-    workstation_->set_panel_factory(
-        "reference_maps",
-        [this](const std::string&, QWidget* parent) -> QWidget* {
-            // 参考图层清单 —— 与图层管理同一交互面的第二实例。
-            reference_layers_ = new ui_composite::LayerManagerPanel(parent);
-            return reference_layers_;
-        });
+    // "reference_maps"（ws2 右栏「参考」）：原型第二图层清单面已随
+    // LayerManagerPanel 退役——dock 落回诚实占位，参考图层直接经
+    // QGIS 原生图层树（图层 dock）管理。
     workstation_->set_panel_factory(
         "map_decor",
         [this](const std::string&, QWidget* parent) -> QWidget* {

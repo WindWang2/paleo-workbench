@@ -101,8 +101,8 @@ std::vector<DockDescriptor> make_workstation_docks() {
         docks.push_back(std::move(x));
     }
     {
-        // ws2 右栏「参考」页 —— 参考图层清单（LayerManagerPanel 第二
-        // 实例：勾选/不透明度同一交互面）。
+        // ws2 右栏「参考」页 —— 原型第二图层清单面已随 LayerManagerPanel
+        // 退役；参考图层直接经 QGIS 原生图层树管理，dock 保留诚实占位。
         auto x = d("reference_maps", "参考");
         x.preferred_area = kAreaRight;
         x.default_visible = false;

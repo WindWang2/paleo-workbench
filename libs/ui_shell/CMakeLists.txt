@@ -39,7 +39,6 @@ if(TARGET Qt6::Widgets)
         src/crs_guidance.cpp
         src/adaptive_page_stack.cpp
         src/command_palette.cpp
-        src/operation_registry_qt.cpp
         # Q_OBJECT headers must be listed as sources — AUTOMOC does not
         # scan the separate include/ tree on its own.
         include/pwb/ui_shell/style_registry.hpp
@@ -51,7 +50,6 @@ if(TARGET Qt6::Widgets)
         include/pwb/ui_shell/crs_guidance.hpp
         include/pwb/ui_shell/adaptive_page_stack.hpp
         include/pwb/ui_shell/command_palette.hpp
-        include/pwb/ui_shell/operation_registry_qt.hpp
     )
     add_library(Pwb::UiShellQt ALIAS pwb_ui_shell_qt)
     set_target_properties(pwb_ui_shell_qt PROPERTIES AUTOMOC ON)

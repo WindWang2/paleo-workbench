@@ -48,9 +48,7 @@ class CompositeEditController;
 class CompositeEditControllerObject;
 class IdentifyResultsPanel;
 class InputTreePanel;
-class LayerManagerPanel;
 class LinkedViewsPanel;
-class MappingStageBar;
 class MappingStagePanel;
 class TopologyCheckerPanel;
 
@@ -74,12 +72,12 @@ public:
     QToolBar* map_toolbar() const { return map_toolbar_; }
 
     // 面板实例由壳层创建、宿主注册为 dock（Python WorkstationFrame
-    // parity）。
-    LayerManagerPanel* layer_manager = nullptr;
+    // parity）。图层管理面已退役：QGIS 原生 QgsLayerTreeView（宿主的
+    // layer-tree dock）是唯一图层清单权威；阶段条已由 ribbon 页签 +
+    // StatusBar 层位下拉取代。
     InputTreePanel* input_tree = nullptr;
     LinkedViewsPanel* linked_views = nullptr;
     MappingStagePanel* stage_panel = nullptr;
-    MappingStageBar* stage_bar = nullptr;
     IdentifyResultsPanel* identify_results = nullptr;
     TopologyCheckerPanel* topology_panel = nullptr;
     pwb::ui_widgets::InteractiveQCHub* qc_hub = nullptr;

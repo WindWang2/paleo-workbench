@@ -95,7 +95,6 @@
 #include <pwb/ui_composite/constraints_sync.hpp>
 #include <pwb/ui_composite/factor_group_layers.hpp>
 #include <pwb/ui_composite/layer_group_controller.hpp>
-#include <pwb/ui_composite/layer_manager_panel.hpp>
 #include <pwb/ui_composite/map_styles.hpp>
 #include <pwb/ui_composite/roles.hpp>
 #include <pwb/ui_composite/vector_layer.hpp>
@@ -2989,9 +2988,6 @@ private:
         apply_categorized_facies_style_(*layer_id, source_features);
         state.artifact_maturity["phase1_draft:" + *layer_id] = "draft";
         edit->set_active_layer(*layer_id);
-        if (auto* doc = composite(); doc != nullptr && doc->layer_manager != nullptr) {
-            doc->layer_manager->select_layer(*layer_id);
-        }
         status("已创建解释草稿（DERIVED）——RAW 保持不变，编辑保存在草稿上");
     }
 
@@ -3388,10 +3384,6 @@ private:
         if (!layer_id.has_value()) return;
         state.artifact_maturity["integrated:" + *layer_id] = "draft";
         edit->set_active_layer(*layer_id);
-        if (auto* doc = composite();
-            doc != nullptr && doc->layer_manager != nullptr) {
-            doc->layer_manager->select_layer(*layer_id);
-        }
         register_integrated_interpretation_(*layer_id, "综合沉积相（草稿）",
                                             {}, "");
         status("已创建综合解释草稿（证据 "
@@ -3496,10 +3488,6 @@ private:
         if (!layer_id.has_value()) return;
         state.artifact_maturity["integrated:" + *layer_id] = "draft";
         edit->set_active_layer(*layer_id);
-        if (auto* doc = composite();
-            doc != nullptr && doc->layer_manager != nullptr) {
-            doc->layer_manager->select_layer(*layer_id);
-        }
         status("已创建综合相带边界（" + std::to_string(features.size())
                + " 条，源自草稿 "
                + (source_id.empty() ? "（工程侧）" : source_id)

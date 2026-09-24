@@ -6,7 +6,6 @@
 
 add_library(pwb_ui_stageflow STATIC
     src/stage_presentation.cpp
-    src/surface_state.cpp
 )
 add_library(Pwb::UiStageflow ALIAS pwb_ui_stageflow)
 target_include_directories(pwb_ui_stageflow PUBLIC
