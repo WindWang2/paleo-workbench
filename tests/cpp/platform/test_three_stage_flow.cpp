@@ -150,17 +150,19 @@ void check_stage_switch_and_layout(MainWindow& window) {
         window.findChild<QgsMapCanvas*>(QStringLiteral("session-map-canvas"));
     PWB_CHECK(canvas_before != nullptr);
 
-    // M3 science-host — 面板化改订: 底部阶段行 dock 投影随阶段权威走
-    // （每格独立 dock；行内 tab 组，成员集按工作区显隐）。
+    // mockup-faithful 改订: 阶段窗格住进科学宿主页内栈（ws1 井震两联 /
+    // ws2 连井剖面 / ws3 单因素参考带）—— 退役 dock 留在注册表但
+    // 永不显示。
     for (const char* dock_id :
          {"pair_link", "predict_task", "seismic_predict", "data_prep",
           "strat_compare", "seq_frame", "factor_refs"}) {
         PWB_CHECK_MSG(shell->workstation()->dock(dock_id) != nullptr,
                       std::string("stage dock missing: ") + dock_id);
+        PWB_CHECK_MSG(!shell->workstation()->dock_visible(dock_id),
+                      std::string("retired dock visible: ") + dock_id);
     }
 
-    // Stage 2: factor surfaces appear; bottom row flips to the
-    // constraint dock set.
+    // Stage 2: factor surfaces appear; 页内阶段窗格切到连井剖面。
     flow->request_stage("constraint_factor");
     PWB_CHECK(flow->snapshot().stage_value == "constraint_factor");
     PWB_CHECK(flow->snapshot().stage_label.find("约束") != std::string::npos);
@@ -168,12 +170,8 @@ void check_stage_switch_and_layout(MainWindow& window) {
     PWB_CHECK(input_dock != nullptr);
     PWB_CHECK_MSG(input_dock->isVisible(),
                   "stage2 profile did not show 输入与结果 dock");
-    PWB_CHECK_MSG(
-        shell->workstation()->dock_visible("data_prep") ||
-            shell->workstation()->dock_visible("crosswell"),
-        "stage2 did not project the constraint stage docks");
-    PWB_CHECK(!shell->workstation()->dock_visible("pair_link"));
-    PWB_CHECK(!shell->workstation()->dock_visible("factor_refs"));
+    PWB_CHECK_MSG(shell->stage_stack()->currentIndex() == 1,
+                  "stage2 did not select the crosswell stage pane");
     // The legacy well/seismic placeholder docks stay managed-but-hidden
     // (the real two-pane lives in the science-host bottom).
     auto* seismic_dock = shell->workstation()->dock("seismic");
@@ -186,12 +184,10 @@ void check_stage_switch_and_layout(MainWindow& window) {
     flow->request_stage("integrated_compilation");
     PWB_CHECK(flow->snapshot().stage_value == "integrated_compilation");
     PWB_CHECK(!input_dock->isVisible());
-    PWB_CHECK_MSG(shell->workstation()->dock_visible("factor_refs"),
-                  "stage3 did not raise the 单因素参考 dock");
-    auto* refs_dock = shell->workstation()->dock("factor_refs");
-    PWB_CHECK(refs_dock != nullptr);
-    PWB_CHECK(refs_dock->widget() != nullptr &&
-              refs_dock->widget()->findChild<QWidget*>(
+    PWB_CHECK_MSG(shell->stage_stack()->currentIndex() == 2,
+                  "stage3 did not select the factor-refs stage pane");
+    PWB_CHECK(shell->stage_pane_factor() != nullptr);
+    PWB_CHECK(shell->stage_pane_factor()->findChild<QWidget*>(
                   "FactorReferenceStrip") != nullptr);
     if (auto* page = shell->mapping_page()) {
         if (page->dock_manager() != nullptr) {
@@ -201,15 +197,13 @@ void check_stage_switch_and_layout(MainWindow& window) {
         }
     }
 
-    // Stage 1: prediction context — 井震两联 dock 抬起，split 在 dock
-    // 宿主内。
+    // Stage 1: prediction context — 井震两联页内窗格抬起，split 在
+    // 窗格宿主内。
     flow->request_stage("facies_calibration");
-    PWB_CHECK_MSG(shell->workstation()->dock_visible("pair_link"),
-                  "stage1 did not raise the 井震两联 dock");
-    auto* pair_dock = shell->workstation()->dock("pair_link");
-    PWB_CHECK(pair_dock != nullptr);
-    PWB_CHECK(pair_dock->widget() != nullptr &&
-              pair_dock->widget()->findChild<QWidget*>(
+    PWB_CHECK_MSG(shell->stage_stack()->currentIndex() == 0,
+                  "stage1 did not select the pair-link stage pane");
+    PWB_CHECK(shell->stage_pane_pair() != nullptr);
+    PWB_CHECK(shell->stage_pane_pair()->findChild<QWidget*>(
                   "PredictionBottomSplit") != nullptr);
     // The seismic/well docks carry no real panel factory in this
     // composition — a stage profile must not present their

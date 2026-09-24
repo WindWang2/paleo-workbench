@@ -167,25 +167,27 @@ std::string_view review_status_label(std::string_view value) {
 }
 
 const std::vector<ColumnDef>& column_definitions() {
-    // data_table_columns.COLUMN_DEFINITIONS.
+    // 稿式列序：名称|类型|关联对象|层位|版本|状态|修改时间|大小 在前
+    // （默认可见 8 列），其余列经「列设置」可加回。
     static const std::vector<ColumnDef> kDefs = {
-        {"name", "文件名", true},      {"type", "类型"},
-        {"stage", "生命周期"},          {"version", "版本"},
-        {"lineage", "血缘"},           {"tags", "标签"},
-        {"managed", "管理方式"},        {"integrity", "完整性"},
-        {"format", "格式"},            {"status", "状态"},
-        {"role", "角色"},              {"review_status", "审核状态"},
-        {"size", "大小"},              {"modified", "修改时间"},
-        {"source", "来源"},            {"path", "路径"},
+        {"name", "名称", true},       {"type", "类型"},
+        {"linked", "关联对象"},        {"horizon", "层位"},
+        {"version", "版本"},           {"status", "状态"},
+        {"modified", "修改时间"},      {"size", "大小"},
+        {"stage", "生命周期"},          {"lineage", "血缘"},
+        {"tags", "标签"},             {"managed", "管理方式"},
+        {"integrity", "完整性"},       {"format", "格式"},
+        {"role", "角色"},             {"review_status", "审核状态"},
+        {"source", "来源"},           {"path", "路径"},
     };
     return kDefs;
 }
 
 const std::vector<std::string>& default_column_keys() {
-    // data_table_columns.DEFAULT_COLUMN_KEYS.
+    // 稿 ws0 数据列表的默认 8 列。
     static const std::vector<std::string> kDefaults = {
-        "name", "type", "stage", "version",
-        "lineage", "tags", "integrity", "modified",
+        "name", "type", "linked", "horizon",
+        "version", "status", "modified", "size",
     };
     return kDefaults;
 }

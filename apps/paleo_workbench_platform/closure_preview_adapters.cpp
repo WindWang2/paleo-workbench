@@ -286,6 +286,76 @@ std::shared_ptr<const void> load_json_payload(const std::string& path,
 
 // --- catalog asset source ----------------------------------------------------
 
+namespace {
+
+// 稿式「关联对象」列的解析：工程 JSON 的 entity_asset_links
+// (asset_id → entity_id) + 实体名表（wells/seismic_surveys/
+// geological_entities 的 id → name）。读不到 → 空表，列显 "—"。
+struct EntityLinkTables {
+    std::map<std::string, std::string> entity_names;   // entity_id → name
+    std::map<std::string, std::string> asset_entities; // asset_id → entity_id
+};
+
+EntityLinkTables entity_link_tables(
+    const std::filesystem::path& project_file) {
+    EntityLinkTables tables;
+    domain::Json root = domain::Json::object();
+    {
+        std::ifstream in(project_file);
+        if (in) {
+            try {
+                in >> root;
+            } catch (const std::exception&) {
+                return tables;
+            }
+        }
+    }
+    const auto name_table = [&tables, &root](const char* key) {
+        const auto it = root.find(key);
+        if (it == root.end() || !it->is_array()) return;
+        for (const auto& node : *it) {
+            const auto id_it = node.find("id");
+            const auto name_it = node.find("name");
+            if (id_it != node.end() && id_it->is_string() &&
+                name_it != node.end() && name_it->is_string()) {
+                tables.entity_names[id_it->get<std::string>()] =
+                    name_it->get<std::string>();
+            }
+        }
+    };
+    name_table("wells");
+    name_table("seismic_surveys");
+    name_table("geological_entities");
+
+    const auto links_it = root.find("entity_asset_links");
+    if (links_it != root.end() && links_it->is_array()) {
+        for (const auto& node : *links_it) {
+            const auto asset_it = node.find("asset_id");
+            const auto entity_it = node.find("entity_id");
+            if (asset_it != node.end() && asset_it->is_string() &&
+                entity_it != node.end() && entity_it->is_string()) {
+                tables.asset_entities[asset_it->get<std::string>()] =
+                    entity_it->get<std::string>();
+            }
+        }
+    }
+    return tables;
+}
+
+std::string metadata_horizon(const domain::Json& metadata) {
+    // 资产/版本 metadata 的层位登记键（无标准键——读常见名，
+    // 全缺省 → 空）。
+    for (const char* key : {"horizon", "horizon_id", "target_horizon"}) {
+        const auto it = metadata.find(key);
+        if (it != metadata.end() && it->is_string()) {
+            return it->get<std::string>();
+        }
+    }
+    return {};
+}
+
+}  // namespace
+
 std::vector<ui_pages_data::AssetRow> asset_rows_from_snapshot(
     const pwb::data::ProjectSnapshotV1& snapshot) {
     std::map<std::string, const catalog::DataVersion*> current;
@@ -295,6 +365,8 @@ std::vector<ui_pages_data::AssetRow> asset_rows_from_snapshot(
     }
     const std::filesystem::path project_dir =
         snapshot.project_file.parent_path();
+    const EntityLinkTables links =
+        entity_link_tables(snapshot.project_file);
 
     std::vector<ui_pages_data::AssetRow> rows;
     rows.reserve(snapshot.catalog_assets.size());
@@ -308,6 +380,16 @@ std::vector<ui_pages_data::AssetRow> asset_rows_from_snapshot(
         row.view.status = "indexed";
         row.view.managed = true;
         row.view.is_trashed = false;
+        // 稿式「关联对象」列：entity_asset_links → 实体名。
+        if (const auto link = links.asset_entities.find(row.view.id);
+            link != links.asset_entities.end()) {
+            const auto name = links.entity_names.find(link->second);
+            row.view.linked_label =
+                name != links.entity_names.end() ? name->second
+                                                 : link->second;
+        }
+        row.view.horizon_label = metadata_horizon(asset.metadata);
+        row.view.description = asset.description;
         if (asset.current_version_id.has_value()) {
             const auto it = current.find(asset.current_version_id->str());
             if (it != current.end() && it->second != nullptr) {
@@ -319,6 +401,11 @@ std::vector<ui_pages_data::AssetRow> asset_rows_from_snapshot(
                     std::string(pwb::domain::to_string(version.stage));
                 row.view.version_label =
                     "v" + std::to_string(version.version_number);
+                row.view.modified_label = version.created_at;
+                if (row.view.horizon_label.empty()) {
+                    row.view.horizon_label =
+                        metadata_horizon(version.metadata);
+                }
                 if (!version.path.empty()) {
                     std::error_code ec;
                     const std::filesystem::path p(version.path);

@@ -5,6 +5,9 @@
 // seam (ui.workstation.common.tinted_map_icon is another slice).
 #pragma once
 
+#include <QList>
+#include <QPair>
+#include <QStringList>
 #include <QWidget>
 
 #include <functional>
@@ -13,6 +16,7 @@
 
 class QAction;
 class QActionGroup;
+class QComboBox;
 class QIcon;
 class QLabel;
 class QLineEdit;
@@ -58,6 +62,13 @@ public:
     // Programmatic sync WITHOUT re-emitting search_changed (#feedback loop).
     void set_search_text_silent(const QString& text);
 
+    // 稿式过滤行：类型/状态下拉候选由真实行集驱动——
+    // (原始键, 显示名) 对；计数显示「共 N 条数据」。
+    void set_filter_options(
+        const QList<QPair<QString, QString>>& types,
+        const QList<QPair<QString, QString>>& statuses);
+    void set_row_count(int count);
+
     QPushButton* import_button() { return import_btn_; }
     QPushButton* verify_button() { return verify_btn_; }
     QPushButton* cancel_import_button() { return cancel_import_btn_; }
@@ -79,6 +90,9 @@ Q_SIGNALS:
     void health_check_requested();
     void reader_toggled();
     void search_changed(const QString& text);
+    // 稿式下拉过滤：空串 = 所有类型/所有状态。
+    void type_filter_changed(const QString& type_key);
+    void status_filter_changed(const QString& status_key);
     void tag_filter_changed(const QStringList& tags, const QString& op);
     void tag_manager_requested();
     void cancel_import_requested();
@@ -105,6 +119,9 @@ private:
     QPushButton* tag_manager_btn_;
     QLabel* operation_status_label_;
     QLineEdit* search_box_;
+    QComboBox* type_combo_;
+    QComboBox* status_combo_;
+    QLabel* count_label_;
     QWidget* column_settings_slot_;
     QPushButton* reader_btn_;
     QMenu* tag_filter_menu_;

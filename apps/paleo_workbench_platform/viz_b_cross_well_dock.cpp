@@ -243,6 +243,40 @@ void VizBCrossWellDock::build_ui() {
     setWidget(tabs_);
 }
 
+QStringList VizBCrossWellDock::all_well_names() const {
+    QStringList names;
+    names.reserve(static_cast<qsizetype>(wells_.size()));
+    for (const auto& well : wells_) {
+        names << QString::fromStdString(well.name);
+    }
+    return names;
+}
+
+void VizBCrossWellDock::set_well_filter(const QSet<QString>& names) {
+    well_filter_ = names;
+    apply_wells_to_canvas();
+}
+
+void VizBCrossWellDock::set_show_frame(bool show) {
+    if (canvas_ != nullptr) canvas_->set_show_tops(show);
+}
+
+void VizBCrossWellDock::apply_wells_to_canvas() {
+    if (canvas_ != nullptr) {
+        std::vector<WellColumnData> shown;
+        shown.reserve(wells_.size());
+        for (const auto& well : wells_) {
+            if (well_filter_.isEmpty() ||
+                well_filter_.contains(
+                    QString::fromStdString(well.name))) {
+                shown.push_back(well);
+            }
+        }
+        canvas_->set_wells(shown);
+    }
+    emit wells_changed(all_well_names());
+}
+
 bool VizBCrossWellDock::load_wells_from_json(const QString& path,
                                              QString* error) {
     std::ifstream file(path.toStdString());
@@ -298,7 +332,7 @@ bool VizBCrossWellDock::load_wells_from_json(const QString& path,
     wells_ = std::move(wells);
     last_wells_path_ = QFileInfo(path).absoluteFilePath();
     last_las_paths_.clear();
-    canvas_->set_wells(wells_);
+    apply_wells_to_canvas();
     tie_well_selector_->clear();
     for (const WellColumnData& well : wells_) {
         tie_well_selector_->addItem(QString::fromStdString(well.name));
@@ -375,7 +409,7 @@ void VizBCrossWellDock::apply_las_wells(
         last_las_paths_.append(QFileInfo(path).absoluteFilePath());
     }
     well_coords_cache_ = coords;  // LAS 无坐标：诚实空数组
-    canvas_->set_wells(wells_);
+    apply_wells_to_canvas();
     tie_well_selector_->clear();
     for (const WellColumnData& well : wells_) {
         tie_well_selector_->addItem(QString::fromStdString(well.name));
@@ -648,7 +682,7 @@ void VizBCrossWellDock::on_auto_arrange() {
             arranged.push_back(wells_[index]);
         }
         wells_ = std::move(arranged);
-        canvas_->set_wells(wells_);
+        apply_wells_to_canvas();
         emit status_message(tr("剖面已按 PCA 主轴排列"));
     } catch (const pwb::viz::cross_well::PlannerError& exc) {
         emit status_message(QString::fromStdString(exc.what()));
@@ -1141,8 +1175,9 @@ void VizBCrossWellDock::reset_workspace() {
     top_meta_ = Json::object();
     last_result_note_.clear();
     if (tie_well_selector_ != nullptr) tie_well_selector_->clear();
+    well_filter_.clear();
+    apply_wells_to_canvas();
     if (canvas_ != nullptr) {
-        canvas_->set_wells(wells_);
         canvas_->update();
     }
     if (preview_ != nullptr) preview_->set_tops(tops_model_.all_tops());

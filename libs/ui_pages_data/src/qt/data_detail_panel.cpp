@@ -1,8 +1,8 @@
 // UI-06 — DataDetailPanel shell (see qt/data_detail_panel.hpp).
 #include <pwb/ui_pages_data/qt/data_detail_panel.hpp>
 
+#include <QGridLayout>
 #include <QLabel>
-#include <QPixmap>
 #include <QVBoxLayout>
 
 #include <pwb/ui_pages_data/vocab.hpp>
@@ -34,27 +34,20 @@ DataDetailPanel::DataDetailPanel(QWidget* parent) : QFrame(parent) {
     layout->setContentsMargins(12, 12, 12, 12);
     layout->setSpacing(12);
 
-    title_ = new QLabel(QStringLiteral("请选择数据项"), this);
+    // 稿 ws0 右列：面板标题恒为「数据属性」（文件名称是首行 kv），
+    // 值对为两列网格（键灰、值主色）。
+    title_ = new QLabel(QStringLiteral("数据属性"), this);
     ui_shell::style_bind(title_, [] {
         return QStringLiteral("color: %1; font-weight: 600;")
             .arg(pal("TEXT_PRIMARY"));
     });
     layout->addWidget(title_);
 
-    metadata_layout_ = new QVBoxLayout();
-    metadata_layout_->setSpacing(4);
-    layout->addLayout(metadata_layout_);
-
-    preview_title_ = new QLabel(QStringLiteral("预览"), this);
-    ui_shell::style_bind(preview_title_, [] {
-        return QStringLiteral("color: %1; font-weight: 600;")
-            .arg(pal("TEXT_PRIMARY"));
-    });
-    layout->addWidget(preview_title_);
-
-    preview_layout_ = new QVBoxLayout();
-    preview_layout_->setSpacing(4);
-    layout->addLayout(preview_layout_);
+    grid_ = new QGridLayout();
+    grid_->setHorizontalSpacing(8);
+    grid_->setVerticalSpacing(4);
+    grid_->setColumnStretch(1, 1);
+    layout->addLayout(grid_);
     layout->addStretch();
 
     update_asset(std::nullopt);
@@ -62,100 +55,57 @@ DataDetailPanel::DataDetailPanel(QWidget* parent) : QFrame(parent) {
 
 void DataDetailPanel::update_asset(
     const std::optional<AssetRow>& asset) {
-    clear_layout(metadata_layout_);
-    clear_layout(preview_layout_);
+    clear_grid();
 
     if (!asset.has_value()) {
-        title_->setText(QStringLiteral("请选择数据项"));
-        add_muted(metadata_layout_,
-                  QStringLiteral("从列表中选择一个数据、成果或文件"));
-        preview_title_->setText(QStringLiteral("预览"));
-        add_muted(preview_layout_, QStringLiteral("暂无预览"));
+        auto* hint = new QLabel(
+            QStringLiteral("从列表中选择一个数据、成果或文件"), this);
+        hint->setWordWrap(true);
+        ui_shell::style_bind(hint, [] {
+            return QStringLiteral("color: %1;").arg(pal("TEXT_SECONDARY"));
+        });
+        grid_->addWidget(hint, 0, 0, 1, 2);
         return;
     }
 
     const AssetRow& row = *asset;
-    const std::string dir = base_dir();
-
-    if (row.kind == AssetKind::Artifact) {
-        // _update_artifact parity.
-        const QString path =
-            QString::fromStdString(row.view.path);
-        const QString name =
-            path.section('/', -1).isEmpty() ? path : path.section('/', -1);
-        title_->setText(name);
-        add_row(QStringLiteral("类型"), QStringLiteral("成果"));
-        add_row(QStringLiteral("格式"),
-                QString::fromStdString(row.view.format));
-        add_row(QStringLiteral("路径"), path);
-        add_row(QStringLiteral("关联"),
-                QString::fromStdString(row.view.linked_id));
-        const auto state =
-            preview_fn_ ? preview_fn_(row, dir) : DetailPreviewState{};
-        preview_title_->setText(QString::fromStdString(state.title));
-        for (const auto& line : state.lines) {
-            add_muted(preview_layout_, QString::fromStdString(line));
-        }
-        return;
-    }
-
-    // _update_resource parity.
-    title_->setText(QString::fromStdString(row.view.name));
-    add_row(QStringLiteral("类型"),
-            QString::fromStdString(std::string(
-                resource_type_label(row.view.type))));
-    add_row(QStringLiteral("格式"),
-            QString::fromStdString(row.view.format));
-    add_row(QStringLiteral("状态"),
-            QString::fromStdString(row.view.status));
-    add_row(QStringLiteral("路径"),
-            QString::fromStdString(row.view.path));
-    add_row(QStringLiteral("校验"),
-            row.view.checksum.empty()
-                ? QStringLiteral("—")
-                : QString::fromStdString(row.view.checksum));
-
-    const auto state =
-        preview_fn_ ? preview_fn_(row, dir) : DetailPreviewState{};
-    preview_title_->setText(QString::fromStdString(state.title));
-    if (state.mode == "image" && !state.image_path.empty()) {
-        if (!add_image_preview(QString::fromStdString(state.image_path))) {
-            add_warning(QStringLiteral("图片预览加载失败"));
-        }
-        add_muted(preview_layout_,
-                  QStringLiteral("图片: %1").arg(
-                      QString::fromStdString(state.image_path)));
-    } else if (state.mode == "pdf" && !state.document_path.empty()) {
-        if (!add_pdf_preview(QString::fromStdString(state.document_path))) {
-            add_warning(QStringLiteral("PDF预览加载失败"));
-        }
-        add_muted(preview_layout_,
-                  QStringLiteral("PDF: %1").arg(
-                      QString::fromStdString(state.document_path)));
-    } else if (state.mode == "text" || state.mode == "table") {
-        for (const auto& line : state.lines) {
-            add_preview_line(QString::fromStdString(line));
-        }
-    } else {
-        for (const auto& line : state.lines) {
-            add_muted(preview_layout_, QString::fromStdString(line));
-        }
-    }
-    if (!state.warning.empty()) {
-        add_warning(QString::fromStdString(state.warning));
-    }
+    const AssetView& v = row.view;
+    const auto show = [](const std::string& s) {
+        return s.empty() ? QStringLiteral("—")
+                         : QString::fromStdString(s);
+    };
+    // 稿式键序：文件名称/数据类型/所属对象/层位/版本/深度范围/
+    // 数据单位/数据来源/修改时间/文件大小/状态/描述。
+    add_kv(QStringLiteral("文件名称"), show(v.name));
+    add_kv(QStringLiteral("数据类型"),
+           row.kind == AssetKind::Artifact
+               ? QStringLiteral("成果")
+               : QString::fromStdString(std::string(
+                     resource_type_label(v.type))));
+    add_kv(QStringLiteral("所属对象"), show(v.linked_label));
+    add_kv(QStringLiteral("层位"), show(v.horizon_label));
+    add_kv(QStringLiteral("版本"), show(v.version_label));
+    // 深度范围/数据单位：目录未暴露逐资产字段 —— 诚实 "—"。
+    add_kv(QStringLiteral("深度范围"), QStringLiteral("—"));
+    add_kv(QStringLiteral("数据单位"), QStringLiteral("—"));
+    add_kv(QStringLiteral("数据来源"), show(v.source_label));
+    add_kv(QStringLiteral("修改时间"), show(v.modified_label));
+    add_kv(QStringLiteral("文件大小"), show(v.size_label));
+    add_kv(QStringLiteral("状态"), show(v.status));
+    add_kv(QStringLiteral("描述"), show(v.description));
 }
 
 void DataDetailPanel::show_downstream_impact(
     const std::vector<std::tuple<std::string, std::string, std::string>>&
         rows) {
     if (rows.empty()) return;
+    const int row_base = grid_->rowCount();
     auto* title = new QLabel(QStringLiteral("下游影响"), this);
     ui_shell::style_bind(title, [] {
         return QStringLiteral("color: %1; font-weight: 600;")
             .arg(pal("TEXT_PRIMARY"));
     });
-    metadata_layout_->addWidget(title);
+    grid_->addWidget(title, row_base, 0, 1, 2);
     for (std::size_t i = 0; i < rows.size() && i < 20; ++i) {
         const auto& [label, state, state_label] = rows[i];
         auto* line = new QLabel(
@@ -169,74 +119,30 @@ void DataDetailPanel::show_downstream_impact(
             return QStringLiteral("color: %1;")
                 .arg(pal(stale ? "WARNING" : "TEXT_SECONDARY"));
         });
-        metadata_layout_->addWidget(line);
+        grid_->addWidget(line, row_base + 1 + static_cast<int>(i), 0, 1, 2);
     }
 }
 
-void DataDetailPanel::add_row(const QString& label, const QString& value) {
-    auto* item = new QLabel(QStringLiteral("%1: %2").arg(label, value), this);
-    item->setWordWrap(true);
-    ui_shell::style_bind(item, [] {
-        return QStringLiteral("color: %1;").arg(pal("TEXT_PRIMARY"));
-    });
-    metadata_layout_->addWidget(item);
-}
-
-void DataDetailPanel::add_muted(QVBoxLayout* layout, const QString& text) {
-    auto* item = new QLabel(text, this);
-    item->setWordWrap(true);
-    ui_shell::style_bind(item, [] {
+void DataDetailPanel::add_kv(const QString& key, const QString& value) {
+    const int row = grid_->rowCount();
+    auto* k = new QLabel(key, this);
+    ui_shell::style_bind(k, [] {
         return QStringLiteral("color: %1;").arg(pal("TEXT_SECONDARY"));
     });
-    layout->addWidget(item);
-}
-
-void DataDetailPanel::add_preview_line(const QString& text) {
-    auto* item = new QLabel(text, this);
-    item->setWordWrap(true);
-    item->setTextInteractionFlags(
+    auto* val = new QLabel(value, this);
+    val->setWordWrap(true);
+    val->setTextInteractionFlags(
         Qt::TextInteractionFlag::TextSelectableByMouse);
-    ui_shell::style_bind(item, [] {
-        return QStringLiteral("color: %1; font-family: monospace;")
-            .arg(pal("TEXT_SECONDARY"));
+    ui_shell::style_bind(val, [] {
+        return QStringLiteral("color: %1;").arg(pal("TEXT_PRIMARY"));
     });
-    preview_layout_->addWidget(item);
+    grid_->addWidget(k, row, 0, Qt::AlignmentFlag::AlignTop);
+    grid_->addWidget(val, row, 1, Qt::AlignmentFlag::AlignTop);
 }
 
-bool DataDetailPanel::add_image_preview(const QString& path) {
-    const QPixmap pixmap(path);
-    if (pixmap.isNull()) return false;
-    auto* label = new QLabel(this);
-    label->setObjectName(QStringLiteral("DataPreviewImage"));
-    label->setAlignment(Qt::AlignmentFlag::AlignCenter);
-    label->setPixmap(pixmap.scaled(
-        220, 160, Qt::AspectRatioMode::KeepAspectRatio,
-        Qt::TransformationMode::SmoothTransformation));
-    preview_layout_->addWidget(label);
-    return true;
-}
-
-bool DataDetailPanel::add_pdf_preview(const QString& path) {
-    if (!pdf_factory_) return false;
-    auto document = pdf_factory_(path);
-    if (document == nullptr || document->page_count() <= 0) return false;
-    preview_layout_->addWidget(
-        new PdfPreviewPanel(std::move(document), this));
-    return true;
-}
-
-void DataDetailPanel::add_warning(const QString& text) {
-    auto* item = new QLabel(text, this);
-    item->setWordWrap(true);
-    ui_shell::style_bind(item, [] {
-        return QStringLiteral("color: %1;").arg(pal("WARNING"));
-    });
-    preview_layout_->addWidget(item);
-}
-
-void DataDetailPanel::clear_layout(QVBoxLayout* layout) {
-    while (layout->count()) {
-        QLayoutItem* child = layout->takeAt(0);
+void DataDetailPanel::clear_grid() {
+    while (grid_->count()) {
+        QLayoutItem* child = grid_->takeAt(0);
         if (QWidget* widget = child->widget()) {
             widget->hide();
             widget->setParent(nullptr);
@@ -244,13 +150,6 @@ void DataDetailPanel::clear_layout(QVBoxLayout* layout) {
         }
         delete child;
     }
-}
-
-std::string DataDetailPanel::base_dir() const {
-    // Python: base_path.parent — the project FILE's directory.
-    const auto pos = project_path_.find_last_of('/');
-    return pos == std::string::npos ? std::string()
-                                    : project_path_.substr(0, pos);
 }
 
 }  // namespace pwb::ui_pages_data::qt

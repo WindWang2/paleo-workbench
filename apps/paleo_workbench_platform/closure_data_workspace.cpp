@@ -20,9 +20,12 @@
 #include <pwb/data/session.hpp>
 #include <pwb/domain/stage.hpp>
 #include <pwb/project/paths.hpp>
+#include <pwb/domain/text.hpp>
 #include <pwb/ui_pages_data/ingest_plan_rows.hpp>
 #include <pwb/ui_pages_data/qt/asset_selection_bus.hpp>
+#include <pwb/ui_pages_data/qt/data_asset_table.hpp>
 #include <pwb/ui_pages_data/qt/data_toolbar.hpp>
+#include <pwb/ui_pages_data/vocab.hpp>
 #include <pwb/ui_pages_data/qt/data_workspace.hpp>
 #include <pwb/ui_pages_data/qt/ingest_plan_dialog.hpp>
 #include <pwb/ui_pages_data/qt/navigation_tree_widget.hpp>
@@ -412,6 +415,108 @@ WorkspaceWiring install_data_workspace(updqt::DataWorkspace& workspace,
         toolbar->setParent(&workspace);  // owned fallback (unplaced)
     }
     wiring.toolbar = toolbar;
+
+    // ---- 稿式过滤行接线 ---------------------------------------------------
+    // 搜索/类型/状态 → 资产表 FilterQuery；行集刷新 → 下拉候选与
+    // 「共 N 条」计数。过滤 seam 此前无宿主——装真实本地过滤
+    // （搜索子串 + 类型/状态等值），UI-03 宿主到来时可整体替换。
+    auto* asset_table = workspace.asset_table();
+    if (asset_table != nullptr) {
+        asset_table->set_filter_fn(
+            [bus](const upd::FilterQuery& query) -> std::vector<int> {
+                std::vector<int> out;
+                if (bus == nullptr) return out;
+                const auto& rows = bus->assets();
+                const std::string& needle = query.search_text;  // 已规范化
+                for (std::size_t i = 0; i < rows.size(); ++i) {
+                    const upd::AssetView& v = rows[i].view;
+                    if (!needle.empty()) {
+                        const std::string haystack =
+                            pwb::domain::lowercase_utf8(
+                                v.name + " " + v.type + " " + v.path + " " +
+                                v.source_label + " " + v.linked_label);
+                        if (haystack.find(needle) == std::string::npos) {
+                            continue;
+                        }
+                    }
+                    if (query.data_type && v.type != *query.data_type) {
+                        continue;
+                    }
+                    if (query.status && v.status != *query.status) {
+                        continue;
+                    }
+                    out.push_back(static_cast<int>(i));
+                }
+                return out;
+            });
+        QObject::connect(toolbar, &updqt::DataToolbar::search_changed,
+                         asset_table,
+                         [asset_table](const QString& text) {
+                             asset_table->set_search_text(text);
+                         });
+        auto apply_dims = [asset_table](const QString& type_key,
+                                        const QString& status_key) {
+            upd::FilterQuery query = asset_table->filter_query();
+            const std::string t = type_key.toStdString();
+            const std::string s = status_key.toStdString();
+            query.data_type = t.empty() ? std::nullopt
+                                        : std::optional<std::string>(t);
+            query.status = s.empty() ? std::nullopt
+                                     : std::optional<std::string>(s);
+            asset_table->set_filter_query(query);
+        };
+        auto type_key = std::make_shared<QString>();
+        auto status_key = std::make_shared<QString>();
+        QObject::connect(toolbar, &updqt::DataToolbar::type_filter_changed,
+                         asset_table,
+                         [type_key, status_key, apply_dims](
+                             const QString& key) {
+                             *type_key = key;
+                             apply_dims(key, *status_key);
+                         });
+        QObject::connect(toolbar, &updqt::DataToolbar::status_filter_changed,
+                         asset_table,
+                         [type_key, status_key, apply_dims](
+                             const QString& key) {
+                             *status_key = key;
+                             apply_dims(*type_key, key);
+                         });
+    }
+    if (bus != nullptr && asset_table != nullptr) {
+        QObject::connect(
+            bus, &updqt::AssetSelectionBus::assets_changed, toolbar,
+            [toolbar](const std::vector<upd::AssetRow>& rows,
+                      const QString&) {
+                // 候选 = 真实行集的 distinct 值；类型显示走词汇映射，
+                // 状态显示走 status_text（无映射原样——诚实）。
+                std::map<std::string, QString> types;
+                std::map<std::string, QString> statuses;
+                for (const auto& row : rows) {
+                    if (!row.view.type.empty()) {
+                        types.emplace(
+                            row.view.type,
+                            QString::fromStdString(std::string(
+                                upd::resource_type_label(row.view.type))));
+                    }
+                    if (!row.view.status.empty()) {
+                        statuses.emplace(
+                            row.view.status,
+                            QString::fromStdString(std::string(
+                                upd::status_text(row.view.status))));
+                    }
+                }
+                QList<QPair<QString, QString>> type_pairs;
+                for (const auto& [key, label] : types) {
+                    type_pairs.append({QString::fromStdString(key), label});
+                }
+                QList<QPair<QString, QString>> status_pairs;
+                for (const auto& [key, label] : statuses) {
+                    status_pairs.append({QString::fromStdString(key), label});
+                }
+                toolbar->set_filter_options(type_pairs, status_pairs);
+                toolbar->set_row_count(static_cast<int>(rows.size()));
+            });
+    }
 
     // Well detail: the panel takes the workspace's well-detail slot; the
     // host owns one workspace service per open project (deleted with the

@@ -283,14 +283,8 @@ void MainWindow::installStageFlow() {
     auto* composite = shell->composite();
     if (workstation == nullptr || composite == nullptr) return;
 
-#ifdef PWB_WITH_CONV_27
-    // ws2 右栏「约束」页：窗口级 ConstraintPanel 收编进工作站 dock 宿主
-    // —— 同一对象；window.constraint_panel profile 键与面板菜单照常
-    // 驱动（visibility 直写 dock，adopted 后仍命中）。
-    if (constraint_dock_ != nullptr) {
-        workstation->adopt_dock("constraint_panel", constraint_dock_);
-    }
-#endif
+    // （constraint_panel 收编已上移到 install_conv27_surface 的创建点旁
+    // —— 见 main_window.cpp；不再依赖 STAGE_FLOW 安装顺序。）
 #ifdef PWB_WITH_CONV_16
     // 单因素统计 HUD 同样收编（底条 tab 组「单因素统计」）—— stage2
     // profile 的 window.factor_stats 抬升它时不再出现窗口级旧 dock。

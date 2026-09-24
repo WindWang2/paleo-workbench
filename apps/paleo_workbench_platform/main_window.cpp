@@ -131,6 +131,7 @@
 #endif
 
 #include <qgsfeatureiterator.h>
+#include <qgslayertree.h>
 #include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
@@ -174,6 +175,7 @@
 #endif
 #ifdef PWB_WITH_APP_SHELL
 #include "app_shell.hpp"
+#include "compilation_layer_panel.hpp"
 #include "workspace_compose.hpp"
 #include "ribbon_command_install.hpp"
 #include "m5_validation_install.hpp"
@@ -677,6 +679,9 @@ void MainWindow::buildUi() {
 
     auto* dock = new QDockWidget(tr("图层"), this);
     dock->setObjectName(QStringLiteral("layer-tree-dock"));
+    // 稿式图层 tab 容器：主要图层（图层树）+ 参考图/参考图层节 +
+    // ws3 底部图例/指北针勾选（CompilationLayerPanel，工作区切模式）。
+    auto* layer_tab_panel = new CompilationLayerPanel(dock);
 #ifdef PWB_WITH_CONV_27
     // Domain-aware tree panel: join-key active-layer sync (no row-index
     // mapping), native group/rename/context menu, edit indicators.
@@ -688,13 +693,58 @@ void MainWindow::buildUi() {
                 : std::optional<pwb::application::DomainLayerFacts>(
                       it->second);
         }, this);
-    dock->setWidget(layer_panel_);
+    layer_tab_panel->set_tree_widget(layer_panel_);
     tree_ = layer_panel_->view();
 #else
-    tree_ = context_.session().map().createLayerTree(dock);
-    dock->setWidget(tree_);
+    tree_ = context_.session().map().createLayerTree(layer_tab_panel);
+    layer_tab_panel->set_tree_widget(tree_);
 #endif
+    dock->setWidget(layer_tab_panel);
     addDockWidget(Qt::LeftDockWidgetArea, dock);
+    // 稿「参考图」节：行 = 工程内栅格图层（QgsProject 同一权威）。
+    // 勾选 → QgsLayerTree 可见性；滑杆 → QgsMapLayer::setOpacity；
+    // 图层增删时重投影行集。descriptor-only 登记不产生行。
+    if (auto* ref_project = context_.session().map().project()) {
+        const auto sync_ref_rows = [layer_tab_panel, ref_project] {
+            QVector<CompilationLayerPanel::ReferenceRow> rows;
+            const auto layers = ref_project->mapLayers();
+            for (auto it = layers.constBegin(); it != layers.constEnd();
+                 ++it) {
+                auto* raster = qobject_cast<QgsRasterLayer*>(it.value());
+                if (raster == nullptr) continue;
+                const auto* node =
+                    ref_project->layerTreeRoot()->findLayer(raster->id());
+                rows.push_back(
+                    {raster->id(), raster->name(),
+                     node == nullptr || node->isVisible(),
+                     static_cast<int>(raster->opacity() * 100.0)});
+            }
+            layer_tab_panel->set_reference_rows(rows);
+        };
+        connect(ref_project, &QgsProject::layersAdded, layer_tab_panel,
+                [sync_ref_rows](const QList<QgsMapLayer*>&) {
+                    sync_ref_rows();
+                });
+        connect(ref_project, &QgsProject::layersRemoved, layer_tab_panel,
+                [sync_ref_rows](const QStringList&) { sync_ref_rows(); });
+        connect(layer_tab_panel,
+                &CompilationLayerPanel::reference_visibility_changed, this,
+                [ref_project](const QString& layer_id, bool on) {
+                    if (auto* node =
+                            ref_project->layerTreeRoot()->findLayer(
+                                layer_id)) {
+                        node->setItemVisibilityChecked(on);
+                    }
+                });
+        connect(layer_tab_panel,
+                &CompilationLayerPanel::reference_opacity_changed, this,
+                [ref_project](const QString& layer_id, int pct) {
+                    if (auto* layer = ref_project->mapLayer(layer_id)) {
+                        layer->setOpacity(pct / 100.0);
+                    }
+                });
+        sync_ref_rows();
+    }
 #if defined(PWB_WITH_APP_SHELL) && defined(PWB_WITH_CONV_27)
     // The native QgsLayerTreeView dock is adopted into the workstation
     // host directly — the retired prototype LayerManagerPanel (and its
@@ -743,7 +793,9 @@ void MainWindow::buildUi() {
     viz_b_dock_ = new pwb::app::VizBCrossWellDock(
         job_center_.get(), this);
     viz_b_dock_->setObjectName(QStringLiteral("viz-b-cross-well-dock"));
-    addDockWidget(Qt::RightDockWidgetArea, viz_b_dock_);
+    // mockup 精确还原：内容部件收编进 ws2 页内阶段窗格
+    // （compose_constraint_bottom）—— dock 壳不挂窗口，功能存续。
+    viz_b_dock_->hide();
     connect(viz_b_dock_, &pwb::app::VizBCrossWellDock::status_message,
             this, [this](const QString& message) {
                 statusBar()->showMessage(message, 5000);
@@ -1072,7 +1124,9 @@ void MainWindow::wire_app_shell() {
 // shell — no AppShell member changes. Lease: 03-line.json
 // named_block_leases; assembled under PWB_BUILD_CLOSURE_SCIENCE by 12.
 #if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
-    pwb::closure_science::qt::attach_prediction_pages(
+    // 返回的 binding 已 parent 到 app_shell_（生命周期随壳层）——
+    // 无需持有指针，显式丢弃满足 [[nodiscard]]。
+    (void)pwb::closure_science::qt::attach_prediction_pages(
         *app_shell_->well_log_page(), *app_shell_->seismic_page(),
         [this]() -> std::filesystem::path {
             auto store = context_.projectStore();
@@ -4556,6 +4610,17 @@ void MainWindow::install_conv27_surface() {
                       it->second);
         }, this);
     addDockWidget(Qt::RightDockWidgetArea, constraint_dock_);
+#ifdef PWB_WITH_APP_SHELL
+    // ws2 右栏「约束」页：窗口级 ConstraintPanel 收编进工作站 dock 宿主
+    // —— 同一对象；window.constraint_panel profile 键与面板菜单照常
+    // 驱动（visibility 直写 dock，adopted 后仍命中）。收编必须发生在
+    // 创建点旁 —— 寄在 stage-flow 安装里会让无 STAGE_FLOW 的壳层构建
+    // （如 ribbon_visual）丢失这个右栏 tab。
+    if (app_shell_ != nullptr && app_shell_->workstation() != nullptr) {
+        app_shell_->workstation()->adopt_dock("constraint_panel",
+                                              constraint_dock_);
+    }
+#endif
     connect(constraint_dock_, &pwb::ui::ConstraintPanel::activate_layer_requested,
             this, [this](const QString& layer_id) {
                 const auto it = facts_.find(layer_id.toStdString());
@@ -4565,6 +4630,17 @@ void MainWindow::install_conv27_surface() {
                     layer_panel_->set_active_layer(it->first);
                 }
                 refreshActionStates();
+            });
+    // 约束要素勾选 → QgsLayerTree 可见性（图层树面板同源权威，画布
+    // 经图层树模型自动跟随）。
+    connect(constraint_dock_, &pwb::ui::ConstraintPanel::visibility_requested,
+            this, [this](const QString& layer_id, bool visible) {
+                auto* project = context_.session().map().project();
+                if (project == nullptr) return;
+                if (auto* node =
+                        project->layerTreeRoot()->findLayer(layer_id)) {
+                    node->setItemVisibilityChecked(visible);
+                }
             });
 
     // Edit tools: QGIS select + digitize, applied through the one edit

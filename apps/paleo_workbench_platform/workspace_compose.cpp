@@ -8,7 +8,9 @@
 #include <memory>
 #include <vector>
 
+#include <QCheckBox>
 #include <QColor>
+#include <QComboBox>
 #include <QFrame>
 #include <QHash>
 #include <QHBoxLayout>
@@ -21,8 +23,10 @@
 
 #include "app_context.hpp"
 #include "app_shell.hpp"
+#include "factor_atlas_panel.hpp"
 #include "factor_reference_strip.hpp"
 #include "main_window.hpp"
+#include "profile_settings_panel.hpp"
 #include "validation_workspace_page.hpp"
 
 #include <pwb/application/adapters/data_store.hpp>
@@ -30,10 +34,10 @@
 #include <pwb/ui_composite/composite_document.hpp>
 #include <pwb/ui_workstation/workstation_frame.hpp>
 
-#if defined(PWB_WITH_SEISMIC_VIEWER)
 #if defined(PWB_WITH_VIZ_B)
 #include "viz_b_cross_well_dock.hpp"
 #endif
+#if defined(PWB_WITH_SEISMIC_VIEWER)
 #include <pwb/seismic_viewer/seismic_slice_widget.hpp>
 #endif
 #if defined(PWB_WITH_WELL_LOG)
@@ -51,7 +55,10 @@ namespace pwb::app::workspace_compose {
 
 namespace {
 
-// A titled bottom-pane frame (header strip + content host).
+// A titled bottom-pane frame (header strip + content host). The header
+// is a row — the mockup puts per-pane controls (显示/色标 combos, 联动
+// toggles) on the same strip as the title, so callers may append widgets
+// to `PaneHeaderBar` before the stretch.
 QFrame* make_pane(const QString& title, QWidget* parent) {
     auto* frame = new QFrame(parent);
     frame->setObjectName(QStringLiteral("WorkspacePane_") + title);
@@ -59,11 +66,18 @@ QFrame* make_pane(const QString& title, QWidget* parent) {
     auto* layout = new QVBoxLayout(frame);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    auto* header = new QLabel(title, frame);
+    auto* header = new QWidget(frame);
     header->setObjectName(QStringLiteral("WorkspacePaneHeader"));
     header->setStyleSheet(QStringLiteral(
-        "QLabel#WorkspacePaneHeader { padding: 2px 6px; "
-        "background: #E4E9ED; font-weight: 600; }"));
+        "QWidget#WorkspacePaneHeader { padding: 2px 6px; "
+        "background: #E4E9ED; }"));
+    auto* header_row = new QHBoxLayout(header);
+    header_row->setContentsMargins(0, 0, 0, 0);
+    header_row->setSpacing(6);
+    auto* title_label = new QLabel(title, header);
+    title_label->setStyleSheet(QStringLiteral("font-weight: 600;"));
+    header_row->addWidget(title_label);
+    header_row->addStretch();
     layout->addWidget(header);
     auto* host = new QWidget(frame);
     host->setObjectName(QStringLiteral("WorkspacePaneHost"));
@@ -86,11 +100,9 @@ void hide_hint(QWidget* page) {
 // ---------------------------------------------------------------------------
 
 void compose_prediction_bottom(AppShell* shell) {
-    // ws1 底部阶段行「井震两联」dock —— 地震+测井 split 注入 dock
-    // 宿主（PredictionPairHost），占位 hint 退役。
-    auto* frame = shell->workstation();
-    auto* pair_dock = frame != nullptr ? frame->dock("pair_link") : nullptr;
-    QWidget* host = pair_dock != nullptr ? pair_dock->widget() : nullptr;
+    // ws1 页内阶段窗格「井震两联」—— 地震+测井 split 注入页内宿主
+    // （PredictionPairHost，中列底部固定区）；占位 hint 退役。
+    QWidget* host = shell != nullptr ? shell->stage_pane_pair() : nullptr;
     if (host != nullptr) {
         if (auto* hint = host->findChild<QLabel*>(
                 QStringLiteral("StageBottomHint"),
@@ -102,10 +114,49 @@ void compose_prediction_bottom(AppShell* shell) {
         auto* split = new QSplitter(Qt::Horizontal);
         split->setObjectName(QStringLiteral("PredictionBottomSplit"));
 #if defined(PWB_WITH_SEISMIC_VIEWER)
-        auto* seismic_frame = make_pane(QStringLiteral("地震剖面"), split);
+        auto* seismic_frame =
+            make_pane(QStringLiteral("地震剖面（与地图联动）"), split);
         auto* seismic =
             new pwb::seismic_viewer::SeismicSliceWidget(seismic_frame);
         seismic->setObjectName(QStringLiteral("WorkspaceSeismicPane"));
+        // 稿窗格题头行：显示 / 色标 下拉 —— 绑 SeismicSliceWidget 真缝
+        // （display_mode / color_map）。稿中的剖面号线名（L03 等）由
+        // 载入体决定，空载时题头不带线名。
+        if (auto* bar = seismic_frame->findChild<QHBoxLayout*>()) {
+            auto* display_label = new QLabel(
+                QStringLiteral("显示"), seismic_frame);
+            auto* display = new QComboBox(seismic_frame);
+            display->addItem(QStringLiteral("变密度"),
+                             static_cast<int>(
+                                 pwb::seismic_viewer::DisplayMode::
+                                     variable_density));
+            display->addItem(QStringLiteral("波形"),
+                             static_cast<int>(
+                                 pwb::seismic_viewer::DisplayMode::wiggle));
+            QObject::connect(
+                display, &QComboBox::currentIndexChanged, seismic,
+                [seismic, display](int index) {
+                    seismic->set_display_mode(
+                        static_cast<pwb::seismic_viewer::DisplayMode>(
+                            display->itemData(index).toInt()));
+                });
+            auto* cmap_label = new QLabel(QStringLiteral("色标"),
+                                          seismic_frame);
+            auto* cmap = new QComboBox(seismic_frame);
+            cmap->addItem(QStringLiteral("seismic"));
+            cmap->addItem(QStringLiteral("seismic_r"));
+            cmap->addItem(QStringLiteral("gray"));
+            cmap->addItem(QStringLiteral("viridis"));
+            QObject::connect(cmap, &QComboBox::currentTextChanged, seismic,
+                             [seismic](const QString& name) {
+                                 seismic->set_color_map(
+                                     name.toStdString());
+                             });
+            bar->insertWidget(bar->count() - 1, display_label);
+            bar->insertWidget(bar->count() - 1, display);
+            bar->insertWidget(bar->count() - 1, cmap_label);
+            bar->insertWidget(bar->count() - 1, cmap);
+        }
         seismic_frame->findChild<QWidget*>(
                          QStringLiteral("WorkspacePaneHost"))
             ->layout()
@@ -125,9 +176,23 @@ void compose_prediction_bottom(AppShell* shell) {
 #endif
 
 #if defined(PWB_WITH_WELL_LOG)
-        auto* well_frame = make_pane(QStringLiteral("测井轨道"), split);
+        auto* well_frame =
+            make_pane(QStringLiteral("测井轨道（与地图联动）"), split);
         auto* well = new pwb::viz::WellLogHostWidget(well_frame);
         well->setObjectName(QStringLiteral("WorkspaceWellPane"));
+        // 稿窗格题头行：深度(m) 标注 + 联动 勾选。联动后端与 Ribbon
+        // predict.link 同一状态 —— 当前未接入，诚实禁用。
+        if (auto* bar = well_frame->findChild<QHBoxLayout*>()) {
+            auto* depth = new QLabel(QStringLiteral("深度(m)"),
+                                     well_frame);
+            auto* link = new QCheckBox(QStringLiteral("联动"), well_frame);
+            link->setChecked(true);
+            link->setEnabled(false);
+            link->setToolTip(QStringLiteral(
+                "联动后端未接入 — 与 Ribbon「联动」命令同一状态"));
+            bar->insertWidget(bar->count() - 1, depth);
+            bar->insertWidget(bar->count() - 1, link);
+        }
         well_frame->findChild<QWidget*>(QStringLiteral("WorkspacePaneHost"))
             ->layout()
             ->addWidget(well);
@@ -154,18 +219,100 @@ void compose_prediction_bottom(AppShell* shell) {
 // ws2 — 连井剖面 tab (P0-2); 数据制备 tab is adopted by the shell itself
 // ---------------------------------------------------------------------------
 
-void compose_constraint_bottom(MainWindow* window, AppShell* shell) {
+void compose_constraint_bottom(MainWindow* window, AppShell* shell,
+                               AppContext* context) {
+    QWidget* host =
+        shell != nullptr ? shell->stage_pane_crosswell() : nullptr;
 #if defined(PWB_WITH_VIZ_B)
     auto* dock = window != nullptr ? window->vizBCrossWellDock() : nullptr;
-    auto* frame = shell != nullptr ? shell->workstation() : nullptr;
-    if (dock == nullptr || frame == nullptr) return;
-    // 连井剖面 dock 整体收编进底部阶段行（dock 化后不再抽内容塞进
-    // 页签 —— 悬浮/停靠/复位都是原生 dock 语义）。
-    frame->adopt_dock("crosswell", dock);
+    if (dock == nullptr || host == nullptr) return;
+    // 连井剖面收编进 ws2 页内阶段窗格（mockup：中列底部固定区，
+    // 「连井剖面（与地图联动）」）—— 取 dock 的内容部件进页（dock
+    // 壳退隐；部件仍由 dock 对象拥有，save/restore/井列 API 不变）。
+    // 稿在窗格左内嵌「剖面设置」卡：剖面井勾选（→ dock 井列过滤）+
+    // 显示设置（地层格架 → set_show_tops）。
+    auto* content = dock->widget();
+    if (content == nullptr) return;
+    if (auto* hint = host->findChild<QLabel*>(
+            QStringLiteral("StageBottomHint"),
+            Qt::FindDirectChildrenOnly)) {
+        hint->hide();
+    }
+    auto* layout = qobject_cast<QVBoxLayout*>(host->layout());
+    if (layout == nullptr) return;
+    auto* split = new QSplitter(Qt::Horizontal, host);
+    split->setObjectName(QStringLiteral("CrossWellPaneSplit"));
+
+    auto* settings = new ProfileSettingsPanel(split);
+    settings->setMinimumWidth(150);
+    settings->setMaximumWidth(220);
+    split->addWidget(settings);
+    split->addWidget(content);
+    split->setStretchFactor(0, 0);
+    split->setStretchFactor(1, 1);
+    content->setParent(split);
+    layout->addWidget(split);
+    dock->hide();
+
+    // 剖面设置 ↔ dock：井名清单跟 wells_changed 重建（保持勾选态），
+    // 勾选集 → dock 画布过滤；地层格架 → tops 叠加开关。
+    settings->set_well_names(dock->all_well_names());
+    QObject::connect(dock, &VizBCrossWellDock::wells_changed, settings,
+                     &ProfileSettingsPanel::set_well_names);
+    QObject::connect(settings, &ProfileSettingsPanel::well_filter_changed,
+                     dock, &VizBCrossWellDock::set_well_filter);
+    QObject::connect(settings, &ProfileSettingsPanel::frame_toggled, dock,
+                     &VizBCrossWellDock::set_show_frame);
 #else
     (void)window;
-    (void)shell;
+    (void)host;
 #endif
+
+    // ws2 右栏「单因素」签 —— 单因素图层清单喂数：project
+    // .factor_map_tasks 同一权威（与 ws3 参考带同一份刷新 seam）。
+    if (auto* atlas = shell->factor_atlas_panel(); atlas != nullptr) {
+        auto refresh_atlas = [atlas, context] {
+            std::vector<pwb::domain::Json> tasks;
+            const auto store =
+                context != nullptr ? context->projectStore() : nullptr;
+            if (store != nullptr) {
+                const auto& root = store->document().root();
+                const auto it = root.find("factor_map_tasks");
+                if (it != root.end() && it->is_array()) {
+                    for (const auto& task : *it) {
+                        if (task.is_object()) tasks.push_back(task);
+                    }
+                }
+            }
+            atlas->update_state(tasks);
+        };
+        refresh_atlas();
+#if defined(PWB_WITH_CLOSURE_MAPPING)
+        if (window != nullptr) {
+            if (auto* preparation =
+                    closure_mapping::preparation_page(window);
+                preparation != nullptr) {
+                QObject::connect(
+                    preparation,
+                    &pwb::ui_pages_data::qt::PreparationPage::
+                        factor_maps_updated,
+                    atlas, refresh_atlas);
+            }
+        }
+#endif
+        // 勾选 → 治理通道（constraint_factor 阶段注册的
+        // overlay_factor_results）——与参考带同一叠加路径。
+        if (shell->composite() != nullptr) {
+            auto* composite = shell->composite();
+            QObject::connect(
+                atlas, &FactorAtlasPanel::overlay_selected, composite,
+                [composite](const pwb::domain::Json&) {
+                    emit composite->stage_action_requested(
+                        QStringLiteral("constraint_factor"),
+                        QStringLiteral("overlay_factor_results"));
+                });
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -244,12 +391,10 @@ QPixmap render_factor_thumbnail(
 
 void compose_compilation_bottom(MainWindow* window, AppShell* shell,
                                 AppContext* context) {
-    // ws3 底部阶段行「单因素参考」dock —— FactorReferenceStrip 注入
-    // dock 宿主（StageBottomCompilationHome）。
-    auto* frame = shell->workstation();
-    auto* refs_dock = frame != nullptr ? frame->dock("factor_refs")
-                                       : nullptr;
-    QWidget* page = refs_dock != nullptr ? refs_dock->widget() : nullptr;
+    // ws3 页内阶段窗格「单因素参考 · 联动显示」—— FactorReferenceStrip
+    // 注入页内宿主（StageBottomCompilationHome）。
+    QWidget* page =
+        shell != nullptr ? shell->stage_pane_factor() : nullptr;
     if (page == nullptr) return;
     hide_hint(page);
     auto* layout = qobject_cast<QVBoxLayout*>(page->layout());
@@ -354,7 +499,7 @@ void compose(const Install& install) {
     if (install.shell == nullptr) return;
     auto* window = dynamic_cast<MainWindow*>(install.window);
     compose_prediction_bottom(install.shell);
-    compose_constraint_bottom(window, install.shell);
+    compose_constraint_bottom(window, install.shell, install.context);
     compose_compilation_bottom(window, install.shell, install.context);
     compose_validation_page(install.shell);
 }

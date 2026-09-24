@@ -389,7 +389,7 @@ void data_commands(ui_shell::CommandRegistry& registry,
 #endif
     // data.export_table: 导出当前资产表（bus 里的真实行）为 CSV。
     register_real(registry, ids, "data.export_table",
-                  QStringLiteral("导出表格"), QStringLiteral("导出当前资产表 CSV"),
+                  QStringLiteral("导出"), QStringLiteral("导出当前资产表 CSV"),
                   QStringLiteral("导出 export csv"),
                   [c] {
                       const auto* bus = data_bus(c);
@@ -434,6 +434,22 @@ void data_commands(ui_shell::CommandRegistry& registry,
                               .arg(bus->assets().size()));
                   },
                   [c](const CommandContext&) { return needs_project(c); });
+    // 稿式新增：标签/影响分析/回收站 —— 资产标签与影响分析
+    // 后端未接入，回收站（软删除区）无实现。
+    register_disabled(registry, ids, "data.tags", QStringLiteral("标签"),
+                      QStringLiteral("资产标签管理"),
+                      QStringLiteral("标签 tag"),
+                      QStringLiteral("资产标签后端未接入"));
+    register_disabled(registry, ids, "data.impact",
+                      QStringLiteral("影响分析"),
+                      QStringLiteral("版本的下游影响分析"),
+                      QStringLiteral("影响 impact 分析"),
+                      QStringLiteral("影响分析后端未接入"));
+    register_disabled(registry, ids, "data.trash",
+                      QStringLiteral("回收站"),
+                      QStringLiteral("软删除资产回收区"),
+                      QStringLiteral("回收站 trash 删除"),
+                      QStringLiteral("回收站（软删除）未实现"));
 }
 
 // ---------------------------------------------------------------------------
@@ -464,8 +480,8 @@ void predict_commands(ui_shell::CommandRegistry& registry,
                       QStringLiteral("构建未含地震查看器/数据集成切片"));
 #endif
     register_disabled(registry, ids, "predict.model_params",
-                      QStringLiteral("模型参数"), QStringLiteral("预测模型参数"),
-                      QStringLiteral("参数 model"), QStringLiteral("M5 接入"));
+                      QStringLiteral("相预测 v2"), QStringLiteral("预测模型/版本选择"),
+                      QStringLiteral("相预测 模型 model 版本"), QStringLiteral("M5 接入"));
     register_real(registry, ids, "predict.run", QStringLiteral("运行预测"),
                   QStringLiteral("对所选井运行真实 ONNX 相预测"),
                   QStringLiteral("运行 run 预测 prediction"),
@@ -576,6 +592,20 @@ void factor_commands(ui_shell::CommandRegistry& registry,
                       QStringLiteral("约束线捕捉开关"), QStringLiteral("捕捉 snap"),
                       QStringLiteral("编图场景切片未接入本次构建"));
 #endif
+    // 稿：约束点编辑——编图场景工具词汇（line/facies/label/vertex）
+    // 无点约束工具，诚实禁用。
+    register_disabled(registry, ids, "factor.constraint_point",
+                      QStringLiteral("约束点"),
+                      QStringLiteral("约束点要素编辑"),
+                      QStringLiteral("约束点 constraint point"),
+                      QStringLiteral("场景无点约束编辑工具"));
+    // 稿：插值方法下拉（约束IDW ▼）——Ribbon 无 combo 类型；
+    // 真方法选择在数据制备任务面板（工程内，稿不入界面）。
+    register_disabled(registry, ids, "factor.method",
+                      QStringLiteral("约束IDW"),
+                      QStringLiteral("插值方法选择（当前：约束IDW）"),
+                      QStringLiteral("插值 方法 idw kriging"),
+                      QStringLiteral("方法选择在数据制备页（稿不入界面）"));
     register_real(registry, ids, "factor.compute",
                   QStringLiteral("计算单因素"),
                   QStringLiteral("按所选方法运行真实插值核（idw/kriging/约束 IDW）"),
@@ -614,12 +644,11 @@ void factor_commands(ui_shell::CommandRegistry& registry,
                   QStringLiteral("切到约束工作区并聚焦连井剖面"),
                   QStringLiteral("选井 well 连井"),
                   [c] {
+                      // 连井剖面 = ws2 页内阶段窗格（随工作区进入自明）。
                       c.shell->navigate_workspace(2);
-                      c.shell->focus_stage_dock(
-                          QStringLiteral("连井剖面"));
                   });
     register_disabled(registry, ids, "factor.crosswell_path",
-                      QStringLiteral("连井路径"),
+                      QStringLiteral("连井剖面"),
                       QStringLiteral("按路径自动排列连井剖面"),
                       QStringLiteral("连井 路径 path"), QStringLiteral("M5 接入"));
     register_disabled(registry, ids, "factor.link", QStringLiteral("联动"),
@@ -645,6 +674,13 @@ void factor_commands(ui_shell::CommandRegistry& registry,
 #endif
                   },
                   [c](const CommandContext&) { return needs_project(c); });
+    // 稿：等值线间距数值控件（20 m）——无专用控件类型，
+    // 以禁用命令呈现当前值。
+    register_disabled(registry, ids, "factor.contour_interval",
+                      QStringLiteral("间距 20 m"),
+                      QStringLiteral("等值线间距（当前 20 m）"),
+                      QStringLiteral("间距 等值线 interval contour"),
+                      QStringLiteral("间距参数控件未接入"));
     register_real(registry, ids, "factor.save", QStringLiteral("保存版本"),
                   QStringLiteral("保存当前阶段成果"), QStringLiteral("保存 save"),
                   [c] {
@@ -675,6 +711,12 @@ void map_commands(ui_shell::CommandRegistry& registry,
                   QStringLiteral("开始/停止编辑（治理动作）"),
                   QStringLiteral("编辑 edit 相界 facies"),
                   [c] { trigger_governed(c, QStringLiteral("toggle_editing")); });
+    // 稿：撤消并列于相界编辑——接治理 undo 动作（与 QAT/菜单
+    // 同一 QAction）。
+    register_real(registry, ids, "map.undo", QStringLiteral("撤消"),
+                  QStringLiteral("撤消上一编辑操作（治理动作 Ctrl+Z）"),
+                  QStringLiteral("撤消 undo"),
+                  [c] { trigger_governed(c, QStringLiteral("undo")); });
     register_real(registry, ids, "map.show_reference",
                   QStringLiteral("显示参考图"),
                   QStringLiteral("编图画布的参考图面板 开/关"),
@@ -685,6 +727,11 @@ void map_commands(ui_shell::CommandRegistry& registry,
                   },
                   /*applicability=*/nullptr,
                   /*stages=*/{"constraint_factor", "integrated_compilation"});
+    // 稿：参考图与主图联动开关——参考带联动后端未接入。
+    register_disabled(registry, ids, "map.ref_link", QStringLiteral("联动"),
+                      QStringLiteral("参考图与主图联动"),
+                      QStringLiteral("联动 link 参考"),
+                      QStringLiteral("参考图联动后端未接入"));
     // M5-2 版式轻量页：模板/纸张/预览进入版式模式（面板骑 ws3 底部
     // 栈第 2 页，F:70）；图例整饰写文档 map_chrome（单一状态）；
     // 透明度指向参考图面板的真滑杆（单一状态，无第二份 slider）。
@@ -729,6 +776,24 @@ void map_commands(ui_shell::CommandRegistry& registry,
                       }
                   },
                   [c](const CommandContext&) { return needs_project(c); });
+    register_real(registry, ids, "map.north_arrow", QStringLiteral("指北针"),
+                  QStringLiteral("指北针整饰开关（写文档 map_chrome）"),
+                  QStringLiteral("指北针 north arrow"),
+                  [c] {
+                      auto* panel = find_compose_panel(c);
+                      QCheckBox* arrow =
+                          panel != nullptr
+                              ? panel->findChild<QCheckBox*>(
+                                    QStringLiteral("ComposeChrome_指北针"))
+                              : nullptr;
+                      if (arrow != nullptr) {
+                          arrow->setChecked(!arrow->isChecked());
+                      } else {
+                          emit c.shell->status_message(
+                              QStringLiteral("指北针控件未装配（版式切片未接入）"));
+                      }
+                  },
+                  [c](const CommandContext&) { return needs_project(c); });
     register_real(registry, ids, "map.template", QStringLiteral("模板"),
                   QStringLiteral("版式模板（9 个内置模板真实清单）"),
                   QStringLiteral("模板 template"),
@@ -770,6 +835,10 @@ void map_commands(ui_shell::CommandRegistry& registry,
     register_disabled(registry, ids, "map.legend", QStringLiteral("图例"),
                       QStringLiteral("图例编辑"), QStringLiteral("图例 legend"),
                       QStringLiteral("编图切片未接入本次构建"));
+    register_disabled(registry, ids, "map.north_arrow",
+                      QStringLiteral("指北针"), QStringLiteral("指北针整饰"),
+                      QStringLiteral("指北针 north arrow"),
+                      QStringLiteral("编图切片未接入本次构建"));
     register_disabled(registry, ids, "map.template", QStringLiteral("模板"),
                       QStringLiteral("版式模板"), QStringLiteral("模板 template"),
                       QStringLiteral("编图切片未接入本次构建"));
@@ -805,7 +874,7 @@ void verify_commands(ui_shell::CommandRegistry& registry,
                      std::vector<std::string>* ids, const Ctx& c) {
     // M5: 对象/基准固定到明确版本（对比视图的选择器就是固定控件）。
     register_real(registry, ids, "verify.select_object",
-                  QStringLiteral("选择对象"),
+                  QStringLiteral("对象"),
                   QStringLiteral("固定验证对象（井）并聚焦对比视图"),
                   QStringLiteral("对象 object 井 well"),
                   [c] {
@@ -817,7 +886,7 @@ void verify_commands(ui_shell::CommandRegistry& registry,
                   },
                   [c](const CommandContext&) { return needs_project(c); });
     register_real(registry, ids, "verify.select_baseline",
-                  QStringLiteral("选择基准"),
+                  QStringLiteral("基准"),
                   QStringLiteral("固定基准解释版本"),
                   QStringLiteral("基准 baseline 解释"),
                   [c] {
@@ -839,9 +908,16 @@ void verify_commands(ui_shell::CommandRegistry& registry,
                       }
                       return std::nullopt;
                   });
+    // 稿：◀◀ 上一处问题——问题表无上一处导航接口，诚实禁用。
+    register_disabled(registry, ids, "verify.prev_issue",
+                      QStringLiteral("上一处"),
+                      QStringLiteral("定位上一处问题"),
+                      QStringLiteral("上一处 问题 prev issue"),
+                      QStringLiteral("问题逐条导航未接入"));
     // F:75 — link couples m and ms ONLY through a real time-depth
     // calibration; without one the toggle stays disabled with its reason.
-    register_real(registry, ids, "verify.link", QStringLiteral("联动"),
+    register_real(registry, ids, "verify.link",
+                  QStringLiteral("联动光标"),
                   QStringLiteral("对照视图深度游标联动（需时深标定）"),
                   QStringLiteral("联动 link 时深"),
                   [c] {
@@ -899,17 +975,12 @@ void verify_commands(ui_shell::CommandRegistry& registry,
                   QStringLiteral("运行 run 验证 qc 检查"),
                   [c] {
                       auto* page = c.shell->validation_page();
-                      auto* button =
-                          page != nullptr
-                              ? page->findChild<QPushButton*>(
-                                    QStringLiteral("ValidationRunQc"))
-                              : nullptr;
-                      if (button == nullptr) {
+                      if (page == nullptr) {
                           emit c.shell->status_message(
                               QStringLiteral("验证页未装配"));
                           return;
                       }
-                      button->click();
+                      page->run_qc();
                   },
                   [c](const CommandContext&) { return needs_project(c); });
     register_real(registry, ids, "verify.settings", QStringLiteral("检查设置"),

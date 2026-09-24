@@ -13,6 +13,7 @@
 #include <QVariant>
 #include <QVBoxLayout>
 
+#include <pwb/ui_data_core/qc_helpers.hpp>
 #include <pwb/ui_map/display_map_canvas.hpp>
 #include <pwb/ui_review/qt/qc_issue_table.hpp>
 #include <pwb/ui_review/qc_issue_rows.hpp>
@@ -23,19 +24,23 @@ namespace pwb::app {
 
 namespace {
 
-// Honest M5 placeholder surface — named gap, never a fake implementation.
-QWidget* m5_placeholder(const QString& title, const QString& body,
-                        QWidget* parent) {
+// 稿式窗格：题头 + 内容槽（页内固定区，非 dock 标题栏）。
+QWidget* titled_pane(const QString& title, QWidget** host_out,
+                     QWidget* parent) {
     auto* frame = new QFrame(parent);
-    frame->setObjectName(QStringLiteral("M5Placeholder"));
+    frame->setFrameShape(QFrame::StyledPanel);
     auto* layout = new QVBoxLayout(frame);
-    auto* title_label = new QLabel(title, frame);
-    title_label->setObjectName(QStringLiteral("M5PlaceholderTitle"));
-    auto* body_label = new QLabel(body, frame);
-    body_label->setObjectName(QStringLiteral("M5PlaceholderBody"));
-    body_label->setWordWrap(true);
-    layout->addWidget(title_label);
-    layout->addWidget(body_label, 1);
+    layout->setContentsMargins(6, 2, 6, 4);
+    layout->setSpacing(2);
+    auto* header = new QLabel(title, frame);
+    header->setObjectName(QStringLiteral("ValidationPaneTitle"));
+    layout->addWidget(header);
+    auto* host = new QWidget(frame);
+    auto* host_layout = new QVBoxLayout(host);
+    host_layout->setContentsMargins(0, 0, 0, 0);
+    host_layout->setSpacing(0);
+    layout->addWidget(host, 1);
+    if (host_out != nullptr) *host_out = host;
     return frame;
 }
 
@@ -89,10 +94,14 @@ ValidationWorkspacePage::ValidationWorkspacePage(QWidget* parent)
     map_ = new pwb::ui_map::DisplayMapCanvas(compare_split);
 
     // Seismic comparison pane slot — the host injects the real viewer.
-    seismic_host_ = new QWidget(compare_split);
+    QWidget* seismic_slot = nullptr;
+    auto* seismic_pane =
+        titled_pane(QStringLiteral("地震剖面（两套解释对照）"),
+                    &seismic_slot, compare_split);
+    seismic_host_ = seismic_slot;
     seismic_host_->setObjectName(QStringLiteral("ValidationSeismicHost"));
-    auto* seismic_layout = new QVBoxLayout(seismic_host_);
-    seismic_layout->setContentsMargins(0, 0, 0, 0);
+    auto* seismic_layout =
+        qobject_cast<QVBoxLayout*>(seismic_host_->layout());
     seismic_empty_ = new QLabel(
         QStringLiteral("地震剖面对照（打开工程并载入体版本后出现）"),
         seismic_host_);
@@ -101,57 +110,69 @@ ValidationWorkspacePage::ValidationWorkspacePage(QWidget* parent)
     seismic_layout->addWidget(seismic_empty_);
 
     compare_split->addWidget(map_);
-    compare_split->addWidget(seismic_host_);
+    compare_split->addWidget(seismic_pane);
     compare_split->setStretchFactor(0, 3);
     compare_split->setStretchFactor(1, 2);
 
-    // Structured issue list (the same QcIssueTable the review surface
-    // uses — one issue schema, no second table).
-    table_ = new pwb::ui_review::qt::QcIssueTable(left_split);
-    connect(table_->table(), &QTableWidget::cellClicked, this,
-            [this](int row, int column) { locate_rule_row(row, column); });
+    // 井验证对比窗格（稿中列底部整宽）—— 宿主经 set_compare_view 注入
+    // 真实 ComparisonView（解释 vs 预测深度带对照）。
+    auto* compare_pane = titled_pane(QStringLiteral("井验证对比"),
+                                     &compare_host_, left_split);
+    auto* compare_layout =
+        qobject_cast<QVBoxLayout*>(compare_host_->layout());
+    auto* compare_empty = new QLabel(
+        QStringLiteral(
+            "井验证对比（选择对象/基准/成果后显示深度带对照）"),
+        compare_host_);
+    compare_empty->setObjectName(QStringLiteral("ValidationCompareEmpty"));
+    compare_empty->setAlignment(Qt::AlignCenter);
+    compare_layout->addWidget(compare_empty);
 
     left_split->addWidget(compare_split);
-    left_split->addWidget(table_);
+    left_split->addWidget(compare_pane);
     left_split->setStretchFactor(0, 3);
     left_split->setStretchFactor(1, 2);
 
-    // Right rail: review detail + the two explicit M5 gaps.
-    hub_ = new pwb::ui_widgets::InteractiveQCHub(this);
-    right_tabs_ = new QTabWidget(this);
-    right_tabs_->setObjectName(QStringLiteral("ValidationRightTabs"));
-    right_tabs_->addTab(hub_, QStringLiteral("复核详情"));
-    right_tabs_->addTab(
-        m5_placeholder(QStringLiteral("解释 vs 预测对比视图"),
-                       QStringLiteral(
-                           "M5 范围：并排/叠加/差异三模式对照（解释版本 vs "
-                           "预测成果），数据源为 StratigraphyCorrelationPage "
-                           "解释版本 + WellLogPredictionPage 预测成果。"),
-                       this),
-        QStringLiteral("对比视图（M5）"));
-    right_tabs_->addTab(
-        m5_placeholder(QStringLiteral("问题级人工复核状态机"),
-                       QStringLiteral(
-                           "M5 范围：通过/未通过/待复核/未执行/不适用/已过期 "
-                           "状态词汇；复核备注必填；输入版本变化时旧报告标记"
-                           "已过期。已复核 ≠ 检查通过。"),
-                       this),
-        QStringLiteral("复核记录（M5）"));
+    // Structured issue list (the same QcIssueTable the review surface
+    // uses — one issue schema, no second table) — 稿右列上格「验证
+    // 结果」。稿在表上有统计行「通过 N · 待复核 N · 未执行 N」——
+    // 计数从报告真字段派生（rule_status.evaluated + issues 派生
+    // severity），不是装饰。
+    auto* right_split = new QSplitter(Qt::Vertical, this);
+    right_split->setObjectName(QStringLiteral("ValidationRightColumn"));
+    QWidget* results_host = nullptr;
+    right_split->addWidget(
+        titled_pane(QStringLiteral("验证结果"), &results_host, right_split));
+    auto* stats_row = new QWidget(results_host);
+    auto* stats_layout = new QHBoxLayout(stats_row);
+    stats_layout->setContentsMargins(2, 0, 2, 2);
+    stats_layout->setSpacing(10);
+    stats_pass_ = new QLabel(stats_row);
+    stats_pending_ = new QLabel(stats_row);
+    stats_skipped_ = new QLabel(stats_row);
+    stats_layout->addWidget(stats_pass_);
+    stats_layout->addWidget(stats_pending_);
+    stats_layout->addWidget(stats_skipped_);
+    stats_layout->addStretch();
+    qobject_cast<QVBoxLayout*>(results_host->layout())->addWidget(stats_row);
+    table_ = new pwb::ui_review::qt::QcIssueTable(results_host);
+    refresh_result_stats();
+    connect(table_->table(), &QTableWidget::cellClicked, this,
+            [this](int row, int column) { locate_rule_row(row, column); });
+    qobject_cast<QVBoxLayout*>(results_host->layout())->addWidget(table_);
 
-    auto* run = new QPushButton(QStringLiteral("运行检查"), this);
-    run->setObjectName(QStringLiteral("ValidationRunQc"));
-    run->setToolTip(QStringLiteral("对工程内全部编图文档运行 QC 规则"));
-    connect(run, &QPushButton::clicked, this,
-            [this] { run_qc(); });
-    auto* right_column = new QWidget(this);
-    auto* right_layout = new QVBoxLayout(right_column);
-    right_layout->setContentsMargins(0, 0, 0, 0);
-    right_layout->setSpacing(2);
-    right_layout->addWidget(run, 0, Qt::AlignRight);
-    right_layout->addWidget(right_tabs_, 1);
+    // 稿右列下格「选中问题详情」：InteractiveQCHub（问题详情+定位）+
+    // 复核处置面板（宿主经 set_review_panel 注入）。
+    right_split->addWidget(titled_pane(QStringLiteral("选中问题详情"),
+                                       &detail_host_, right_split));
+    hub_ = new pwb::ui_widgets::InteractiveQCHub(detail_host_);
+    qobject_cast<QVBoxLayout*>(detail_host_->layout())
+        ->addWidget(hub_);
+    right_split->setStretchFactor(0, 3);
+    right_split->setStretchFactor(1, 2);
 
     outer->addWidget(left_split, 1);
-    outer->addWidget(right_column);
+    outer->addWidget(right_split);
 
     // Issue click → smooth pan on the read-only map (locate point padded
     // 10% — core::kFocusPad parity). Never a text-only popup. Selection
@@ -178,27 +199,34 @@ void ValidationWorkspacePage::set_seismic_pane(QWidget* pane) {
 }
 
 void ValidationWorkspacePage::set_compare_view(QWidget* view) {
-    if (view == nullptr || right_tabs_ == nullptr) return;
-    const int index = right_tabs_->indexOf(compare_view_);
-    const int at = index >= 0 ? index : 1;
-    if (auto* old = right_tabs_->widget(at)) {
-        right_tabs_->removeTab(at);
-        old->deleteLater();
+    if (view == nullptr || compare_host_ == nullptr) return;
+    auto* layout = qobject_cast<QVBoxLayout*>(compare_host_->layout());
+    if (layout == nullptr) return;
+    if (auto* hint = compare_host_->findChild<QLabel*>(
+            QStringLiteral("ValidationCompareEmpty"),
+            Qt::FindDirectChildrenOnly)) {
+        hint->hide();
+    }
+    if (compare_view_ != nullptr) {
+        layout->removeWidget(compare_view_);
+        compare_view_->deleteLater();
     }
     compare_view_ = view;
-    right_tabs_->insertTab(at, view, QStringLiteral("对比视图"));
+    view->setParent(compare_host_);
+    layout->addWidget(view);
 }
 
 void ValidationWorkspacePage::set_review_panel(QWidget* panel) {
-    if (panel == nullptr || right_tabs_ == nullptr) return;
-    const int index = right_tabs_->indexOf(review_panel_);
-    const int at = index >= 0 ? index : 2;
-    if (auto* old = right_tabs_->widget(at)) {
-        right_tabs_->removeTab(at);
-        old->deleteLater();
+    if (panel == nullptr || detail_host_ == nullptr) return;
+    auto* layout = qobject_cast<QVBoxLayout*>(detail_host_->layout());
+    if (layout == nullptr) return;
+    if (review_panel_ != nullptr) {
+        layout->removeWidget(review_panel_);
+        review_panel_->deleteLater();
     }
     review_panel_ = panel;
-    right_tabs_->insertTab(at, panel, QStringLiteral("复核记录"));
+    panel->setParent(detail_host_);
+    layout->addWidget(panel);
 }
 
 void ValidationWorkspacePage::set_actions_provider(
@@ -223,7 +251,64 @@ void ValidationWorkspacePage::update_reports(
         }
     }
     hub_->set_issues(QStringLiteral("map_qc"), issues);
+    refresh_result_stats();
     emit reports_refreshed();
+}
+
+// 稿统计行「通过 N · 待复核 N · 未执行 N」—— 逐规则：
+//   rule_status[rule].evaluated == false            → 未执行
+//   评估且无 issues（derive_rule_result == pass）    → 通过
+//   评估且有 issues（warning/error 尚无人工结论）    → 待复核
+// 无报告时三档归零 —— 诚实缺席，不伪造通过数。
+void ValidationWorkspacePage::refresh_result_stats() {
+    int pass = 0;
+    int pending = 0;
+    int skipped = 0;
+    if (!reports_.empty()) {
+        const auto& report = reports_.front();
+        const auto rules_it = report.find("rules");
+        const auto issues_it = report.find("issues");
+        const auto status_it = report.find("rule_status");
+        if (rules_it != report.end() && rules_it->is_array()) {
+            for (const auto& rule_json : *rules_it) {
+                if (!rule_json.is_string()) continue;
+                const auto rule = rule_json.get<std::string>();
+                bool evaluated = true;
+                if (status_it != report.end() && status_it->is_object()) {
+                    const auto sit = status_it->find(rule);
+                    if (sit != status_it->end() && sit->is_object()) {
+                        const auto eit = sit->find("evaluated");
+                        if (eit != sit->end() && eit->is_boolean()) {
+                            evaluated = eit->get<bool>();
+                        }
+                    }
+                }
+                if (!evaluated) {
+                    ++skipped;
+                    continue;
+                }
+                const auto result = pwb::ui_data_core::derive_rule_result(
+                    rule, issues_it != report.end() ? *issues_it
+                                                    : pwb::domain::Json());
+                if (result.severity == "pass") {
+                    ++pass;
+                } else {
+                    ++pending;
+                }
+            }
+        }
+    }
+    const auto paint = [](QLabel* label, const QString& text,
+                          const char* color) {
+        label->setText(text);
+        label->setStyleSheet(
+            QStringLiteral("color: %1; font-weight: 600;").arg(color));
+    };
+    paint(stats_pass_, QStringLiteral("✓ 通过 %1").arg(pass), "#2e7d32");
+    paint(stats_pending_, QStringLiteral("⚠ 待复核 %1").arg(pending),
+          "#e65100");
+    paint(stats_skipped_, QStringLiteral("○ 未执行 %1").arg(skipped),
+          "#757575");
 }
 
 void ValidationWorkspacePage::run_qc() {

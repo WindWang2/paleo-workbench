@@ -37,6 +37,16 @@ QString cell_text(const AssetView& v, const std::string& key) {
         return QString::fromStdString(v.review_status);
     }
     if (key == "size") return QString::fromStdString(v.size_label);
+    if (key == "linked") {
+        return v.linked_label.empty()
+                   ? QStringLiteral("—")
+                   : QString::fromStdString(v.linked_label);
+    }
+    if (key == "horizon") {
+        return v.horizon_label.empty()
+                   ? QStringLiteral("—")
+                   : QString::fromStdString(v.horizon_label);
+    }
     if (key == "modified") return QString::fromStdString(v.modified_label);
     if (key == "source") return QString::fromStdString(v.source_label);
     if (key == "path") return QString::fromStdString(v.path);

@@ -10,6 +10,7 @@
 
 #include "app_context.hpp"
 #include "app_shell.hpp"
+#include "compilation_layer_panel.hpp"
 #include "closure_mapping_document.hpp"
 #include "closure_mapping_install.hpp"
 // AUTOMOC scans includes textually (no #if evaluation) — macro-indirect
@@ -222,6 +223,81 @@ void install(const Install& install) {
         bind(decor->save_button(), "map.save_plan");
         bind(decor->review_button(), "map.submit");
         sync_decor();
+    }
+
+    // ws3「编图图层」tab 底部整饰勾选（图例 / 指北针与比例尺）——
+    // 与 MapChromePanel 同一 map_chrome 文档节、同一写回路径；
+    // 勾选态随活动文档同步（镜像，非第二状态源）。
+    if (auto* layer_panel = shell->layer_tab_panel()) {
+        const auto sync_layer_chrome = [bank, layer_panel] {
+            auto* doc = bank->active_document();
+            if (doc == nullptr) return;
+            const auto chrome_it = doc->find("map_chrome");
+            if (chrome_it == doc->end() || !chrome_it->is_object()) {
+                return;
+            }
+            const auto elements_it = chrome_it->find("elements");
+            bool legend = false;
+            bool north_scale = false;
+            if (elements_it != chrome_it->end() &&
+                elements_it->is_array()) {
+                for (const auto& element : *elements_it) {
+                    if (!element.is_string()) continue;
+                    const auto name = element.get<std::string>();
+                    if (name == "图例") legend = true;
+                    if (name == "指北针" || name == "比例尺") {
+                        north_scale = true;
+                    }
+                }
+            }
+            layer_panel->set_chrome_state(legend, north_scale);
+        };
+        QObject::connect(
+            bank, &closure_mapping::MapDocumentBank::active_changed,
+            layer_panel, [sync_layer_chrome](const QString&) {
+                sync_layer_chrome();
+            });
+        QObject::connect(
+            bank, &closure_mapping::MapDocumentBank::document_saved,
+            layer_panel, [sync_layer_chrome](const QString&) {
+                sync_layer_chrome();
+            });
+        QObject::connect(
+            layer_panel,
+            &pwb::app::CompilationLayerPanel::chrome_element_toggled,
+            shell, [bank](const QString& element, bool on) {
+                auto* doc = bank->active_document();
+                if (doc == nullptr) return;
+                Json chrome = Json::object();
+                const auto chrome_it = doc->find("map_chrome");
+                if (chrome_it != doc->end() && chrome_it->is_object()) {
+                    chrome = *chrome_it;
+                }
+                Json next = Json::array();
+                bool found = false;
+                const auto elements_it = chrome.find("elements");
+                if (elements_it != chrome.end() &&
+                    elements_it->is_array()) {
+                    for (const auto& entry : *elements_it) {
+                        if (entry.is_string() &&
+                            entry.get<std::string>() ==
+                                element.toStdString()) {
+                            found = true;
+                            if (on) next.push_back(entry);
+                        } else {
+                            next.push_back(entry);
+                        }
+                    }
+                }
+                if (on && !found) {
+                    next.push_back(element.toStdString());
+                }
+                chrome["elements"] = std::move(next);
+                (*doc)["map_chrome"] = std::move(chrome);
+                emit bank->document_saved(
+                    QString::fromStdString(bank->active_id()));
+            });
+        sync_layer_chrome();
     }
 
     // ---- 上下文 Ribbon 组 (R:33) ------------------------------------------

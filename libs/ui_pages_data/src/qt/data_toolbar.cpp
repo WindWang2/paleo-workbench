@@ -3,12 +3,14 @@
 
 #include <QAction>
 #include <QActionGroup>
+#include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPushButton>
 #include <QTimer>
+#include <QVBoxLayout>
 
 #include <algorithm>
 
@@ -58,9 +60,39 @@ QPushButton* make_button(QWidget* parent, const char* icon_name,
 
 DataToolbar::DataToolbar(QWidget* parent) : QWidget(parent) {
     setObjectName(QStringLiteral("DataToolbar"));
-    auto* layout = new QHBoxLayout(this);
+    auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(4);                       // SPACE_1
+
+    // 稿式中列头：「数据列表」标题 + 过滤行。页面级功能按钮已由
+    // Ribbon 命令承载（emit 同名信号），不再占行——全部创建后隐藏，
+    // 仅作信号源保留（命令面板/快捷键复用同一信号身份）。
+    auto* title_row = new QHBoxLayout();
+    title_row->setContentsMargins(0, 0, 0, 0);
+    title_row->setSpacing(4);
+    auto* title = new QLabel(QStringLiteral("数据列表"), this);
+    title->setObjectName(QStringLiteral("DataListTitle"));
+    {
+        const auto p = ui_shell::style_palette();
+        const auto it = p.find("TEXT_PRIMARY");
+        title->setStyleSheet(QStringLiteral(
+            "font-weight: 600; color: %1;")
+                .arg(it != p.end() ? QString::fromStdString(it->second)
+                                   : QString()));
+    }
+    title_row->addWidget(title);
+    title_row->addStretch(1);
+    column_settings_slot_ = new QWidget(this);
+    column_settings_slot_->setObjectName(QStringLiteral("ColumnSettingsSlot"));
+    auto* slot_layout = new QHBoxLayout(column_settings_slot_);
+    slot_layout->setContentsMargins(0, 0, 0, 0);
+    slot_layout->setSpacing(0);
+    title_row->addWidget(column_settings_slot_);
+    layout->addLayout(title_row);
+
+    auto* filter_row = new QHBoxLayout();
+    filter_row->setContentsMargins(0, 0, 0, 0);
+    filter_row->setSpacing(4);
 
     import_btn_ = new QPushButton(icon("btn-import"),
                                   QStringLiteral("导入文件"), this);
@@ -70,14 +102,14 @@ DataToolbar::DataToolbar(QWidget* parent) : QWidget(parent) {
         QStringLiteral("导入文件并创建项目受管的不可变 RAW 副本"));
     connect(import_btn_, &QPushButton::clicked, this,
             &DataToolbar::import_files_requested);
-    layout->addWidget(import_btn_);
+    import_btn_->setVisible(false);
 
     import_folder_btn_ = make_button(
         this, "btn-import-folder", QStringLiteral("导入目录"),
         "SecondaryButton", QStringLiteral("导入整个目录"));
     connect(import_folder_btn_, &QPushButton::clicked, this,
             &DataToolbar::import_folder_requested);
-    layout->addWidget(import_folder_btn_);
+    import_folder_btn_->setVisible(false);  // 稿式行不承载——Ribbon 同名命令接此信号
 
     plan_import_btn_ = make_button(
         this, "btn-import", QStringLiteral("规划导入…"), "SecondaryButton",
@@ -86,7 +118,7 @@ DataToolbar::DataToolbar(QWidget* parent) : QWidget(parent) {
             "（与 Agent 导入共用同一计划服务）"));
     connect(plan_import_btn_, &QPushButton::clicked, this,
             &DataToolbar::plan_import_requested);
-    layout->addWidget(plan_import_btn_);
+    plan_import_btn_->setVisible(false);  // 稿式行不承载——Ribbon 同名命令接此信号
 
     // D4: visible only while an import runs; cooperative cancel.
     cancel_import_btn_ = new QPushButton(QStringLiteral("取消导入"), this);
@@ -97,14 +129,14 @@ DataToolbar::DataToolbar(QWidget* parent) : QWidget(parent) {
     cancel_import_btn_->setVisible(false);
     connect(cancel_import_btn_, &QPushButton::clicked, this,
             &DataToolbar::cancel_import_requested);
-    layout->addWidget(cancel_import_btn_);
+    cancel_import_btn_->setVisible(false);
 
     verify_btn_ = make_button(this, "btn-verify", QStringLiteral("完整性校验"),
                               "SecondaryButton",
                               QStringLiteral("后台校验数据资产完整性与 SHA-256"));
     connect(verify_btn_, &QPushButton::clicked, this,
             &DataToolbar::verify_requested);
-    layout->addWidget(verify_btn_);
+    verify_btn_->setVisible(false);  // 稿式行不承载——Ribbon 同名命令接此信号
 
     health_btn_ = make_button(
         this, "btn-health", QStringLiteral("健康检查"), "SecondaryButton",
@@ -112,41 +144,41 @@ DataToolbar::DataToolbar(QWidget* parent) : QWidget(parent) {
             "数据目录健康体检：资产/版本统计、缺失、血缘断链、标签悬挂、孤儿文件"));
     connect(health_btn_, &QPushButton::clicked, this,
             &DataToolbar::health_check_requested);
-    layout->addWidget(health_btn_);
+    health_btn_->setVisible(false);  // 稿式行不承载——Ribbon 同名命令接此信号
 
     rescan_btn_ = make_button(this, "btn-rescan", QStringLiteral("重新扫描"),
                               "SecondaryButton", QStringLiteral("重新扫描选中项"));
     connect(rescan_btn_, &QPushButton::clicked, this,
             &DataToolbar::rescan_requested);
-    layout->addWidget(rescan_btn_);
+    rescan_btn_->setVisible(false);  // 稿式行不承载——Ribbon 同名命令接此信号
 
     remove_btn_ = make_button(this, "btn-remove", QStringLiteral("移出项目"),
                               "SecondaryButton",
                               QStringLiteral("移出项目（不删源文件）"));
     connect(remove_btn_, &QPushButton::clicked, this,
             &DataToolbar::remove_requested);
-    layout->addWidget(remove_btn_);
+    remove_btn_->setVisible(false);  // 稿式行不承载——Ribbon 同名命令接此信号
 
     open_folder_btn_ = make_button(this, "btn-open-folder",
                                    QStringLiteral("打开目录"), "SecondaryButton",
                                    QStringLiteral("在文件管理器中打开"));
     connect(open_folder_btn_, &QPushButton::clicked, this,
             &DataToolbar::open_folder_requested);
-    layout->addWidget(open_folder_btn_);
+    open_folder_btn_->setVisible(false);  // 稿式行不承载——Ribbon 同名命令接此信号
 
     visualize_btn_ = make_button(this, "btn-visualize", QStringLiteral("可视化"),
                                  "SecondaryButton",
                                  QStringLiteral("在可视化页面打开"));
     connect(visualize_btn_, &QPushButton::clicked, this,
             &DataToolbar::visualize_requested);
-    layout->addWidget(visualize_btn_);
+    visualize_btn_->setVisible(false);  // 稿式行不承载——Ribbon 同名命令接此信号
 
     clear_preview_cache_btn_ = make_button(
         this, "btn-clear-cache", QStringLiteral("清除预览缓存"),
         "SecondaryButton", QStringLiteral("清除项目预览磁盘缓存"));
     connect(clear_preview_cache_btn_, &QPushButton::clicked, this,
             &DataToolbar::clear_preview_cache_requested);
-    layout->addWidget(clear_preview_cache_btn_);
+    clear_preview_cache_btn_->setVisible(false);  // 稿式行不承载——Ribbon 同名命令接此信号
 
     // --- Tag tools ---------------------------------------------------------
     tag_filter_btn_ = make_button(this, "btn-tag-filter",
@@ -156,14 +188,14 @@ DataToolbar::DataToolbar(QWidget* parent) : QWidget(parent) {
     connect(tag_filter_menu_, &QMenu::aboutToShow, this,
             &DataToolbar::rebuild_tag_filter_menu);
     tag_filter_btn_->setMenu(tag_filter_menu_);
-    layout->addWidget(tag_filter_btn_);
+    tag_filter_btn_->setVisible(false);  // 稿式行不承载——Ribbon 同名命令接此信号
 
     tag_manager_btn_ = make_button(this, "btn-tag-manager",
                                    QStringLiteral("标签管理"), "SecondaryButton",
                                    QStringLiteral("管理标签：新建 / 重命名 / 合并 / 清理"));
     connect(tag_manager_btn_, &QPushButton::clicked, this,
             &DataToolbar::tag_manager_requested);
-    layout->addWidget(tag_manager_btn_);
+    tag_manager_btn_->setVisible(false);  // 稿式行不承载——Ribbon 同名命令接此信号
 
     operation_status_label_ = new QLabel(QString(), this);
     {
@@ -175,7 +207,7 @@ DataToolbar::DataToolbar(QWidget* parent) : QWidget(parent) {
                     .arg(QString::fromStdString(it->second)));
         }
     }
-    layout->addWidget(operation_status_label_);
+    operation_status_label_->setVisible(false);
 
     search_timer_ = new QTimer(this);
     search_timer_->setSingleShot(true);
@@ -186,9 +218,9 @@ DataToolbar::DataToolbar(QWidget* parent) : QWidget(parent) {
     search_box_ = new QLineEdit(this);
     search_box_->setObjectName(QStringLiteral("SearchBox"));
     search_box_->setPlaceholderText(
-        QStringLiteral("搜索文件名 / 类型 / 阶段 / 标签 / 路径..."));
+        QStringLiteral("搜索名称、井名、来源…"));
     search_box_->setToolTip(
-        QStringLiteral("搜索文件名/类型/阶段/标签/路径"));
+        QStringLiteral("搜索名称、井名、来源"));
     search_box_->setClearButtonEnabled(true);
     ui_shell::style_track_control_height(search_box_);
     connect(search_box_, &QLineEdit::textChanged, this,
@@ -197,14 +229,46 @@ DataToolbar::DataToolbar(QWidget* parent) : QWidget(parent) {
                 pending_search_ = text;
                 search_timer_->start();
             });
-    layout->addWidget(search_box_, 1);
+    filter_row->addWidget(search_box_, 1);
 
-    column_settings_slot_ = new QWidget(this);
-    column_settings_slot_->setObjectName(QStringLiteral("ColumnSettingsSlot"));
-    auto* slot_layout = new QHBoxLayout(column_settings_slot_);
-    slot_layout->setContentsMargins(0, 0, 0, 0);
-    slot_layout->setSpacing(0);
-    layout->addWidget(column_settings_slot_);
+    // 稿：所有类型 ▼ / 所有状态 ▼ —— 候选由真实行集驱动
+    // （set_filter_options），空工程只剩「所有*」。
+    type_combo_ = new QComboBox(this);
+    type_combo_->setObjectName(QStringLiteral("DataTypeFilter"));
+    type_combo_->addItem(QStringLiteral("所有类型"), QString());
+    connect(type_combo_, &QComboBox::currentIndexChanged, this,
+            [this](int index) {
+                Q_EMIT type_filter_changed(
+                    type_combo_->itemData(index).toString());
+            });
+    filter_row->addWidget(type_combo_);
+
+    status_combo_ = new QComboBox(this);
+    status_combo_->setObjectName(QStringLiteral("DataStatusFilter"));
+    status_combo_->addItem(QStringLiteral("所有状态"), QString());
+    connect(status_combo_, &QComboBox::currentIndexChanged, this,
+            [this](int index) {
+                Q_EMIT status_filter_changed(
+                    status_combo_->itemData(index).toString());
+            });
+    filter_row->addWidget(status_combo_);
+
+    filter_row->addStretch(1);
+
+    // 稿：行尾计数「共 N 条数据」。
+    count_label_ = new QLabel(QStringLiteral("共 0 条数据"), this);
+    count_label_->setObjectName(QStringLiteral("DataRowCount"));
+    {
+        const auto p = ui_shell::style_palette();
+        const auto it = p.find("TEXT_SECONDARY");
+        if (it != p.end()) {
+            count_label_->setStyleSheet(
+                QStringLiteral("color: %1;")
+                    .arg(QString::fromStdString(it->second)));
+        }
+    }
+    filter_row->addWidget(count_label_);
+    layout->addLayout(filter_row);
 
     // Hides the whole right column (reader + inspector), not only the reader.
     reader_btn_ = make_button(this, "btn-reader", QStringLiteral("预览栏"),
@@ -213,7 +277,7 @@ DataToolbar::DataToolbar(QWidget* parent) : QWidget(parent) {
     reader_btn_->setCheckable(true);
     connect(reader_btn_, &QPushButton::clicked, this,
             &DataToolbar::reader_toggled);
-    layout->addWidget(reader_btn_);
+    reader_btn_->setVisible(false);
 }
 
 void DataToolbar::set_verify_running(bool running) {
@@ -332,6 +396,32 @@ void DataToolbar::set_search_text_silent(const QString& text) {
     search_sync_ = true;
     search_box_->setText(text);
     search_sync_ = false;
+}
+
+void DataToolbar::set_filter_options(
+    const QList<QPair<QString, QString>>& types,
+    const QList<QPair<QString, QString>>& statuses) {
+    // 候选 = 真实行的 distinct 值（原始键作 userData，显示名作
+    // 文本）；当前选中经 userData 保留。
+    const auto refill = [](QComboBox* combo, const QString& all_label,
+                           const QList<QPair<QString, QString>>& values) {
+        const QString current = combo->currentData().toString();
+        combo->blockSignals(true);
+        combo->clear();
+        combo->addItem(all_label, QString());
+        for (const auto& [key, label] : values) {
+            combo->addItem(label, key);
+        }
+        const int restore = combo->findData(current);
+        combo->setCurrentIndex(restore >= 0 ? restore : 0);
+        combo->blockSignals(false);
+    };
+    refill(type_combo_, QStringLiteral("所有类型"), types);
+    refill(status_combo_, QStringLiteral("所有状态"), statuses);
+}
+
+void DataToolbar::set_row_count(int count) {
+    count_label_->setText(QStringLiteral("共 %1 条数据").arg(count));
 }
 
 void DataToolbar::emit_debounced_search() {

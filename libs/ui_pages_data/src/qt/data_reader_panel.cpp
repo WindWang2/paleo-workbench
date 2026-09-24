@@ -446,6 +446,10 @@ DataReaderPanel::DataReaderPanel(QWidget* parent) : QFrame(parent) {
     loading_label->set_message(QStringLiteral("正在生成预览…"));
     loading_label->setObjectName("LoadingLabel");
     loading_layout->addWidget(loading_label, 1);
+    // 必须入栈 —— setCurrentWidget 对非栈内 widget 是静默无效调用，
+    // 未入栈的 loading_page_ 会作为游离子控件浮在面板左上（与 title_
+    // 重影），且 loading 态从未真正显示过。
+    stack_->addWidget(loading_page_);
 
     stack_->setCurrentWidget(empty_);
     connect(image_, &ImagePreview::zoom_changed, this,

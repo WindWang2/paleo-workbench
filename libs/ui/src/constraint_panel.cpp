@@ -4,7 +4,9 @@
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 
+#include <qgslayertree.h>
 #include <qgsmaplayer.h>
+#include <qgsproject.h>
 #include <qgsvectorlayer.h>
 
 #include <pwb/qgis/layer_adapter.hpp>
@@ -58,10 +60,22 @@ ConstraintPanel::ConstraintPanel(const FactsProvider& facts_provider,
             [this](QTreeWidgetItem* item, int column) {
                 on_row_activated(item, column);
             });
+    connect(tree_, &QTreeWidget::itemChanged, this,
+            [this](QTreeWidgetItem* item, int column) {
+                if (syncing_checks_ || item == nullptr || column != 0) {
+                    return;
+                }
+                const QString layer_id =
+                    item->data(0, Qt::UserRole).toString();
+                if (layer_id.isEmpty()) return;
+                emit visibility_requested(
+                    layer_id, item->checkState(0) == Qt::Checked);
+            });
     setWidget(tree_);
 }
 
 void ConstraintPanel::refresh(pwb::application::ProjectSession& session) {
+    syncing_checks_ = true;
     tree_->clear();
     const auto active = session.active_layer();
     for (const std::string& layer_id : session.map().layerIdsTopFirst()) {
@@ -92,10 +106,22 @@ void ConstraintPanel::refresh(pwb::application::ProjectSession& session) {
         row->setData(0, Qt::UserRole,
                      QString::fromStdString(layer_id));
         row->setToolTip(0, QString::fromStdString(layer_id));
+        // 稿式约束要素勾选 = 图层树可见性（读 QgsLayerTree 真状态，
+        // 无图层树节点时按可见处理）。
+        row->setFlags(row->flags() | Qt::ItemIsUserCheckable);
+        bool visible = true;
+        if (auto* project = session.map().project()) {
+            if (auto* node = project->layerTreeRoot()->findLayer(
+                    QString::fromStdString(layer_id))) {
+                visible = node->itemVisibilityChecked();
+            }
+        }
+        row->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
         if (active.has_value() && active->layer_id == layer_id) {
             row->setSelected(true);
         }
     }
+    syncing_checks_ = false;
 }
 
 QStringList ConstraintPanel::constraint_rows() const {

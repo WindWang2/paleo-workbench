@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <QDockWidget>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
@@ -84,8 +85,20 @@ class VizBCrossWellDock : public QDockWidget {
         return picks_model_.all_picks().size();
     }
 
+    // 剖面设置（ws2 页内窗格左列）seam：剖面井勾选 → 画布井列过滤。
+    // 空集 = 全部显示；过滤器只影响画布投影，不改 wells_ 数据本身。
+    void set_well_filter(const QSet<QString>& names);
+    // 显示设置：地层格架（分层线叠加）开关。沉积相/测井曲线由剖面
+    // 渲染器固定输出，无独立开关。
+    void set_show_frame(bool show);
+    // 面板初始化/刷新用：全部井名（未过滤）。
+    [[nodiscard]] QStringList all_well_names() const;
+
   signals:
     void status_message(const QString& message);
+    // 井列变化（加载/重排/清空）后广播全部井名——剖面井勾选清单
+    // 据此重建（勾选态按名匹配保留）。
+    void wells_changed(const QStringList& names);
 
   private slots:
     void on_load_wells();
@@ -128,9 +141,13 @@ class VizBCrossWellDock : public QDockWidget {
     void apply_dtw_results(
         const std::vector<std::pair<std::string, double>>& pairs,
         const std::string& formation);
+    // 唯一的画布井列投影点：wells_ 经剖面井过滤器（空=全部）过滤后
+    // set_wells，并广播 wells_changed。任何井列写入都走这里。
+    void apply_wells_to_canvas();
 
     // Data.
     std::vector<pwb::viz::cross_well::WellColumnData> wells_;
+    QSet<QString> well_filter_;  // 空 = 全部井显示
     pwb::viz::cross_well::FormationTopsModel tops_model_;
     pwb::viz::cross_well::HorizonPicksModel picks_model_;
     pwb::viz::cross_well::SeismicTie tie_;
