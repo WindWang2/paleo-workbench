@@ -258,12 +258,4 @@ OperationRegistry& operation_registry() {
     return *current_registry();
 }
 
-void bind_registry_to_shell(OperationRegistry* shell_registry) {
-    // The global slot forwards to whatever registry the current shell
-    // bound; nullptr rebinds the lazy fallback (shell teardown path).
-    current_registry() = shell_registry != nullptr
-                             ? shell_registry
-                             : &fallback_registry();
-}
-
 }  // namespace pwb::ui_shell

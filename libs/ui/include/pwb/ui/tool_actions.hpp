@@ -6,6 +6,7 @@
 // the policy output is asserted by tests.
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -19,13 +20,17 @@ namespace pwb::ui {
 
 class ToolActionSet {
 public:
-    ~ToolActionSet();   // owns (deletes) the QActions it materialized
+    ~ToolActionSet();   // deletes only the actions it still owns
 
-    // Rebuilds/updates one QAction per availability entry. Actions are
-    // owned by this object (parented QObject tree); toolbar binding keeps
-    // whatever subset the surface wants.
+    // Rebuilds/updates one QAction per availability entry. Without a
+    // parent the set owns (deletes) the actions itself — the legacy
+    // contract; with a host QObject the actions are parented into the
+    // host's QObject tree (Qt owns them, destruction order follows the
+    // tree instead of member order — the D3 hardening for shells whose
+    // member order must not be load-bearing).
     void apply(const std::map<std::string, pwb::tool_policy::ToolAvailability>&
-                   availability);
+                   availability,
+               QObject* parent = nullptr);
 
     QAction* action(const std::string& tool_id) const;
     std::vector<std::string> action_ids() const;
@@ -38,6 +43,8 @@ public:
 
 private:
     std::map<std::string, QAction*> actions_;
+    // Actions handed to a host QObject tree (not deleted here).
+    std::set<QAction*> parented_;
 };
 
 }  // namespace pwb::ui

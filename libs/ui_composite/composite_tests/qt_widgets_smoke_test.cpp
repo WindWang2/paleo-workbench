@@ -21,8 +21,8 @@
 #include <pwb/ui_composite/composite_document.hpp>
 #include <pwb/ui_composite/composite_panels.hpp>
 #include <pwb/ui_composite/facies_selector.hpp>
-#include <pwb/ui_composite/layer_manager_panel.hpp>
-#include <pwb/ui_composite/mapping_stage_bar.hpp>
+#include <pwb/ui_composite/input_tree_panel.hpp>
+#include <pwb/ui_composite/linked_views_panel.hpp>
 #include <pwb/ui_composite/mapping_stage_panel.hpp>
 #include <pwb/ui_composite/merge_features_dialog.hpp>
 #include <pwb/ui_composite/tool_page_dialog.hpp>
@@ -109,18 +109,6 @@ int main(int argc, char** argv) {
         (void)zoom_fired;
     }
 
-    // --- mapping stage bar ------------------------------------------
-    {
-        MappingStageBar bar;
-        QString requested;
-        QObject::connect(&bar, &MappingStageBar::stage_requested, &bar,
-                         [&](const QString& value) { requested = value; });
-        bar.set_current_stage("boundary");
-        check(requested.isEmpty() ||
-                  requested == QStringLiteral("boundary"),
-              "stage bar accepts stage switch");
-    }
-
     // --- mapping stage panel ----------------------------------------
     {
         MappingStagePanel panel;
@@ -186,13 +174,11 @@ int main(int argc, char** argv) {
         check(true, "snapping settings dialog constructs");
     }
 
-    // --- layer manager / input tree / linked views -------------------
+    // --- input tree / linked views ------------------------------------
     {
-        LayerManagerPanel manager;
-        manager.set_project_crs("EPSG:4326");
         InputTreePanel input_tree;
         LinkedViewsPanel linked;
-        check(true, "layer manager + input tree + linked views");
+        check(true, "input tree + linked views");
     }
 
     // --- tool page dialog ---------------------------------------------
@@ -238,8 +224,8 @@ int main(int argc, char** argv) {
         QObject::connect(
             &document, &CompositeDocument::stage_switch_requested,
             &document, [&](const QString& value) { stage = value; });
-        document.stage_bar->set_current_stage("fill");
-        check(true, "document stage wiring constructs");
+        Q_UNUSED(stage);
+        check(true, "document constructs without retired stage surfaces");
     }
 
     // --- linked workspace (CONV_30-gated) ------------------------------

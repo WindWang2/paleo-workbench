@@ -7,7 +7,6 @@
 #include <string>
 
 #include <pwb/ui_stageflow/stage_presentation.hpp>
-#include <pwb/ui_stageflow/surface_state.hpp>
 
 #include "ui_stageflow_test.hpp"
 
@@ -160,65 +159,7 @@ PWB_TEST(effective_visibility_merge) {
 
 // ---------------------------------------------------------------- surfaces
 
-PWB_TEST(surface_state_vocabulary) {
-    // Every kind has non-empty title + hint (dual-signal contract) and a
-    // state-language token key.
-    const std::vector<SurfaceKind> kinds = {
-        SurfaceKind::Ready,     SurfaceKind::Loading,     SurfaceKind::Busy,
-        SurfaceKind::Queued,    SurfaceKind::Cancelled,   SurfaceKind::Stale,
-        SurfaceKind::Degraded,  SurfaceKind::MissingSource,
-        SurfaceKind::Unsupported, SurfaceKind::Error,     SurfaceKind::NoProject,
-        SurfaceKind::NoLayer,   SurfaceKind::NoSelection, SurfaceKind::Empty};
-    for (const SurfaceKind kind : kinds) {
-        const auto state = surface_state_for(kind);
-        CHECK_MSG(!state.title.empty(), "surface title empty");
-        CHECK_MSG(!state.hint.empty(), "surface hint empty");
-        const auto token = surface_token_key(kind);
-        CHECK(!token.category.empty());
-        CHECK(!token.value.empty());
-    }
-    // Retry only for actionable-transient kinds.
-    CHECK(!surface_state_for(SurfaceKind::Error).retry_action_id.empty());
-    CHECK(!surface_state_for(SurfaceKind::Stale).retry_action_id.empty());
-    CHECK(!surface_state_for(SurfaceKind::MissingSource).retry_action_id.empty());
-    CHECK(surface_state_for(SurfaceKind::Busy).retry_action_id.empty());
-    CHECK(surface_state_for(SurfaceKind::NoProject).retry_action_id.empty());
-    CHECK(surface_state_for(SurfaceKind::Ready).retry_action_id.empty());
-}
 
-PWB_TEST(surface_task_derivation) {
-    // Precedence: fail > cancelled > busy > queued; subject lands in title.
-    auto failed = surface_for_task(false, false, false, true, "boom", "因子图");
-    CHECK(failed.kind == SurfaceKind::Error);
-    CHECK(failed.title.find("因子图") != std::string::npos);
-    CHECK(failed.hint == "boom");
-    auto cancelled = surface_for_task(false, false, true, false, "", "等值线");
-    CHECK(cancelled.kind == SurfaceKind::Cancelled);
-    // running + cancelled -> cancelled is the honest "user asked to stop".
-    auto busy = surface_for_task(true, false, true, false, "", "x");
-    CHECK(busy.kind == SurfaceKind::Cancelled);
-    auto queued = surface_for_task(false, true, false, false, "", "x");
-    CHECK(queued.kind == SurfaceKind::Queued);
-    auto ok = surface_for_task(false, false, false, false, "", "x");
-    CHECK(ok.kind == SurfaceKind::Ready);
-}
 
-PWB_TEST(surface_factor_derivation) {
-    auto computing = surface_for_factor(true, false, false, false, "厚度");
-    CHECK(computing.kind == SurfaceKind::Busy);
-    CHECK(computing.title.find("厚度") != std::string::npos);
-    CHECK(computing.hint.find("主地图") != std::string::npos);
-    auto stale = surface_for_factor(false, true, false, false, "厚度");
-    CHECK(stale.kind == SurfaceKind::Stale);
-    CHECK(!stale.retry_action_id.empty());
-    CHECK(stale.hint.find("综合编图") != std::string::npos);
-    auto missing = surface_for_factor(false, false, true, false, "厚度");
-    CHECK(missing.kind == SurfaceKind::MissingSource);
-    // Fail-closed: failed beats computing.
-    auto failed_factor = surface_for_factor(true, false, false, true, "厚度");
-    CHECK(failed_factor.kind == SurfaceKind::Error);
-    auto ok = surface_for_factor(false, false, false, false, "厚度");
-    CHECK(ok.kind == SurfaceKind::Ready);
-}
 
 int main() { return ::pwb_test::run_all("ui_stageflow.core"); }

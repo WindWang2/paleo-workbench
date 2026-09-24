@@ -14,11 +14,12 @@
 #include <QString>
 #include <qgsapplication.h>
 #include <qgsmapcanvas.h>
+#include <qgslayertreeview.h>
+#include <qgsproject.h>
 
 #include <pwb/application/project_session.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
 #include <pwb/ui_composite/composite_document.hpp>
-#include <pwb/ui_composite/mapping_stage_bar.hpp>
 #include <pwb/ui_map/map_dock_manager.hpp>
 #include <pwb/ui_map/mapping_page.hpp>
 #include <pwb/ui_shell/command_palette.hpp>
@@ -56,12 +57,10 @@ void check_stage_flow_installed(MainWindow& window) {
     PWB_CHECK(shell != nullptr);
     PWB_CHECK(shell->workstation() != nullptr);
     // M2 (D1): the ribbon chrome is the stage switch — the MappingStageBar
-    // retires (no top-bar mount; the bar widget stays an unmounted orphan
-    // owned by the composite document).
+    // is deleted outright (the retired surface no longer exists even as an
+    // unmounted orphan owned by the composite document).
     PWB_CHECK(shell->ribbon() != nullptr);
     PWB_CHECK(!shell->workstation()->top_bar_mounted());
-    PWB_CHECK(shell->composite()->stage_bar != nullptr);
-    PWB_CHECK(shell->composite()->stage_bar->parentWidget() == nullptr);
     // The horizon selector migrated to the AppShell StatusBar.
     PWB_CHECK(shell->status_bar()->findChild<QComboBox*>(
                   "StatusHorizonCombo") != nullptr);
@@ -323,6 +322,51 @@ void check_task_center_provider(MainWindow& window) {
     (void)window;
 }
 
+void check_map_object_identity(MainWindow& window) {
+    // D2（#1429 家族回归）：会话三件套 QgsProject / QgsMapCanvas /
+    // QgsLayerTreeView 在阶段切换、工程关闭-重开全程指针恒等——阶段与
+    // 工程流只改可见性与图层清单，绝不允许重建第二套地图状态。
+    QgsProject* const project =
+        window.context().session().map().project();
+    QgsMapCanvas* const canvas =
+        window.findChild<QgsMapCanvas*>(QStringLiteral("session-map-canvas"));
+    PWB_CHECK(project != nullptr && canvas != nullptr);
+#ifdef PWB_WITH_CONV_27
+    // applyStageValue/layerPanel 仅存在于 CONV-27 build（本测试目标在
+    // 标准配置下不定义该宏——阶段写路径经 stageFlow）。
+    QgsLayerTreeView* const view =
+        window.layerPanel() != nullptr ? window.layerPanel()->view()
+                                       : nullptr;
+    PWB_CHECK(view != nullptr);
+    for (const std::string stage :
+         {"facies_calibration", "constraint_factor", "integrated_compilation",
+          "facies_calibration"}) {
+        window.applyStageValue(stage);
+        PWB_CHECK(window.context().session().map().project() == project);
+        PWB_CHECK(window.findChild<QgsMapCanvas*>(
+                      QStringLiteral("session-map-canvas")) == canvas);
+        PWB_CHECK(window.layerPanel()->view() == view);
+    }
+
+#ifdef PWB_WITH_DATA_INTEGRATION
+    // 工程 close（无工程时是幂等 no-op）后，同一会话对象继续服务——
+    // reopen 后 project/canvas/tree 仍恒等（图层在 QgsProject 内重建，
+    // 壳层不重建画布/树/工程）。
+    const QString close_error = window.closeProject();
+    PWB_CHECK_MSG(close_error.isEmpty(), close_error.toStdString());
+    PWB_CHECK(window.context().session().map().project() == project);
+    PWB_CHECK(window.findChild<QgsMapCanvas*>(
+                  QStringLiteral("session-map-canvas")) == canvas);
+    PWB_CHECK(window.layerPanel()->view() == view);
+#endif
+#else
+    // Reduced build（无 CONV-27）：canvas/project 恒等仍可断言。
+    PWB_CHECK(window.context().session().map().project() == project);
+    PWB_CHECK(window.findChild<QgsMapCanvas*>(
+                  QStringLiteral("session-map-canvas")) == canvas);
+#endif
+}
+
 void check_palette_popup(MainWindow& window) {
     AppShell* shell = window.appShell();
     shell->command_palette()->popup();
@@ -349,6 +393,7 @@ int main(int argc, char** argv) {
         check_command_registry(window);
         check_stage_switch_and_layout(window);
         check_workspace_stage_coupling(window);
+        check_map_object_identity(window);
         check_user_preference_override(window);
         check_task_center_provider(window);
         check_palette_popup(window);

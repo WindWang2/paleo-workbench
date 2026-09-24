@@ -22,7 +22,6 @@
 #include <pwb/ui_shell/floating_panel.hpp>
 #include <pwb/ui_shell/layout_persistence.hpp>
 #include <pwb/ui_shell/map_status_bar.hpp>
-#include <pwb/ui_shell/operation_registry_qt.hpp>
 #include <pwb/ui_shell/page_placeholder.hpp>
 #include <pwb/ui_shell/screen_inventory.hpp>
 #include <pwb/ui_shell/shortcut_registry.hpp>
@@ -178,11 +177,6 @@ int main(int argc, char** argv) {
     PagePlaceholder placeholder(QStringLiteral("井"));
     check(placeholder.findChild<QLabel*>() != nullptr,
           "placeholder constructs");
-
-    OperationRegistryQt ops;
-    const auto& rec = ops.registry().begin("op-1", "任务");
-    check(rec.state == OperationState::Running, "op registry qt bridge");
-    ops.registry().finish("op-1", OperationState::Completed);
 
     check(screen_inventory().hubs.size() == 5, "screen inventory hubs");
     check(dock_manager().panel_title("workstation:inspector") ==

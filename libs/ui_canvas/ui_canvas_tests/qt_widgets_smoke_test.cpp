@@ -1,8 +1,10 @@
-// UI-15 Qt widget smoke (offscreen): UnifiedMapCanvas + NativeMapCanvas +
-// NativeLayerTree + MapLayerPropertiesDialog + MapExportWorker +
-// PreviewSettingsDialog + NativeRasterRequestController. No QGIS — the
-// canvas consumes a synchronous fake backend and a fake scalar source;
-// export degrades honestly without a QGIS factory.
+// UI-15 Qt widget smoke (offscreen): UnifiedMapCanvas +
+// MapLayerPropertiesDialog + MapExportWorker + PreviewSettingsDialog.
+// No QGIS — the canvas consumes a synchronous fake backend and a fake
+// scalar source; export degrades honestly without a QGIS factory.
+// (NativeMapCanvas / NativeLayerTree / NativeRasterRequestController —
+// the zero-consumer prototype canvas stack — retired with the
+// QGIS-native shell convergence.)
 
 #include <QApplication>
 #include <QElapsedTimer>
@@ -19,24 +21,16 @@
 
 #include "ui_canvas_test.hpp"
 
-#include <layer_model.hpp>
-
 #include <pwb/ui_canvas/export_core.hpp>
 #include <pwb/ui_canvas/map_render_backend.hpp>
 #include <pwb/ui_canvas/qt/map_export_worker.hpp>
 #include <pwb/ui_canvas/qt/map_layer_properties.hpp>
-#include <pwb/ui_canvas/qt/native_layer_tree.hpp>
-#include <pwb/ui_canvas/qt/native_map_canvas.hpp>
-#include <pwb/ui_canvas/qt/native_raster_controller.hpp>
 #include <pwb/ui_canvas/qt/preview_settings_dialog.hpp>
 #include <pwb/ui_canvas/qt/qt_meta.hpp>
 #include <pwb/ui_canvas/qt/unified_map_canvas.hpp>
 #include <pwb/ui_pages_preview/qt/preview_settings_panel.hpp>
 
 using namespace pwb::ui_canvas;
-using pwb::layer_model::LayerRegistry;
-using pwb::layer_model::LayerType;
-using pwb::layer_model::MapLayer;
 
 namespace {
 
@@ -60,62 +54,6 @@ public:
 
 std::shared_ptr<MapRenderBackend> qt_fake_factory() {
     return std::make_shared<FakeBackend>();
-}
-
-// Deterministic scalar raster source (8x8 solid pixels).
-class FakeScalar final : public IScalarRasterSource {
-public:
-    explicit FakeScalar(RasterKey key = {1, 1}) : key_(key) {}
-    RasterKey raster_key() const override { return key_; }
-    std::vector<std::uint8_t> rasterize() const override {
-        ++rasterize_calls;
-        return std::vector<std::uint8_t>(
-            static_cast<std::size_t>(raster_width() * raster_height() * 4),
-            '\xAA');
-    }
-    int raster_width() const override { return 8; }
-    int raster_height() const override { return 8; }
-
-    RasterKey key_;
-    mutable int rasterize_calls = 0;
-};
-
-// Minimal scene: owns the registry + one scalar layer.
-class TestScene final : public NativeMapScene {
-public:
-    LayerRegistry& registry() override { return registry_; }
-    const LayerRegistry& registry() const override { return registry_; }
-
-    MapLayer* add_scalar(const std::string& id,
-                         const std::shared_ptr<FakeScalar>& scalar) {
-        scalars_[id] = scalar;
-        return registry_.add_layer(
-            std::make_unique<MapLayer>(id, id, LayerType::ScalarGrid));
-    }
-
-    ScalarRasterSourcePtr scalar_layer(
-        const std::string& layer_id) const override {
-        const auto it = scalars_.find(layer_id);
-        return it == scalars_.end() ? nullptr : it->second;
-    }
-    const ContourGeometry* contour_geometry(
-        const std::string&) const override {
-        return nullptr;
-    }
-    const PointGeometry* point_geometry(
-        const std::string&) const override {
-        return nullptr;
-    }
-    void notify() { emit_changed(); }
-
-    LayerRegistry registry_;
-    std::map<std::string, std::shared_ptr<FakeScalar>> scalars_;
-};
-
-MapLayer* add_layer(LayerRegistry& registry, const std::string& id,
-                    LayerType type = LayerType::Vector) {
-    return registry.add_layer(
-        std::make_unique<MapLayer>(id, id, type));
 }
 
 // Pump the event loop until `done` or timeout — replaces fragile sleeps.
@@ -233,122 +171,6 @@ PWB_TEST(export_worker_renders_and_reports) {
     CHECK(threw);
 }
 
-PWB_TEST(native_canvas_scene_and_raster_cache) {
-    TestScene scene;
-    auto scalar = std::make_shared<FakeScalar>();
-    MapLayer* layer = scene.add_scalar("s1", scalar);
-    layer->set_extent({0.0, 0.0, 10.0, 5.0});
-
-    NativeMapCanvas canvas(&scene);
-    canvas.resize(400, 200);
-    CHECK(canvas.scene() == &scene);
-    canvas.fit_to_scene();
-    const auto e = canvas.view_extent();
-    // 4% margin on the scene extent (Python fit_to_scene parity).
-    CHECK(e[0] < 0.0);
-    CHECK(e[2] > 10.0);
-    CHECK(e[1] < 0.0);
-    CHECK(e[3] > 5.0);
-
-    // Synchronous export prep fills the raster cache.
-    canvas.prepare_for_export();
-    CHECK(canvas.image_cache_size() >= 1);
-    CHECK(scalar->rasterize_calls >= 1);
-    CHECK(!canvas.cached_image("s1").isNull());
-
-    canvas.zoom_by(0.5);
-    canvas.pan_by_pixels(5.0, 5.0);
-    canvas.clear_scene();
-    CHECK(canvas.scene() == nullptr);
-    canvas.shutdown();
-}
-
-PWB_TEST(raster_controller_queue_and_shutdown) {
-    NativeRasterRequestController controller;
-    auto scalar_a = std::make_shared<FakeScalar>();
-    auto scalar_b = std::make_shared<FakeScalar>();
-
-    controller.request(/*scene_epoch=*/1, "s1", RasterKey{1, 1}, scalar_a);
-    // Latest-request-per-layer: re-requesting the same layer keeps ONE
-    // desired entry; a different layer does not discard s1's work.
-    controller.request(1, "s1", RasterKey{1, 1}, scalar_a);
-    controller.request(1, "s2", RasterKey{1, 1}, scalar_b);
-    CHECK(controller.desired_count() <= 2);
-
-    controller.invalidate();
-    CHECK_EQ(static_cast<long long>(controller.desired_count()), 0);
-    CHECK_EQ(static_cast<long long>(controller.pending_count()), 0);
-
-    // Bounded shutdown on an idle lane joins cleanly.
-    CHECK(controller.shutdown(3000));
-    CHECK(!controller.is_running());
-}
-
-PWB_TEST(layer_tree_model_resolves_registry) {
-    LayerRegistry registry;
-    add_layer(registry, "a");
-    add_layer(registry, "b");
-    add_layer(registry, "g", LayerType::Group);
-    MapLayer* c = add_layer(registry, "c");
-    registry.set_parent("c", "g");
-    c->set_extent({0.0, 0.0, 10.0, 5.0});
-
-    NativeLayerModel model(&registry);
-    // Display order = reversed registry (g, b, a) — top row is topmost z.
-    CHECK_EQ(static_cast<long long>(model.rowCount()), 3);
-    const QModelIndex top = model.index(0, 0);
-    CHECK_EQ(model.data(top, NativeLayerModel::LayerIdRole)
-                 .toString()
-                 .toStdString(),
-             std::string("g"));
-
-    // Group children resolve through the authoritative registry.
-    const QModelIndex c_idx = model.index_for_id("c");
-    CHECK(c_idx.isValid());
-    CHECK(model.parent(c_idx) == top);
-
-    // Active-layer selection round-trips.
-    CHECK(model.set_active_layer("b"));
-    CHECK(model.active_layer_id().has_value());
-    CHECK_EQ(*model.active_layer_id(), std::string("b"));
-
-    // Registry mutation through the model stays authoritative.
-    MapLayer* added =
-        model.add_layer("d", "Delta", LayerType::Vector, "");
-    CHECK(added != nullptr);
-    CHECK(registry.get("d") != nullptr);
-    CHECK(model.remove_layer("d"));
-    CHECK(registry.get("d") == nullptr);
-}
-
-PWB_TEST(layer_tree_actions_and_group_ids) {
-    LayerRegistry registry;
-    add_layer(registry, "a");
-    NativeLayerTree tree(&registry);
-    tree.resize(300, 400);
-    CHECK(tree.model() != nullptr);
-    CHECK(tree.view() != nullptr);
-    // Required actions exist with a selection-sensitive enablement.
-    CHECK(tree.add_layer_action() != nullptr);
-    CHECK(tree.add_group_action() != nullptr);
-    CHECK(tree.remove_action() != nullptr);
-    CHECK(tree.properties_action() != nullptr);
-    CHECK(!tree.remove_action()->isEnabled());  // nothing selected
-
-    // Group creation goes through the registry with a uuid-like suffix.
-    tree.add_group_action()->trigger();
-    bool found_group = false;
-    for (const auto& layer : registry.layers()) {
-        if (layer->type() == LayerType::Group) {
-            found_group = true;
-            // Python: f"group_{uuid4().hex[:12]}".
-            CHECK_EQ(static_cast<long long>(layer->id().size()),
-                     6 + 12);
-            CHECK(layer->id().rfind("group_", 0) == 0);
-        }
-    }
-    CHECK(found_group);
-}
 
 PWB_TEST(properties_dialog_scalar_and_legacy) {
     // Scalar layer → scalar tab fields + scalar payload.
@@ -396,31 +218,12 @@ PWB_TEST(preview_settings_dialog_modal_apply) {
     CHECK(dialog.panel()->reset_button() != nullptr);
 }
 
-PWB_TEST(native_canvas_epoch_invalidates_pending_rasters) {
-    TestScene scene;
-    auto scalar = std::make_shared<FakeScalar>();
-    MapLayer* layer = scene.add_scalar("s1", scalar);
-    layer->set_extent({0.0, 0.0, 10.0, 5.0});
-
-    NativeMapCanvas canvas(&scene);
-    canvas.resize(200, 100);
-    // Scene replacement bumps the epoch; a second scene object swaps in
-    // and the canvas re-registers its listener without leaking.
-    TestScene other;
-    canvas.set_scene(&other);
-    CHECK(canvas.scene() == &other);
-    canvas.set_scene(&scene);
-    CHECK(canvas.scene() == &scene);
-    canvas.shutdown();
-}
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     qRegisterMetaType<pwb::ui_canvas::Json>("pwb::ui_canvas::Json");
     qRegisterMetaType<pwb::ui_canvas::RenderFrame>(
         "pwb::ui_canvas::RenderFrame");
-    qRegisterMetaType<pwb::ui_canvas::NativeRasterRequest>(
-        "pwb::ui_canvas::NativeRasterRequest");
     qRegisterMetaType<std::optional<std::string>>(
         "std::optional<std::string>");
     qRegisterMetaType<std::pair<double, double>>(

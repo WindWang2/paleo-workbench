@@ -84,6 +84,9 @@ class SequenceFrameworkPage;
 class StratigraphyCorrelationPage;
 class VisualizationPage;
 }
+namespace pwb::seismic_service {
+class SeismicVolumeService;
+}
 namespace pwb::ui_map {
 class MappingPage;
 }
@@ -133,7 +136,9 @@ public:
     // placeholder instead of a fabricated scene.
     explicit AppShell(
         QWidget* parent = nullptr,
-        pwb::ui_wellseis::qt::JointHostController* joint_host = nullptr);
+        pwb::ui_wellseis::qt::JointHostController* joint_host = nullptr,
+        pwb::seismic_service::SeismicVolumeService* seismic_volume_service =
+            nullptr);
     ~AppShell() override;
 
     // Host assembly (call once, before show): the session map canvas becomes
@@ -374,10 +379,14 @@ private:
     // Per-workspace right-dock panel instances (created lazily by the
     // dock factories; non-owning — docks own them).
     QWidget* predict_compare_ = nullptr;
-    QWidget* reference_layers_ = nullptr;
     QWidget* map_decor_ = nullptr;
     pwb::ui_workstation::VerifyRecordsPanel* verify_records_ = nullptr;
 
+    // Seismic volume service (07 closure): host-injected, window-owned
+    // (D4 — the per-shell function-local static retired: no hidden
+    // process-lifetime service state inside a per-window shell).
+    pwb::seismic_service::SeismicVolumeService* seismic_volume_service_ =
+        nullptr;
     // Joint-host seam (06): the window injects the real host (owned by
     // the Geo3D dock); without one the fallback stub reports
     // has_scene=false so GeologicalModeling3DPage renders its honest

@@ -6,22 +6,30 @@ namespace pwb::ui {
 
 ToolActionSet::~ToolActionSet() {
     for (auto& [id, action] : actions_) {
-        delete action;
+        if (parented_.find(action) == parented_.end()) delete action;
     }
 }
 
 void ToolActionSet::apply(
     const std::map<std::string, pwb::tool_policy::ToolAvailability>&
-        availability) {
+        availability,
+    QObject* parent) {
     for (const auto& [tool_id, verdict] : availability) {
         QAction* action = nullptr;
         const auto it = actions_.find(tool_id);
         if (it == actions_.end()) {
-            action = new QAction(QString::fromStdString(tool_id));
+            action = new QAction(QString::fromStdString(tool_id), parent);
             action->setObjectName(QString::fromStdString(tool_id));
+            if (parent != nullptr) parented_.insert(action);
             actions_[tool_id] = action;
         } else {
             action = it->second;
+            // D3: adopt previously-unparented stock into the host tree
+            // (Qt then owns destruction order, not member order).
+            if (parent != nullptr && action->parent() == nullptr) {
+                action->setParent(parent);
+                parented_.insert(action);
+            }
         }
         // Pure projection: no gate logic lives here. setChecked is a no-op
         // on non-checkable actions, so a checked verdict promotes the

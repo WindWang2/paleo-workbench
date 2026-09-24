@@ -6,6 +6,9 @@
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QLabel>
+#include <QSet>
+
+#include <functional>
 #include <QLineEdit>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -130,9 +133,15 @@
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
 #include <qgsmapmouseevent.h>
+#include <QKeyEvent>
+
+#include <qgscoordinatetransform.h>
+#include <qgsdistancearea.h>
+#include <qgsmaptoolidentifyfeature.h>
 #include <qgsmaptoolemitpoint.h>
 #include <qgsmaptoolpan.h>
 #include <qgsmaptoolzoom.h>
+#include <qgsrubberband.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
 #include <qgsvertexmarker.h>
@@ -155,7 +164,6 @@
 #include "ribbon_command_install.hpp"
 #include "m5_validation_install.hpp"
 #include <pwb/ui_composite/composite_document.hpp>
-#include <pwb/ui_composite/layer_manager_panel.hpp>
 #if defined(PWB_WITH_CLOSURE_MAPPING)
 #include "m5_compose_install.hpp"
 #endif
@@ -244,6 +252,10 @@
 // the metatype declared at global scope (outside namespace pwb::app).
 Q_DECLARE_METATYPE(pwb::app::JobCenter*)
 #endif
+
+namespace pwb::seismic_service {
+class SeismicVolumeService;
+}
 
 namespace pwb::app {
 
@@ -380,6 +392,79 @@ private:
     std::unique_ptr<QgsVertexMarker> marker_;
 };
 
+// C（shell 收敛）：距离量测工具——QGIS app 私有的 QgsMeasureTool 不在
+// 公共 gui API 中，此处仅以公共件组合（QgsMapToolEmitPoint +
+// QgsRubberBand + QgsDistanceArea + 地图单位）实现等价交互；不复制
+// QGIS 源码、不建第二事件路由。左键加点、右键/双击结束、Esc 清空。
+class MeasureDistanceTool : public QgsMapToolEmitPoint {
+public:
+    using Report = std::function<void(const QString&)>;
+    explicit MeasureDistanceTool(QgsMapCanvas* canvas, Report report)
+        : QgsMapToolEmitPoint(canvas),
+          band_(new QgsRubberBand(canvas, Qgis::GeometryType::Line)),
+          report_(std::move(report)) {
+        setCursor(Qt::CrossCursor);
+        band_->setColor(Qt::blue);
+        band_->setWidth(2);
+        band_->setLineStyle(Qt::DashLine);
+    }
+
+    void canvasReleaseEvent(QgsMapMouseEvent* event) override {
+        // QGIS parity: left adds a point; right just finishes (keep band).
+        if (event->button() != Qt::LeftButton) return;
+        const QgsPointXY point = toMapCoordinates(event->pos());
+        band_->addPoint(point);
+        if (report_) report_(currentText());
+    }
+
+    void canvasDoubleClickEvent(QgsMapMouseEvent* event) override {
+        Q_UNUSED(event);
+        if (report_) report_(currentText());  // finished
+    }
+
+    void keyPressEvent(QKeyEvent* event) override {
+        if (event->key() == Qt::Key_Escape) {
+            band_->reset(Qgis::GeometryType::Line);
+            if (report_) report_(QString());
+        }
+    }
+
+    // Re-arm clears the previous measurement (one live measurement).
+    void activate() override {
+        band_->reset(Qgis::GeometryType::Line);
+        QgsMapToolEmitPoint::activate();
+    }
+
+private:
+    QString currentText() const {
+        const int points = band_->numberOfVertices();
+        if (points < 1) return QString();
+        QgsDistanceArea calculator;
+        calculator.setSourceCrs(canvas()->mapSettings().destinationCrs(),
+                                canvas()->mapSettings().transformContext());
+        calculator.setEllipsoid(canvas()->mapSettings().ellipsoid());
+        double total = 0.0;
+        try {
+            for (int i = 1; i < points; ++i) {
+                const QgsPointXY* from = band_->getPoint(i - 1);
+                const QgsPointXY* to = band_->getPoint(i);
+                if (from != nullptr && to != nullptr) {
+                    total += calculator.measureLine(*from, *to);
+                }
+            }
+        } catch (const QgsCsException&) {
+            return QObject::tr("距离：坐标变换失败");
+        }
+        return QObject::tr("距离：%1（%2 点）")
+            .arg(QgsDistanceArea::formatDistance(
+                total, 3, calculator.lengthUnits(), true))
+            .arg(points);
+    }
+
+    QgsRubberBand* band_;
+    Report report_;
+};
+
 
 MainWindow::MainWindow(AppContext& context, QWidget* parent,
                        QSettings* services_settings)
@@ -450,7 +535,13 @@ void MainWindow::init_shell(QSettings* services_settings) {
             });
     theme_service_->load_persisted(*services_settings_);
     buildPlatformMenus();
+#ifndef PWB_WITH_CONV_27
+    // B2（shell 收敛）：CONV-27 build 的窗口布局唯一走 WorkbenchLayout
+    // （layout_store_，版本围栏）；此函数仅作无 CONV-27 时 reduced
+    // build 的回退，不再与前者双写/双恢复（此前 resetLayoutState 需要
+    // 手工删 key 调和两份 saveState blob）。
     pwb::platform_services::restore_window_layout(*services_settings_, *this);
+#endif
 #ifdef PWB_WITH_APP_SHELL
     // M2 (D7): the ribbon mode + workspace persist on the same unified
     // (PaleoWorkbench, Workstation) store. The shell was constructed
@@ -543,10 +634,19 @@ void MainWindow::buildUi() {
     // W5/UI-17 — the page-navigation shell hosts the composite document;
     // the session canvas is its central canvas (same widget, reparented —
     // the session's attachCanvas pointer stays valid).
-#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
-    app_shell_ = new AppShell(this, geo3d_dock_->joint_host());
+    // 注入 shell 的体数据服务指针（reduced build 无该服务 —— 传空，
+    // 页面保持诚实未绑定；类型只需前置声明，见文件头）。
+    pwb::seismic_service::SeismicVolumeService* const shell_volume_service =
+#if defined(PWB_WITH_SEISMIC_SERVICE) && defined(PWB_WITH_DATA_INTEGRATION)
+        seismic_volume_service_.get();
 #else
-    app_shell_ = new AppShell(this);
+        nullptr;
+#endif
+#if defined(PWB_WITH_GEO3D_VIZ) && defined(PWB_WITH_UI_WELLSEIS)
+    app_shell_ = new AppShell(this, geo3d_dock_->joint_host(),
+                              shell_volume_service);
+#else
+    app_shell_ = new AppShell(this, nullptr, shell_volume_service);
 #endif
     app_shell_->install_canvas(canvas_);
     setCentralWidget(app_shell_);
@@ -582,15 +682,10 @@ void MainWindow::buildUi() {
 #endif
     addDockWidget(Qt::LeftDockWidgetArea, dock);
 #if defined(PWB_WITH_APP_SHELL) && defined(PWB_WITH_CONV_27)
+    // The native QgsLayerTreeView dock is adopted into the workstation
+    // host directly — the retired prototype LayerManagerPanel (and its
+    // dead active_layer bridge) no longer exists.
     app_shell_->adopt_layer_tree_dock(dock);
-    connect(app_shell_->composite()->layer_manager,
-            &pwb::ui_composite::LayerManagerPanel::active_layer_changed,
-            this, [this](const QVariant& layer_id) {
-                if (layer_panel_ != nullptr && layer_id.isValid()) {
-                    layer_panel_->set_active_layer(
-                        layer_id.toString().toStdString());
-                }
-            });
 #endif
 
     status_label_ = new QLabel(QStringLiteral("ready"), this);
@@ -784,6 +879,23 @@ void MainWindow::buildUi() {
     zoom_in_tool_ = new QgsMapToolZoom(canvas_, false);
     zoom_out_tool_ = new QgsMapToolZoom(canvas_, true);
     vertex_tool_ = new VertexMoveMapTool(canvas_, this);
+    // C：识别走 QGIS 公共 QgsMapToolIdentifyFeature；量测走公共件组合
+    // （MeasureDistanceTool，见上）——均 canvas 拥有，无第二状态机。
+    identify_tool_ = new QgsMapToolIdentifyFeature(canvas_);
+    connect(
+        static_cast<QgsMapToolIdentifyFeature*>(identify_tool_),
+        qOverload<const QgsFeature&>(
+            &QgsMapToolIdentifyFeature::featureIdentified),
+        this,
+        [this](const QgsFeature& feature) {
+            const QString summary =
+                tr("识别到要素 %1").arg(static_cast<qlonglong>(feature.id()));
+            statusBar()->showMessage(summary, 8000);
+        });
+    measure_tool_ = new MeasureDistanceTool(
+        canvas_, [this](const QString& summary) {
+            statusBar()->showMessage(summary, 8000);
+        });
     canvas_->setMapTool(pan_tool_);
     context_.session().set_current_tool("pan");
 
@@ -1072,21 +1184,20 @@ void MainWindow::wire_ribbon_commands() {
             return {verdict.enabled, verdict.reason};
         });
 
-    // -- the full file menu (R:20): same handlers as the native 文件 menu,
-    // MRU rides the same settings store (refreshRecentProjects fills both).
-    // No shortcuts here on purpose: the native menu bar carries the
-    // canonical key bindings (Ctrl+N/O/Q…) — a second binding would make
-    // them ambiguous; the ribbon file button is a mouse surface.
+    // -- the full file menu (R:20/B1): hosts the SAME shared QActions as
+    // the native 文件 menu (one identity per command; the shortcuts ride
+    // the actions themselves and converge_menus_into_ribbon promotes
+    // them to the window for post-menubar-hide dispatch).
     auto* file = new QMenu(app_shell_);
 #ifdef PWB_WITH_DATA_INTEGRATION
-    file->addAction(tr("新建工程…"), this, [this] { newProjectDialog(); });
-    file->addAction(tr("打开工程…"), this, [this] { openProjectDialog(); });
-    file->addAction(tr("保存工程"), this, [this] { saveProjectRequested(); });
-    file->addAction(tr("打开样例工程"), this,
-                    [this] { openSampleProjectRequested(); });
+    // B1：与原生 文件 菜单共享同一批 QAction——同一命令一个 identity，
+    // 文本/快捷键随动作走（ribbon 面只是同一动作的第二个宿主）。
+    file->addAction(file_new_action_);
+    file->addAction(file_open_action_);
+    file->addAction(file_save_action_);
+    file->addAction(file_sample_action_);
     file->addSeparator();
-    file->addAction(tr("工程属性…"), this,
-                    [this] { showProjectProperties(); });
+    file->addAction(file_properties_action_);
     file->addSeparator();
 #endif
     ribbon_recent_menu_ = new QMenu(tr("最近工程(&R)"), file);
@@ -1122,12 +1233,55 @@ void MainWindow::wire_ribbon_commands() {
         }
         file->addSeparator();
     }
-    file->addAction(tr("退出"), this, [this] { close(); });
+    file->addAction(file_exit_action_);
     ribbon->set_file_menu(file);
     ribbon_file_menu_ = file;
     refreshRecentProjects();
 }
 #endif
+
+void MainWindow::buildFileActions() {
+    // B1（shell 收敛）：文件命令的唯一 QAction identity——原生 文件 菜
+    // 单、ribbon 文件菜单、快捷键共享同一批动作（快捷键只设在动作上
+    // 一次，不存在第二绑定造成的歧义；converge_menus_into_ribbon 把
+    // 带快捷键的动作挂到窗口本身以保全菜单栏隐藏后的 WindowContext
+    // 派发）。
+#ifdef PWB_WITH_DATA_INTEGRATION
+    file_new_action_ = new QAction(tr("新建工程…"), this);
+    file_new_action_->setShortcut(QKeySequence::New);
+    connect(file_new_action_, &QAction::triggered, this,
+            [this] { newProjectDialog(); });
+
+    file_open_action_ = new QAction(tr("打开工程…"), this);
+    file_open_action_->setShortcut(QKeySequence::Open);
+    connect(file_open_action_, &QAction::triggered, this,
+            [this] { openProjectDialog(); });
+
+    file_save_action_ = new QAction(tr("保存工程"), this);
+    connect(file_save_action_, &QAction::triggered, this,
+            [this] { saveProjectRequested(); });
+
+    file_sample_action_ = new QAction(tr("打开样例工程"), this);
+    connect(file_sample_action_, &QAction::triggered, this,
+            [this] { openSampleProjectRequested(); });
+
+    file_properties_action_ = new QAction(tr("工程属性…"), this);
+    connect(file_properties_action_, &QAction::triggered, this,
+            [this] { showProjectProperties(); });
+#endif
+    file_exit_action_ = new QAction(tr("退出"), this);
+    file_exit_action_->setShortcut(QKeySequence::Quit);
+    connect(file_exit_action_, &QAction::triggered, this, &MainWindow::close);
+
+    file_clear_recent_action_ = new QAction(tr("清除最近工程"), this);
+    connect(file_clear_recent_action_, &QAction::triggered, this, [this] {
+        if (services_settings_ != nullptr) {
+            pwb::platform_services::clear_recent_projects(
+                *services_settings_);
+        }
+        refreshRecentProjects();
+    });
+}
 
 void MainWindow::buildMenusAndToolbar() {
     // Actions materialize from the policy vocabulary; labels/shortcuts are
@@ -1145,6 +1299,8 @@ void MainWindow::buildMenusAndToolbar() {
         {"pan", QT_TRANSLATE_NOOP("MainWindow", "平移"), QKeySequence()},
         {"zoom_in", QT_TRANSLATE_NOOP("MainWindow", "放大"), QKeySequence()},
         {"zoom_out", QT_TRANSLATE_NOOP("MainWindow", "缩小"), QKeySequence()},
+        {"identify", QT_TRANSLATE_NOOP("MainWindow", "识别要素"), QKeySequence(Qt::Key_I)},
+        {"measure_distance", QT_TRANSLATE_NOOP("MainWindow", "距离量测"), QKeySequence(Qt::Key_M)},
         {"full_extent", QT_TRANSLATE_NOOP("MainWindow", "全图"), QKeySequence(Qt::Key_F)},
         {"refresh", QT_TRANSLATE_NOOP("MainWindow", "刷新"), QKeySequence(Qt::Key_F5)},
         {"toggle_editing", QT_TRANSLATE_NOOP("MainWindow", "开始/停止编辑"),
@@ -1258,22 +1414,17 @@ void MainWindow::buildMenusAndToolbar() {
     }
 #endif
 
+    buildFileActions();
     QMenu* file_menu = menuBar()->addMenu(tr("文件(&F)"));
 #ifdef PWB_WITH_DATA_INTEGRATION
-    file_menu->addAction(tr("新建工程…"), this,
-                         &MainWindow::newProjectDialog,
-                         QKeySequence::New);
-    file_menu->addAction(tr("打开工程…"), this,
-                         &MainWindow::openProjectDialog, QKeySequence::Open);
-    // BEGIN CPP-CLOSE-12 — 工程保存/样例工程/属性 menu parity with the
-    // app-bar surfaces (no shortcut: Ctrl+S stays 提交编辑 in this shell).
-    file_menu->addAction(tr("保存工程"), this,
-                         [this] { saveProjectRequested(); });
-    file_menu->addAction(tr("打开样例工程"), this,
-                         [this] { openSampleProjectRequested(); });
-    file_menu->addAction(tr("工程属性…"), this,
-                         [this] { showProjectProperties(); });
-    // END CPP-CLOSE-12
+    // B1：与 ribbon 文件菜单共享的同一批 QAction（无第二 identity）。
+    file_menu->addAction(file_new_action_);
+    file_menu->addAction(file_open_action_);
+    file_menu->addAction(file_save_action_);
+    file_menu->addAction(file_sample_action_);
+    file_menu->addSeparator();
+    file_menu->addAction(file_properties_action_);
+    file_menu->addSeparator();
 #endif
     file_menu->addAction(actions_.action("reference_import"));
     file_menu->addAction(actions_.action("layer_new"));
@@ -1283,8 +1434,7 @@ void MainWindow::buildMenusAndToolbar() {
     // CONV-PS recent-projects MRU (populated after the settings store is
     // bound in the constructor).
     recent_projects_menu_ = file_menu->addMenu(tr("最近工程(&R)"));
-    file_menu->addAction(tr("退出"), this, &MainWindow::close,
-                         QKeySequence::Quit);
+    file_menu->addAction(file_exit_action_);
 
     QMenu* edit_menu = menuBar()->addMenu(tr("编辑(&E)"));
     edit_menu->addAction(actions_.action("toggle_editing"));
@@ -1312,6 +1462,10 @@ void MainWindow::buildMenusAndToolbar() {
     view_menu->addAction(actions_.action("pan"));
     view_menu->addAction(actions_.action("zoom_in"));
     view_menu->addAction(actions_.action("zoom_out"));
+    // C：识别/量测进视图菜单（governed QAction——菜单与未来 ribbon 面
+    // 共用同一 identity；可用性由 policy 的 inspection 组派生）。
+    view_menu->addAction(actions_.action("identify"));
+    view_menu->addAction(actions_.action("measure_distance"));
     view_menu->addAction(actions_.action("full_extent"));
     view_menu->addSeparator();
     view_menu->addAction(actions_.action("refresh"));
@@ -1389,6 +1543,8 @@ void MainWindow::connectActions() {
     wire("pan", &MainWindow::armPan);
     wire("zoom_in", &MainWindow::armZoomIn);
     wire("zoom_out", &MainWindow::armZoomOut);
+    wire("identify", &MainWindow::armIdentify);
+    wire("measure_distance", &MainWindow::armMeasure);
     wire("full_extent", &MainWindow::zoomFullExtent);
     wire("refresh", &MainWindow::refreshMap);
     wire("toggle_editing", &MainWindow::toggleEditing);
@@ -1412,7 +1568,8 @@ void MainWindow::connectActions() {
 
 void MainWindow::refreshActionStates() {
     const auto availability = pwb::tool_policy::evaluate_all(context_.session().snapshot());
-    actions_.apply(availability);
+    // D3：动作挂到窗口 QObject 树（销毁序随树走，成员序不再是承重墙）。
+    actions_.apply(availability, this);
     setStatusFromPolicy(availability);
 #ifdef PWB_WITH_CONV_27
     // Edit tools retarget the canvas current layer on every active change.
@@ -2114,6 +2271,22 @@ void MainWindow::armZoomOut() {
     canvas_->setMapTool(zoom_out_tool_);
 }
 
+void MainWindow::armIdentify() {
+    // Identify against the active vector layer (QGIS public tool; null
+    // layer keeps the tool armed — a click then identifies nothing).
+    auto* identify = static_cast<QgsMapToolIdentifyFeature*>(identify_tool_);
+    const auto active = context_.session().active_layer();
+    identify->setLayer(
+        active.has_value()
+            ? context_.session().map().vectorLayerById(active->layer_id)
+            : nullptr);
+    canvas_->setMapTool(identify);
+}
+
+void MainWindow::armMeasure() {
+    canvas_->setMapTool(measure_tool_);
+}
+
 void MainWindow::armVertexTool() {
     canvas_->setMapTool(vertex_tool_);
 }
@@ -2710,6 +2883,8 @@ void MainWindow::onCanvasMapToolChanged() {
     if (tool == pan_tool_) tool_id = "pan";
     else if (tool == zoom_in_tool_) tool_id = "zoom_in";
     else if (tool == zoom_out_tool_) tool_id = "zoom_out";
+    else if (tool == identify_tool_) tool_id = "identify";
+    else if (tool == measure_tool_) tool_id = "measure_distance";
     else if (tool == vertex_tool_) tool_id = "vertex";
 #ifdef PWB_WITH_CONV_27
     else if (edit_tools_ != nullptr
@@ -2809,23 +2984,20 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     }
 #ifdef PWB_WITH_CONV_27
     // UI layout only; business state lives in the store/catalog round.
-    // A pending reset must NOT be overwritten by this close — and the
-    // CONV-PS store below must skip the write for the same reason (its
-    // restore runs after layout_store_'s at startup, so it would
-    // otherwise resurrect the pre-reset layout).
-    const bool layout_reset_pending = layout_reset_pending_;
-    if (layout_store_ != nullptr && !layout_reset_pending) {
+    // B2：CONV-27 build 单一布局存储（WorkbenchLayout）——待重置的
+    // pending 标志拦住本次 close 的回写即可，没有第二个 store 会在
+    // 启动时复活旧布局。
+    if (layout_store_ != nullptr && !layout_reset_pending_) {
         layout_store_->save(*this);
     }
 #else
-    const bool layout_reset_pending = false;
-#endif
-    // Persist the window layout on the confirmed close path only: the
-    // window is still visible here, so save_window_layout accepts it
-    // (a cancelled close must not rewrite the store).
-    if (services_settings_ != nullptr && !layout_reset_pending) {
+    // Reduced build fallback: no WorkbenchLayout — the unified platform
+    // store carries the window layout instead. Confirmed-close only (the
+    // window is still visible here; a cancelled close must not rewrite).
+    if (services_settings_ != nullptr) {
         pwb::platform_services::save_window_layout(*services_settings_, *this);
     }
+#endif
 // BEGIN VIZ-B
 #ifdef PWB_WITH_VIZ_B
     if (viz_b_dock_ != nullptr) {
@@ -2950,12 +3122,18 @@ void MainWindow::converge_menus_into_ribbon() {
     file->insertSeparator(exit_action);
     // 快捷键保全：带快捷键的动作挂到窗口本身 —— 菜单栏隐藏后 Qt 仍会
     // 派发 WindowContext 快捷键（挂在隐藏菜单/菜单栏上的动作不计）。
+    // B1 之后同一 QAction 可能同时出现在原生与 ribbon 菜单——去重后再
+    // 挂（insertAction 会先移除旧位置，但集合保证只走一次）。
+    QSet<QAction*> shortcut_actions;
     for (QMenu* menu : findChildren<QMenu*>()) {
         for (QAction* action : menu->actions()) {
             if (action->menu() == nullptr && !action->shortcut().isEmpty()) {
-                addAction(action);
+                shortcut_actions.insert(action);
             }
         }
+    }
+    for (QAction* action : shortcut_actions) {
+        addAction(action);
     }
     menuBar()->hide();
 }
@@ -2977,38 +3155,43 @@ void MainWindow::syncThemeMenuChecks() {
 }
 
 void MainWindow::refreshRecentProjects() {
-    // M4 (R:20): both the native 文件 menu and the ribbon file button carry
-    // the same MRU — one data source (the settings store), two views.
+    // B1（shell 收敛）：MRU 每条目一个 QAction（窗口拥有），两个
+    // 最近工程 菜单挂同一批动作——数据单一来源（设置存储），动作也单
+    // 一 identity（此前每菜单各自 new QAction + connect）。
     const QStringList projects =
         services_settings_ == nullptr
             ? QStringList()
             : pwb::platform_services::load_recent_projects(*services_settings_);
+    for (QAction* action : recent_project_actions_) {
+        delete action;  // Q析构自动从两个菜单移除
+    }
+    recent_project_actions_.clear();
+    for (const QString& project : projects) {
+        QAction* action = new QAction(project, this);
+        connect(action, &QAction::triggered, this,
+                [this, project]() { openRecentProject(project); });
+        recent_project_actions_.push_back(action);
+    }
     auto fill = [this, &projects](QMenu* menu) {
         if (menu == nullptr) return;
+        // clear() 只销毁菜单自有的动作；共享动作父对象是窗口，安全保留。
         menu->clear();
         if (projects.isEmpty()) {
             QAction* empty = menu->addAction(tr("(暂无最近工程)"));
             empty->setEnabled(false);
-            return;
-        }
-        for (const QString& project : projects) {
-            QAction* action = menu->addAction(project);
-            connect(action, &QAction::triggered, this,
-                    [this, project]() { openRecentProject(project); });
+        } else {
+            for (QAction* action : recent_project_actions_) {
+                menu->addAction(action);
+            }
         }
         menu->addSeparator();
-        menu->addAction(tr("清除最近工程"), this, [this]() {
-            if (services_settings_ != nullptr) {
-                pwb::platform_services::clear_recent_projects(
-                    *services_settings_);
-            }
-            refreshRecentProjects();
-        });
+        menu->addAction(file_clear_recent_action_);
     };
     fill(recent_projects_menu_);
 #ifdef PWB_WITH_APP_SHELL
     // M4: the ribbon file button carries the same MRU (one data source,
-    // two views). Absent in reduced builds (no ribbon, no member).
+    // two views, now also one QAction per entry). Absent in reduced
+    // builds (no ribbon, no member).
     fill(ribbon_recent_menu_);
 #endif
 }
@@ -3480,10 +3663,16 @@ void MainWindow::superviseAttributeRun(const std::string& request_id) {
     // the supervision job is already running) and the runner directly
     // (when the job is still QUEUED behind another lane and a queued
     // cancel would drop it before it ever forwarded the cancel).
+    // D1（#1429 家族）：worker 体只按值捕获服务指针，不再捕获 this。
+    // attribute_runner 由 AppContext 拥有（栈序：窗口先析构、context 后
+    // 析构），窗口析构期间轮询访问它依旧有效——与 submitSegyJob 的
+    // 数据捕获模式一致。
+    pwb::application::AlgorithmRunner* const attribute_runner =
+        &context_.attributeRunner();
     QObject::connect(
         progress, &QProgressDialog::canceled, this,
-        [this, request_id] {
-            context_.attributeRunner().cancel(request_id);
+        [attribute_runner, request_id] {
+            attribute_runner->cancel(request_id);
         });
     QObject::connect(progress, &QProgressDialog::canceled, &owner,
                      &pwb::job::qtbridge::JobOwner::cancel);
@@ -3491,21 +3680,21 @@ void MainWindow::superviseAttributeRun(const std::string& request_id) {
     pwb::job::JobSpec spec;
     spec.kind = "seismic.attribute";
     spec.title = "地震属性计算";
-    spec.run = [this, request_id, alive](pwb::job::JobContext& ctx)
-        -> std::any {
+    spec.run = [attribute_runner, request_id, alive](
+                   pwb::job::JobContext& ctx) -> std::any {
         bool cancel_sent = false;
         for (;;) {
-            // Teardown escape: alive clears before the runner member dies,
-            // so this loop can exit without touching `this` again.
+            // Teardown escape: alive clears before the job center dies,
+            // so this loop can exit early without polling further.
             if (!alive->load()) return {};
             // Cooperative cancel propagation: the supervision token flips
             // the underlying run's TaskHandle; the run then unwinds its
             // publication exactly like an explicit cancel.
             if (ctx.token().is_cancelled() && !cancel_sent) {
                 cancel_sent = true;
-                context_.attributeRunner().cancel(request_id);
+                attribute_runner->cancel(request_id);
             }
-            const auto outcome = attributeOutcome(request_id);
+            const auto outcome = attribute_runner->outcome(request_id);
             if (outcome.status == "queued") {
                 ctx.report_progress(0.05, std::nullopt, "排队中");
             } else if (outcome.status == "running") {
@@ -3517,7 +3706,7 @@ void MainWindow::superviseAttributeRun(const std::string& request_id) {
             }
             ctx.sleep_interruptible(0.05);
         }
-        return attributeOutcome(request_id);
+        return attribute_runner->outcome(request_id);
     };
     owner.start(
         job_center_->scheduler(), std::move(spec),
@@ -4318,18 +4507,10 @@ void MainWindow::saveLayoutState() {
 }
 
 void MainWindow::resetLayoutState() {
+    // B2：单一布局存储——reset 写默认版本围栏即可；不再有第二份
+    // saveState blob 需要手工删 key 调和。
     if (layout_store_ != nullptr) layout_store_->reset();
     layout_reset_pending_ = true;
-    // The CONV-PS store restores AFTER layout_store_ at startup, so its
-    // layout keys must go too or the pre-reset layout wins the next launch.
-    if (services_settings_ != nullptr) {
-        services_settings_->remove(
-            pwb::platform_services::LayoutKeys::window_state);
-        services_settings_->remove(
-            pwb::platform_services::LayoutKeys::window_geometry);
-        services_settings_->remove(
-            pwb::platform_services::LayoutKeys::state_version);
-    }
     statusBar()->showMessage(tr("布局已重置（下次启动恢复默认）"), 6000);
 }
 #endif

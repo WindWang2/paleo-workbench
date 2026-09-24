@@ -39,7 +39,6 @@ namespace { long test_pid() {
 #include <pwb/domain/json.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
 #include <pwb/ui_composite/composite_document.hpp>
-#include <pwb/ui_composite/layer_manager_panel.hpp>
 #include <pwb/ui_pages_data/qt/hub_page.hpp>
 #include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
 #include <pwb/ui_shell/adaptive_page_stack.hpp>
@@ -114,10 +113,9 @@ void check_shell(MainWindow& window) {
         PWB_CHECK(static_cast<const void*>(layer_dock->widget()) ==
                   static_cast<const void*>(window.layerPanel()));
     }
-    PWB_CHECK(shell->composite()->layer_manager != nullptr);
-    PWB_CHECK(shell->composite()->layer_manager->parent() ==
-              shell->composite());
-    PWB_CHECK(shell->composite()->layer_manager->isHidden());
+    // The retired prototype LayerManagerPanel is deleted (no hidden
+    // second layer-list surface); the dock identity check above is the
+    // surviving contract: composite_layer hosts the native tree panel.
 
     auto* map_toolbar = shell->composite()->map_toolbar();
     PWB_CHECK(map_toolbar != nullptr && !map_toolbar->actions().isEmpty());
