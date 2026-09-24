@@ -7,8 +7,13 @@
 # geo-viz-engine/packages/geoviz_plots（@0885195，行为冻结源）1:1 移植，
 # oracle 见 tools/oracle/generate_viz_e_charts_fixtures.py。
 #
-# Qt 层（pwb_viz_charts_qt）：PlotWidget/CrossPlotWidget/ColorbarWidget/
-# SurfaceWidget（QPainter 自绘，V6 选型决策见 scope-ledger）。
+# Qt 层（pwb_viz_charts_qt）：ColorbarWidget/SurfaceWidget（QPainter 自绘，
+# V6 选型决策见 scope-ledger）。
+#
+# QGIS-PLOT convergence: the generic PlotWidget/CrossPlotWidget/qt-series
+# layer is RETIRED — interactive 2-D charts run on Pwb::QgisPlot
+# (QgsPlotCanvas). What remains here is the domain-specific grid-surface +
+# colorbar renderer (no QGIS Plot equivalent) and the Qt-free math core.
 
 add_library(pwb_viz_charts STATIC
     src/axes.cpp
@@ -24,18 +29,15 @@ target_include_directories(pwb_viz_charts PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(pwb_viz_charts PUBLIC cxx_std_20)
 
-# Qt 层：4 个 QPainter widget（PlotWidget/CrossPlotWidget/ColorbarWidget/
-# SurfaceWidget），行为冻结源 @0885195。
+# Qt 层：domain-specific QPainter widgets — the grid-surface renderer and
+# its colorbar (no QGIS Plot equivalent). The generic PlotWidget /
+# CrossPlotWidget / qt-series machinery was retired to Pwb::QgisPlot
+# (docs/development/qgis-native-plot-convergence/).
 if(TARGET Qt6::Widgets)
     add_library(pwb_viz_charts_qt STATIC
         qt/src/colorbar_widget.cpp
-        qt/src/cross_plot_widget.cpp
-        qt/src/plot_widget.cpp
         qt/src/surface_widget.cpp
         qt/include/pwb/viz_charts/qt/colorbar_widget.hpp
-        qt/include/pwb/viz_charts/qt/cross_plot_widget.hpp
-        qt/include/pwb/viz_charts/qt/plot_widget.hpp
-        qt/include/pwb/viz_charts/qt/series.hpp
         qt/include/pwb/viz_charts/qt/surface_widget.hpp
     )
     add_library(Pwb::VizChartsQt ALIAS pwb_viz_charts_qt)

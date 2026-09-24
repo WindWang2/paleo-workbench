@@ -1,101 +1,70 @@
-> **HISTORICAL / scratch** — agent scratch / historical findings. Not product documentation authority; see [`docs/README.md`](docs/README.md).
+# Findings — QGIS Native Plot Convergence
 
-# 当前发现入口 — C++ 全面转换收尾
+## QGIS 4.2.0 Plot API（已从 vendored 头文件确认）
 
-当前事实与决策：[C++ findings](docs/development/cpp-conversion-planning/findings.md)；
-计划：[task_plan](docs/development/cpp-conversion-planning/task_plan.md)。
-以下保留 #1302 Python 工作台历史发现，不能作为当前 C++ 转换基线。
+### core/plot (`PwbQgis::Core`)
+- `QgsPlot` — 抽象基类（type(), writeXml/readXml, DataDefinedProperty: margins/axis intervals/min/max）
+- `Qgs2DPlot : QgsPlot` — size/margins/interiorPlotArea/render(context, plotContext, plotData)
+- `Qgs2DXyPlot : Qgs2DPlot` — x/yMinimum/Maximum, xAxis()/yAxis() → QgsPlotAxis, chartBackgroundSymbol/chartBorderSymbol, flipAxes, calculateOptimisedIntervals()
+- `QgsPlotAxis` — type (Interval/Categorical?), gridIntervalMajor/Minor, labelInterval, gridMajor/MinorSymbol (QgsLineSymbol), textFormat, numericFormat, labelSuffix
+- `QgsPlotData` — QList<QgsAbstractPlotSeries*> + categories (QStringList)
+- `QgsXyPlotSeries : QgsAbstractPlotSeries` — QList<pair<double,double>> data, setData/append/clear
+- `QgsLineChartPlot`, `QgsBarChartPlot`, `QgsPieChartPlot` — 待读详细签名（subagent A）
+- `QgsPlotRegistry` — plot type registry
+- `QgsPlotDefaultSettings` — default symbols/formats factory
+- `QgsVectorLayerPlotDataGatherer` — 从矢量层采集 plot 数据（数据驱动！）
 
----
+### gui/plot (`PwbQgis::Gui`)
+- `QgsPlotCanvas : QGraphicsView` — **框架基类**，管理 QGraphicsScene + QgsPlotTool 栈 + 事件分发；虚函数默认空实现：panContentsBy/centerPlotOn/scalePlot/zoomToRect/snapToPlot/wheelZoom/crs/toMapCoordinates/toCanvasCoordinates。信号：toolChanged/plotAreaChanged/contextMenuAboutToShow/willBeDeleted。内置 space/mid-mouse 临时 pan/zoom tool。
+- `QgsPlotTool : QObject` — activate/deactivate, plot{Move,Press,Release,DoubleClick}Event(QgsPlotMouseEvent*), wheelEvent, keyEvent, gestureEvent, canvasToolTipEvent(QHelpEvent*), setAction(QAction*) → 与工具栏 checkable action 联动, populateContextMenuWithEvent
+- `QgsPlotToolPan`, `QgsPlotToolZoom`, `QgsPlotToolXAxisZoom` — 现成
+- `qgsplottransienttools.h` — TemporaryKeyPan/MousePan/KeyZoom
+- `QgsPlotCanvasItem : QGraphicsItem` — 场景叠加项基类
+- `QgsPlotRubberBand` — 矩形橡皮筋
+- `QgsPlotMouseEvent` — plot 坐标事件
+- `QgsPlotWidget` — 待确认（可能是 layout item 配置 widget，非显示 canvas）
 
-# Findings — Paleo UI Workbench (feat/paleo-ui-workbench)
+### 参考实现
+- `src/gui/elevation/qgselevationprofilecanvas.h` — QgsElevationProfileCanvas : QgsPlotCanvas，内含 QgsElevationProfilePlotItem(QgsPlotCanvasItem 渲染 Qgs2DXyPlot) + QgsElevationProfileCrossHairsItem + identify()/snapToPlot()/zoomFull()/canvasPointHovered 信号。PwbPlotCanvas 照此模式。
 
-## Environment
-- 主仓 main @ e7214566；worktree C:\Users\wangj.KEVIN\projects\paleo-workbench-paleo-ui
-  branch feat/paleo-ui-workbench；geo-viz-engine 子模块已用本地 reference 初始化
-- 主仓 .venv (cp312, PySide6 6.11.2) 可复用：editable MetaPathFinder 位于
-  sys.meta_path 尾部，pytest pythonpath=["."]（rootdir=worktree）先命中 → worktree
-  代码生效（实测 paleo_workbench.__file__ 指向 worktree）
-- UI 测试配方：QT_QPA_PLATFORM=offscreen + `-m "not slow and not opengl"`；
-  冒烟 tests/test_facies_taxonomy.py 15 passed
+## 构建事实
 
-## Architecture (Explore 双报告要点, 2026-09-14)
+- SDK 复用：`-DPALEO_QGIS_SDK_DIR=/home/kevin/projects/paleo_project/main/native/qgis_render_bridge/build/qgis-vendor/output` `-DPALEO_QGIS_BUILD_DIR=.../qgis-vendor` `-DPALEO_QGIS_SOURCE_DIR=<本worktree>/third_party/qgis` `-DPWB_QGIS_DEPS_PREFIX=/home/kevin/projects/paleo_project/main/build/qgis-deps-prefix` `-DPWB_QT_PREFIX=/usr`
+- `PwbQgis::Sdk` INTERFACE target：核心 include 闭包 + Core/Gui/Analysis imported .so
+- 本机 16 核；约束 -j4
+- Preset 注意：`CMakePresets.json` 的 linux preset binaryDir 在 `build/presets/*`；main worktree 用 `build/native-product` 手工配置。沿用 `build/native-product` 保持一致。
 
-### Shell / 工作台
-- WorkstationFrame (ui/workstation/shell.py L96)：dock_host QMainWindow 持有全部
-  QDockWidget；_add_dock L344 走 workstation_dock_registry；_wire_mapping_stage
-  L534 是期次/horizon 联动主接线点；_on_mapping_horizon L871 = set_target_from_boundary
-  + stage_controller.refresh_evaluation()（无换层，仅元数据）
-- 新 dock 需登记：dock_framework.py WORKSTATION_DOCKS + shell._PANEL_TOGGLE_TABLE +
-  _shell_docks()；浮动覆盖层 parenting 范式 = PwbToast.show_on(parent)（reparent 到
-  window，QTimer child 自动消亡）
-- UIContextService (ui_context.py L116)：UIContextSnapshot ~40 字段 + provider 注册
-  —— HUD 事实流应经此投影（如 MapStatusBar.apply_context 模式）
+## 已存在并行工作（overlap ledger 输入）
 
-### 画布双栈
-- QgisCanvasShim (qgis_stack/canvas_shim.py L348)：set_extent L634(record_history,
-  coalesce_history) 直接设无动画；zoom_by L682；map_position_changed(tuple) 光标坐标
-  信号；native_identified(dict) 识别；export_png L1460；set_layer_snapshot L1399
-  增量镜像（changed_hints）；shutdown_live_shims L41
-- UnifiedMapCanvas (unified_map_canvas.py L360) fallback：同鸭子面 + map_clicked(tuple)
-  L376（裸左键）+ render_export_image L855；无 identify 工具
-- Python 权威拾取：composite_editing.identify_all(point, base_layers) L2802（editable
-  走 FeatureSpatialIndex L287，base 走 _geometry_hit）→ 吸色管双栈可用
+- PR #1483 open: `feat/qgis-native-layer-control`（Prompt 2）
+- PR #1482 open: `feat/qgis-native-data-management`（Prompt 3）
+- worktrees 无 PR：paleo-qgis-shell / paleo-qgis-processing / paleo-qgis-layout（均在 baseline，无 commit）
+- main worktree 脏：94 项改动，含 `libs/visualization/src/{cross_well/qt/section_canvas,well_tie/qt/tie_canvas,cross_well/qt/formation_tops_preview}.cpp`、`ui_workstation` panels、`main_window.*`、`viz_c_time_map.cpp`、`factor_stats_dock.cpp` —— 与我方向重叠，需记 ledger（那些改动未进 origin/main，不在我 baseline）
 
-### 期次/层序现状（GAP）
-- horizon = 纯字符串 stratigraphy.target_horizon；workflow/stratigraphy.py:
-  set_target_from_boundary L86 / active_target_horizon L105 / horizons_from_data L121
-  / horizon_choices L163 / ensure_horizon_catalog L145
-- PaleoMapDocument.linked_target_horizon（每 horizon 一图档）；user_vector_layers
-  单层集不分 horizon；代码中无 寒武系/奥陶系 等年代名（grep 空）
-- MappingStageBar.horizon_combo (mapping_stage_bar.py L148) + _commit_horizon L247
-  （_suppress_horizon echo 防护范式）
-- 层组：layer_groups.py GroupTemplate/system templates；LayerGroupController.
-  reconcile L347 tree_transaction + keyed-LCS diff_trees；apply_stage_visibility L497
-  只推变更组 —— 期次可见性切换可复用同思路
+## 实施结果摘要（Session 3-4）
 
-### 相带
-- FaciesTaxonomy (mapping/facies_taxonomy.py L52)：builtin=resources/facies_taxonomy.json
-  {"_meta","tree":{相:{亚相:{微相:{}}}}} 8/24/66；project override ProjectDocument.
-  facies_taxonomy；from_geojson_features
-- 特征属性 facies/sub_facies/micro_facies/level；分配=模态 FaciesSelectionDialog
-  （composite_document._assign_facies_dialog L4210）；无当前相带持续状态（GAP）
-- 颜色：stage_actions._categorized_facies_style（分类渲染器）；花纹：
-  mapping/facies_patterns.py fill_patterns；图例 overlay=_top_facies_legend L4167
-- 捕获后自动赋值挂点：edit_controller.feature_captured → _on_feature_captured
+- 新库 `libs/qgis_plot` → `Pwb::QgisPlot`：PwbPlotCanvas / PwbPlotItem /
+  PwbScatterPlot / PwbRangeBandPlot / PwbIntervalStripPlot /
+  PwbPlotTool{Identify,Lasso,XAxisZoom} / PwbDepthNumericFormat /
+  SeriesBinding / PointHit / PwbPlotPanel。
+- 迁移 4 面（≥3 达标）：XyScatterHost（散点）、ComparisonView（QC 对比，
+  3 模式+深度游标联动）、TimeDepthPreviewPage、WellLogPreviewPage。
+- 退役 generic 层：plot_widget/cross_plot_widget/qt-series.hpp 删除；
+  SurfaceWidget/ColorbarWidget 保留（域专用）；Qt-free kernel 全保留。
+- 关键 API 事实：`Qgs2DXyPlot` 在 `qgsplot.h`（无 qgs2dplot.h）；
+  tool 构造单参 canvas；`flipAxes()` 原生轴翻转；
+  `calculateOptimisedIntervals` 对 QPdfWriter painter 度量死循环 →
+  scratch QImage 预计算；AUTOMOC 要求 Q_OBJECT 头文件列入 sources。
+- 测试：qgis_plot.smoke 30/30 PASS（含 interval strip 显式 extent、
+  hguide、lasso、PNG/SVG/PDF 导出、panel 生命周期）。
 
-### QC
-- TopologyCheckerPanel (topology_checker_panel.py L37)：issue dict {id,rule,layer_id,
-  feature_id,other_feature_id,message,fixable,bbox,methods}；信号 zoom_requested(list)/
-  highlight_requested(str)/fix_requested(str,int)/fix_all/ignore/restore；_RULE_LABELS
-  {overlap,gap,is_valid,workspace_remainder,dangle}
-- cartographic_qa.py：15 规则族纯检测（collect_cartographic_qa L1215）；issue=
-  workflow/qc.make_issue {rule,severity,message,feature_id,feature_kind,ref,geometry,
-  centroid,extra}；无 UI 无修复（GAP=QC Hub 首个消费者）
-- 修复件：topology.repair_invalid_geometry L311；geometry_operations.repair L442；
-  composite_editing.repair_layer_geometries L2364
+## Review 结论（Round 2，双轴）
 
-### 跨视图联动
-- ViewCoordinationController (view_coordination.py L42)：SelectionContext(viz/
-  selection_context.py L74) changed-field 路由 + source-tag skip + emit=False 回切
-  + 节流(30-120ms) —— echo 防护范式库
-- 已有 sinks：set_spatial_cursor_sink L729 (x,y→图标记)、set_link_cursor_sink L750
-  ((well_name,md)→engine crosshair)；连井 CrossWellHost (viz/hosts/cross_well_host.py)
-  未接 SelectionContext（GAP=本任务接线）
-- 单因素运行时：FactorGridResult(workflow/factor_grid_result.py L240) grid_z/grid_x/
-  grid_y/variance_grid/input_points(=控制井样点)；factor_grid_artifacts.py
-  peek_live_factor_grid L341；FACTOR_DEFAULTS(workflow/factor_units.py L27, 砂地比%)
+- spec 轴：判定"真收敛、非 wrapper"——pan/zoom 实现在 QGIS 规定的虚
+  函数 seam（同 QgsElevationProfileCanvas），无第二状态机；
+  P0 = pa_flow_test 残留已删头文件（已修）。
+- standards 轴：无架构违规；修正项全部落地（见 08-review-findings.md）。
 
-### 撤销/快捷键/测试
-- 撤销：VectorEditSession undo_stack/redo_stack + begin/end_edit_command
-  (vector_layer.py L474+)；native=gesture 宏；无 QUndoStack
-- shortcuts.py：register_shortcut L43 (ApplicationShortcut, 同 id 替换, 文本输入守卫)；
-  conflicts() L126；已占用键见 task_plan
-- 测试范式：AppShell 全壳 / WorkstationFrame 直构+ _force_fallback monkeypatch /
-  FakeCheckerStack 纯鸭子；conftest isolate_qsettings + cleanup_qt_deferred_deletes
-  (reap 匿名 parentless) autouse
-- 视觉：visual_qa_v11.py v11_shot_table L857 name→builder；像素 diff 非 gate (V5 D8)
+## 待 subagent 回报
 
-## Open questions to verify by test
-- Qt 快捷键跨上下文优先级：ApplicationShortcut("1" hub) vs WidgetWithChildrenShortcut
-  ("1" 画布) 同键并存时是否只触发画布域（Ticket 2 首个测试实证，记入 00-decisions D6）
+- A/B/C 均已回报并归档进 docs/development/qgis-native-plot-convergence/

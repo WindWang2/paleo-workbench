@@ -93,6 +93,9 @@ if(TARGET Qt6::Widgets)
         PUBLIC Pwb::UiPagesPreview Pwb::UiShellQt Pwb::PlatformServices
                Pwb::Visualization Qt6::Widgets
         PRIVATE Qt6::Gui)
+    # QGIS-PLOT — preview pages render through PwbPlotCanvas (hard dep: the
+    # presenters include qgis_plot headers unconditionally).
+    target_link_libraries(pwb_ui_pages_preview_qt PUBLIC Pwb::QgisPlot)
 
     if(TARGET Qt6::Pdf)
         target_link_libraries(pwb_ui_pages_preview_qt PRIVATE Qt6::Pdf)
