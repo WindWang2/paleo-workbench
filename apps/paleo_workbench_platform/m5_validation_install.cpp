@@ -206,13 +206,7 @@ void install(const Install& install) {
     QObject::connect(panel, &ReviewDispositionPanel::status_message, shell,
                      &AppShell::status_message);
     QObject::connect(panel, &ReviewDispositionPanel::rerun_requested, page,
-                     [page] {
-                         if (auto* button = page->findChild<QPushButton*>(
-                                 QStringLiteral("ValidationRunQc"));
-                             button != nullptr) {
-                             button->click();
-                         }
-                     });
+                     [page] { page->run_qc(); });
 
     // Selection link (M3 channel) → the review panel draft.
     QObject::connect(page, &ValidationWorkspacePage::issue_selected, panel,

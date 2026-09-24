@@ -32,6 +32,11 @@ struct AssetView {
     std::string size_label;
     std::string checksum;    // ResourceItem.checksum ("" → "—" in detail rows)
     std::string linked_id;   // ExportArtifact.linked_id ("关联" detail row)
+    // 稿式列：关联对象 = entity_asset_links 解析出的实体名；层位 =
+    // 资产 metadata.horizon（未登记 → "—"，诚实空值不编数）。
+    std::string linked_label;
+    std::string horizon_label;
+    std::string description;   // DataAsset.description（稿式「描述」行）
     std::vector<std::string> tags;
     bool is_trashed = false;
     bool managed = true;

@@ -12,6 +12,7 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QMenu>
+#include <QSplitter>
 #include <QString>
 #include <QToolBar>
 #include <QToolButton>
@@ -73,11 +74,17 @@ void check_shell(MainWindow& window) {
     PWB_CHECK(shell->ribbon() != nullptr);
     PWB_CHECK(shell->workspace_host() != nullptr);
     PWB_CHECK(shell->workspace_host()->count() == 3);
-    // M3 面板化改订: 科学宿主 = 纯 QGIS 画布页；阶段面板是底部阶段行
-    // 的独立 dock（可悬浮/停靠/tab 化，navigate_workspace 投影成员）。
+    // mockup-faithful 改订: 科学宿主 = QGIS 画布 + 页内阶段窗格栈
+    // （井震两联/连井剖面/单因素参考带住进中列底部，不再是 dock）。
     auto* science_page = shell->workspace_host()->findChild<QWidget*>(
         QStringLiteral("ScienceHostPage"));
     PWB_CHECK(science_page != nullptr);
+    PWB_CHECK(shell->stage_stack() != nullptr);
+    PWB_CHECK(shell->stage_stack()->count() == 3);
+    PWB_CHECK(shell->stage_pane_pair() != nullptr);
+    PWB_CHECK(shell->stage_pane_crosswell() != nullptr);
+    PWB_CHECK(shell->stage_pane_factor() != nullptr);
+    // 退役的阶段行 dock 仍留在注册表（oracle parity）但永不显示。
     for (const char* dock_id :
          {"data_preview", "data_history", "data_relations", "pair_link",
           "predict_task", "seismic_predict", "crosswell", "data_prep",
@@ -85,10 +92,15 @@ void check_shell(MainWindow& window) {
           "data_lineage"}) {
         PWB_CHECK_MSG(shell->workstation()->dock(dock_id) != nullptr,
                       std::string("stage dock missing: ") + dock_id);
+        PWB_CHECK_MSG(!shell->workstation()->dock_visible(dock_id),
+                      std::string("retired dock visible: ") + dock_id);
     }
     PWB_CHECK(shell->validation_page() != nullptr);
-    PWB_CHECK(shell->validation_page()->findChild<QWidget*>(
-                  "ValidationRunQc") != nullptr);
+    // 稿式右列 = 验证结果 + 选中问题详情 竖排（页内窗格）。
+    PWB_CHECK(shell->validation_page()->findChild<QSplitter*>(
+                  "ValidationRightColumn") != nullptr);
+    PWB_CHECK(shell->validation_page()->issue_table() != nullptr);
+    PWB_CHECK(shell->validation_page()->qc_hub() != nullptr);
     // M5-3: hub 轴已拆 —— page_stack_ 只剩「编图工具」dock 的单页内容
     // （mapping_page_）；kPageIndex*/hub_names 保留为路由词汇与
     // deferred-binding flush 键（ui_shell oracle 冻结数据不动）。
@@ -137,16 +149,9 @@ void check_workspace_navigation(MainWindow& window) {
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
               pwb::app::WorkspaceHostWidget::kPageScience);
     PWB_CHECK(shell->ribbon()->current_workspace() == 1);
-    // M3 面板化: 进 ws1 → 底部阶段行投影预测组 —— 井震两联 dock 抬起
-    // 可见；预测任务/地震预测同组 tab 成员；ws2/ws3 成员隐藏。
-    auto* host = shell->workstation()->dock_host();
-    auto* pair = shell->workstation()->dock("pair_link");
-    PWB_CHECK(pair != nullptr && pair->isVisible());
-    PWB_CHECK(host->tabifiedDockWidgets(pair).contains(
-        shell->workstation()->dock("predict_task")));
-    PWB_CHECK(host->tabifiedDockWidgets(pair).contains(
-        shell->workstation()->dock("seismic_predict")));
-    PWB_CHECK(!shell->workstation()->dock_visible("strat_compare"));
+    // 页内阶段窗格：ws1 → 井震两联页（栈 idx 0）；退役 dock 全隐。
+    PWB_CHECK(shell->stage_stack()->currentIndex() == 0);
+    PWB_CHECK(!shell->workstation()->dock_visible("pair_link"));
     PWB_CHECK(!shell->workstation()->dock_visible("factor_refs"));
 
     // Workspaces 1/2/3 share the ONE science host page.
@@ -154,8 +159,7 @@ void check_workspace_navigation(MainWindow& window) {
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
               pwb::app::WorkspaceHostWidget::kPageScience);
     PWB_CHECK(shell->ribbon()->current_workspace() == 3);
-    PWB_CHECK(shell->workstation()->dock_visible("factor_refs"));
-    PWB_CHECK(!shell->workstation()->dock_visible("pair_link"));
+    PWB_CHECK(shell->stage_stack()->currentIndex() == 2);
 
     shell->navigate_workspace(4);
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
@@ -192,21 +196,22 @@ void check_workspace_navigation(MainWindow& window) {
               pwb::app::WorkspaceHostWidget::kPageValidation);
     PWB_CHECK(shell->ribbon()->current_workspace() == 4);
 
-    // M5-3 migrated homes: sequence → ws2 层序格架 dock；well_log → ws1；
-    // seismic → ws1 地震预测 dock；geomodel → ws4 3D 对照 tab；viz → ws0。
+    // M5-3 migrated homes: sequence → ws2；well_log → ws1；seismic → ws1；
+    // geomodel → ws4；viz → ws0（退役面不再投影 dock —— 页内窗格
+    // 随工作区自明）。
     shell->navigate_to(pwb::ui_shell::kPageIndexWell,
                        QStringLiteral("sequence"));
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
               pwb::app::WorkspaceHostWidget::kPageScience);
     PWB_CHECK(shell->ribbon()->current_workspace() == 2);
-    PWB_CHECK(shell->workstation()->dock_visible("seq_frame"));
+    PWB_CHECK(shell->stage_stack()->currentIndex() == 1);
 
     shell->navigate_to(pwb::ui_shell::kPageIndexWell);
     PWB_CHECK(shell->ribbon()->current_workspace() == 1);
+    PWB_CHECK(shell->stage_stack()->currentIndex() == 0);
 
     shell->navigate_to(pwb::ui_shell::kPageIndexSeismic);
     PWB_CHECK(shell->ribbon()->current_workspace() == 1);
-    PWB_CHECK(shell->workstation()->dock_visible("seismic_predict"));
 
     shell->navigate_to(pwb::ui_shell::kPageIndexSeismic,
                        QStringLiteral("geomodel"));

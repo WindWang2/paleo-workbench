@@ -6,6 +6,7 @@
 #include <QComboBox>
 #include <QDebug>
 #include <QDockWidget>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLocale>
@@ -42,6 +43,10 @@
 #include <pwb/ui_seqviz/qt/correlation_page.hpp>
 #include <pwb/ui_seqviz/qt/sequence_framework_page.hpp>
 #include <pwb/ui_seqviz/qt/visualization_page.hpp>
+
+#include "compilation_layer_panel.hpp"
+#include "factor_atlas_panel.hpp"
+#include "reference_legend_panel.hpp"
 #include <pwb/ui_shell/adaptive_page_stack.hpp>
 #include <pwb/ui_shell/command_palette.hpp>
 #include <pwb/ui_shell/command_registry.hpp>
@@ -187,13 +192,16 @@ AppShell::AppShell(QWidget* parent,
             &ui_workstation::WorkstationFrame::horizon_requested,
             this, &AppShell::horizon_requested);
 
-    // dock 宿主首显后：重放当前工作区的阶段行投影 —— 启动时序里
-    // navigate_workspace 先于宿主显示，tabify 当时静默无效。
+    // dock 宿主首显后：重放当前工作区的页内阶段窗格选择 —— 启动时序
+    // 里 navigate_workspace 先于宿主显示。
     connect(workstation_,
             &ui_workstation::WorkstationFrame::dock_layout_ready,
             this, [this] {
-                apply_stage_dock_profile(
-                    ribbon_ != nullptr ? ribbon_->current_workspace() : 0);
+                const int ws =
+                    ribbon_ != nullptr ? ribbon_->current_workspace() : 0;
+                if (ws >= 1 && ws <= 3 && stage_stack_ != nullptr) {
+                    stage_stack_->setCurrentIndex(ws - 1);
+                }
             });
 
     // 底条「验证记录」双击行 → 验证工作区（问题详情在页内右列）。
@@ -265,6 +273,10 @@ void AppShell::adopt_layer_tree_dock(QDockWidget* dock) {
     if (dock == nullptr || workstation_ == nullptr) {
         return;
     }
+    // 稿式容器（主要图层 + 参考图节 + ws3 整饰行）—— navigate_workspace
+    // 按工作区切 Compilation/Checklist 模式。
+    layer_tab_panel_ =
+        qobject_cast<CompilationLayerPanel*>(dock->widget());
     workstation_->adopt_dock("composite_layer", dock);
 }
 
@@ -306,7 +318,8 @@ void AppShell::build_pages() {
     // D4：宿主注入的窗口级 volume service（无函数内 static —— 每窗口
     // 壳不再暗藏进程级服务状态）；未注入时页面保持诚实的未绑定占位。
     if (seismic_volume_service_ != nullptr) {
-        pwb::closure_seismic::install_seismic_page(
+        // binding parent 到 page 本体（随页销毁）——无需持有指针。
+        (void)pwb::closure_seismic::install_seismic_page(
             {seismic_page_, seismic_volume_service_});
     }
 #endif
@@ -352,23 +365,36 @@ void AppShell::build_pages() {
 
 namespace {
 
-// Thin host for the migrated full pages living in the stage bottom tabs:
-// the pages carry full-page minimum heights (e.g. 预测任务 ~934px) which
-// would squeeze the canvas out of the 65:35 contract (F:46). Ignored size
-// policy lets the splitter shrink the host to the compact band; the page
-// content behaves like any IDE bottom tool (its inner panes scroll/clip
-// as designed for narrow hosts).
-QWidget* as_bottom_tab(QWidget* page, QWidget* parent) {
-    if (page == nullptr) return nullptr;
-    auto* host = new QWidget(parent);
-    host->setObjectName(page->objectName() + QStringLiteral("BottomHost"));
-    auto* layout = new QVBoxLayout(host);
-    layout->setContentsMargins(0, 0, 0, 0);
+// 页内阶段窗格（mockup 题头条 + 内容槽）：题头是窗格自身的一部
+// 分（不是 dock 标题栏）——稿中「连井剖面（与地图联动）」/
+// 「单因素参考 · 联动显示」式。返回内容宿主，宿主安装器往里注入
+// 真实面板。
+// 页内阶段窗格：带题头的外框 + 内容宿主。外框入栈（栈页 = frame），
+// 返回内容宿主供安装器注入 —— 若把 host 直接入栈会被重父出离外框，
+// 题头框沦为游离子控件叠在栈角（曾造成题头重影）。
+QWidget* make_stage_pane(const QString& title, const QString& content_name,
+                         QStackedWidget* stack) {
+    auto* frame = new QFrame(stack);
+    frame->setObjectName(content_name + QStringLiteral("Pane"));
+    frame->setFrameShape(QFrame::StyledPanel);
+    auto* layout = new QVBoxLayout(frame);
+    layout->setContentsMargins(6, 2, 6, 0);
     layout->setSpacing(0);
-    page->setParent(host);
-    page->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
-    layout->addWidget(page);
-    host->setMinimumHeight(120);
+    auto* header = new QLabel(title, frame);
+    header->setObjectName(QStringLiteral("StagePaneTitle"));
+    layout->addWidget(header);
+    auto* host = new QWidget(frame);
+    host->setObjectName(content_name);
+    auto* host_layout = new QVBoxLayout(host);
+    host_layout->setContentsMargins(0, 0, 0, 0);
+    host_layout->setSpacing(0);
+    auto* hint = new QLabel(
+        QStringLiteral("（打开工程并产出对应数据后在此显示）"), host);
+    hint->setObjectName(QStringLiteral("StageBottomHint"));
+    hint->setAlignment(Qt::AlignCenter);
+    host_layout->addWidget(hint);
+    layout->addWidget(host, 1);
+    stack->addWidget(frame);
     return host;
 }
 
@@ -384,34 +410,62 @@ void AppShell::build_workspace_host() {
     page_stack_->removeWidget(hub_data_);
     workspace_host_->addWidget(hub_data_);  // reparents into the host
 
-    // Page 1 科学宿主 (M3, D2 — 面板化改订)：中央 = 纯 CompositeDocument
-    // （workspaces 1/2/3 共享的 QGIS 画布权威）。原底部页栈解散为
-    // 独立 dock（底部阶段行，见 wire_workstation 的 set_panel_factory
-    // 与 navigate_workspace 的逐工作区投影）—— 每格可悬浮/停靠/tab。
+    // Page 1 科学宿主 (mockup-faithful-2026-09-24)：中列 = QSplitter(V)
+    // { CompositeDocument（workspaces 1/2/3 共享的 QGIS 画布权威）,
+    //   页内阶段窗格栈 }。稿中井震两联/连井剖面/单因素参考带是中列
+    // 底部固定区（受左右栏夹界），不是全宽 dock —— 窗格住进页内
+    // QStackedWidget，navigate_workspace 按工作区选页。
     auto* science_page = new QWidget(this);
     science_page->setObjectName(QStringLiteral("ScienceHostPage"));
     auto* science_layout = new QVBoxLayout(science_page);
     science_layout->setContentsMargins(0, 0, 0, 0);
     science_layout->setSpacing(0);
+    auto* science_split = new QSplitter(Qt::Vertical, science_page);
+    science_split->setObjectName(QStringLiteral("ScienceStageSplit"));
+    science_split->setChildrenCollapsible(false);
     composite_->setParent(science_page);
-    science_layout->addWidget(composite_);
+    science_split->addWidget(composite_);
+    stage_stack_ = new QStackedWidget(science_split);
+    stage_stack_->setObjectName(QStringLiteral("ScienceStageStack"));
+    // ws1 井震两联 —— 裸宿主（两幅子窗格自带题头）；compose 安装器
+    // 经 stage_pane_pair() 注入地震+测井 split。
+    stage_pair_host_ = new QWidget(stage_stack_);
+    stage_pair_host_->setObjectName(QStringLiteral("PredictionPairHost"));
+    {
+        auto* layout = new QVBoxLayout(stage_pair_host_);
+        layout->setContentsMargins(0, 0, 0, 0);
+        auto* hint = new QLabel(
+            QStringLiteral(
+                "地震剖面 + 测井轨道两联（打开工程后从数据管理载入"
+                "体版本 / 井曲线）"),
+            stage_pair_host_);
+        hint->setObjectName(QStringLiteral("StageBottomHint"));
+        hint->setAlignment(Qt::AlignCenter);
+        layout->addWidget(hint);
+    }
+    stage_stack_->addWidget(stage_pair_host_);
+    // ws2 连井剖面 —— 稿内题头「连井剖面（与地图联动）」；
+    // compose 安装器经 stage_pane_crosswell() 注入 VizB 剖面内容。
+    stage_crosswell_host_ =
+        make_stage_pane(QStringLiteral("连井剖面（与地图联动）"),
+                        QStringLiteral("CrossWellStageHost"),
+                        stage_stack_);
+    // ws3 单因素参考带 —— 稿内题头「单因素参考 · 联动显示」；
+    // compose 安装器经 stage_pane_factor() 注入 FactorReferenceStrip。
+    stage_factor_host_ =
+        make_stage_pane(QStringLiteral("单因素参考 · 联动显示"),
+                        QStringLiteral("StageBottomCompilationHome"),
+                        stage_stack_);
+    science_split->addWidget(stage_stack_);
+    science_split->setStretchFactor(0, 7);
+    science_split->setStretchFactor(1, 3);
+    science_layout->addWidget(science_split);
     workspace_host_->addWidget(science_page);
 
     // Page 2 验证 (M3, D5): the real composition page — read-only compare
     // canvas + seismic pane slot + structured issues + review detail with
     // locate. The M5 gaps stay explicit placeholders inside the page.
     validation_page_ = new ValidationWorkspacePage(this);
-    // M5-3: hub 遗留页迁入验证右列 —— 报告导出（成图审核页的 QC 报告
-    // 导出/定稿入口，closure_review 绑定不变）与 3D 对照（井震联合
-    // 3D，可选视图，D6）。
-    if (auto* tabs = validation_page_->findChild<QTabWidget*>(
-            QStringLiteral("ValidationRightTabs"));
-        tabs != nullptr) {
-        tabs->addTab(as_bottom_tab(review_page_, tabs),
-                     QStringLiteral("报告导出"));
-        tabs->addTab(as_bottom_tab(geomodel_page_, tabs),
-                     QStringLiteral("3D 对照"));
-    }
     workspace_host_->addWidget(validation_page_);
 }
 
@@ -427,12 +481,11 @@ void AppShell::adopt_preparation_page(QWidget* page) {
         preparation != nullptr) {
         preparation_page_ = preparation;
     }
-    // ws2 底部阶段行「数据制备」dock —— 占位 hint 退役，真实
-    // PreparationPage 入住（pwbAdopted 让占位护栏视作真实面板）。
-    workstation_->install_panel("data_prep", as_bottom_tab(
-                                               page,
-                                               workstation_->dock(
-                                                   "data_prep")));
+    // mockup 精确还原：稿 ws2 无「数据制备」面 —— 页面留在工程内不
+    // 进界面（功能存续，prepare/contour worker 仍由 shutdown_workers
+    // 关停）；原 data_prep dock 已退役为隐藏注册表项。
+    page->hide();
+    page->setParent(this);
 }
 // END CLOSURE-MAPPING
 
@@ -554,10 +607,15 @@ void AppShell::wire_workstation() {
     // Composite sub-panels dock like Python's WorkstationFrame._add_dock.
     // "composite_layer" hosts the host-adopted native QgsLayerTreeView dock
     // (see adopt_layer_tree_dock) — no prototype factory.
+    // "composite_input"（ws2 右栏「单因素」）：稿的单因素图层（层位）
+    // 勾选清单 —— factor_map_tasks 驱动（与参考带同一权威），勾选经
+    // stage_action_requested 治理通道叠加；数据喂入在
+    // workspace_compose::compose_constraint_bottom。
     workstation_->set_panel_factory(
         "composite_input",
-        [this](const std::string&, QWidget*) -> QWidget* {
-            return composite_->input_tree;
+        [this](const std::string&, QWidget* parent) -> QWidget* {
+            factor_atlas_ = new FactorAtlasPanel(parent);
+            return factor_atlas_;
         });
     workstation_->set_panel_factory(
         "composite_linked",
@@ -575,18 +633,33 @@ void AppShell::wire_workstation() {
             return composite_->stage_panel;
         });
     // 原型右栏每工作区页签（navigate_workspace 决定子集与标题）：
-    //   ws1 图层|预测参数|对比   ws2 约束|单因素|参考
+    //   ws1 图层|预测参数|样式   ws2 约束|单因素|参考
     //   ws3 编图图层|图件整饰|版式输出
     workstation_->set_panel_factory(
         "predict_compare",
         [this](const std::string&, QWidget* parent) -> QWidget* {
-            predict_compare_ =
-                new ui_composite::LinkedInterpretationWorkspace(parent);
+            // 样式（稿 ws1 右栏第三签）—— QGIS 样式面板
+            // （QgsLayerStylingWidget）接入前的诚实占位。
+            predict_compare_ = new QLabel(
+                QStringLiteral(
+                    "样式面板待接入 —— 将直接采用 QGIS "
+                    "QgsLayerStylingWidget（symbology/标注/渲染）"),
+                parent);
+            predict_compare_->setObjectName(
+                QStringLiteral("PredictStylePlaceholder"));
+            qobject_cast<QLabel*>(predict_compare_)
+                ->setAlignment(Qt::AlignCenter);
+            qobject_cast<QLabel*>(predict_compare_)->setWordWrap(true);
             return predict_compare_;
         });
-    // "reference_maps"（ws2 右栏「参考」）：原型第二图层清单面已随
-    // LayerManagerPanel 退役——dock 落回诚实占位，参考图层直接经
-    // QGIS 原生图层树（图层 dock）管理。
+    // "reference_maps"（ws2 右栏「参考」）：稿的岩性图例 + 界面线型
+    // 图例 —— 岩性色取 viz::facies_color_for 真词汇（与剖面渲染器
+    // 同一取色权威）。
+    workstation_->set_panel_factory(
+        "reference_maps",
+        [](const std::string&, QWidget* parent) -> QWidget* {
+            return new ReferenceLegendPanel(parent);
+        });
     workstation_->set_panel_factory(
         "map_decor",
         [this](const std::string&, QWidget* parent) -> QWidget* {
@@ -607,89 +680,14 @@ void AppShell::wire_workstation() {
             return verify_records_;
         });
 
-    // ---- 底部阶段行（面板化 dock；navigate_workspace 按工作区投影）----
-    // ws1 智能预测：井震两联（compose install 注入 split）| 预测任务 |
-    // 地震预测；ws2：连井剖面（adopt_dock）| 数据制备（adopt 注入）|
-    // 地层对比 | 层序格架；ws3：单因素参考带；ws0：数据预览 |
-    // 版本历史 | 关联关系（m5_data_install 注入）。
-    workstation_->set_panel_factory(
-        "pair_link",
-        [](const std::string&, QWidget* parent) -> QWidget* {
-            // 两联宿主 —— compose_prediction_bottom 把地震+测井 split
-            // 注入；compose 缺席时保持诚实空态 hint。
-            auto* host = new QWidget(parent);
-            host->setObjectName(QStringLiteral("PredictionPairHost"));
-            auto* layout = new QVBoxLayout(host);
-            layout->setContentsMargins(0, 0, 0, 0);
-            auto* hint = new QLabel(
-                QStringLiteral(
-                    "地震剖面 + 测井轨道两联（打开工程后从数据管理载入"
-                    "体版本 / 井曲线）"),
-                host);
-            hint->setObjectName(QStringLiteral("StageBottomHint"));
-            hint->setAlignment(Qt::AlignCenter);
-            layout->addWidget(hint);
-            return host;
-        });
-    workstation_->set_panel_factory(
-        "predict_task",
-        [this](const std::string&, QWidget* parent) -> QWidget* {
-            return as_bottom_tab(well_log_page_, parent);
-        });
-    workstation_->set_panel_factory(
-        "seismic_predict",
-        [this](const std::string&, QWidget* parent) -> QWidget* {
-            return as_bottom_tab(seismic_page_, parent);
-        });
-    workstation_->set_panel_factory(
-        "data_prep",
-        [](const std::string&, QWidget* parent) -> QWidget* {
-            auto* hint = new QLabel(
-                QStringLiteral(
-                    "连井剖面 + 数据制备（载入井数据后出现剖面）"),
-                parent);
-            hint->setObjectName(QStringLiteral("StageBottomHint"));
-            hint->setAlignment(Qt::AlignCenter);
-            return hint;
-        });
-    workstation_->set_panel_factory(
-        "strat_compare",
-        [this](const std::string&, QWidget* parent) -> QWidget* {
-            return as_bottom_tab(stratigraphy_page_, parent);
-        });
-    workstation_->set_panel_factory(
-        "seq_frame",
-        [this](const std::string&, QWidget* parent) -> QWidget* {
-            return as_bottom_tab(sequence_page_, parent);
-        });
-    workstation_->set_panel_factory(
-        "factor_refs",
-        [](const std::string&, QWidget* parent) -> QWidget* {
-            // 单因素参考带宿主 —— compose_compilation_bottom 注入
-            // FactorReferenceStrip。
-            auto* host = new QWidget(parent);
-            host->setObjectName(
-                QStringLiteral("StageBottomCompilationHome"));
-            new QVBoxLayout(host);
-            return host;
-        });
-    // ws0 底签「数据预览」= DataWorkspace 的 DataReaderPanel —— dock
-    // reparent 走它之后，页内 bottom_tabs_ 只剩空壳，隐藏。
-    workstation_->set_panel_factory(
-        "data_preview",
-        [this](const std::string&, QWidget*) -> QWidget* {
-            if (data_workspace_ == nullptr) return nullptr;
-            auto* panel = data_workspace_->reader_panel();
-            if (panel != nullptr &&
-                data_workspace_->bottom_tabs() != nullptr) {
-                // 页内容器已空 —— 页本体只留表格区（dock 接管预览）。
-                data_workspace_->bottom_tabs()->hide();
-            }
-            return panel;
-        });
-    // data_props / data_lineage / data_history / data_relations 无
-    // factory —— m5_data_install 装配 DataDetailPanel /
-    // DataLineagePanel 后经 install_panel 注入；未装配时护栏保持隐藏。
+    // ---- 页内阶段窗格（mockup 精确还原）----
+    // ws1 井震两联 / ws2 连井剖面 / ws3 单因素参考带住进科学宿主页底
+    // 部栈（build_workspace_host 的 stage_stack_），宿主安装器经
+    // stage_pane_* 注入；ws0 的「数据预览 | 版本历史 | 关联关系」与
+    // 右列「数据属性 + 数据血缘」回到 DataWorkspace 页内槽位（稿中
+    // 它们是中列/右列的页内区，非全宽 dock）。原阶段行 dock id
+    // （pair_link、crosswell、factor_refs、data_preview…）保留注册
+    // 表描述符（Python oracle parity）但不再注册工厂 —— 永不显示。
 
     // Navigation: explorer -> navigate_to (the M2 legacy routing seam —
     // Python activate_legacy parity).
@@ -865,19 +863,15 @@ void AppShell::navigate_workspace(int workspace_index) {
     static const RightTab kAllRight[] = {
         {"inspector", "检查器"},       {"composite_layer", "图层管理"},
         {"composite_input", "输入与结果"}, {"facies_palette", "相带画刷"},
-        {"predict_compare", "对比"},   {"constraint_panel", "约束"},
+        {"predict_compare", "样式"},   {"constraint_panel", "约束"},
         {"reference_maps", "参考"},    {"map_decor", "图件整饰"},
         {"layout_output", "版式输出"}, {"data_props", "数据属性"},
-        {"data_lineage", "数据血缘"},
-    };
-    static const RightTab kWs0[] = {
-        {"data_props", "数据属性"},
         {"data_lineage", "数据血缘"},
     };
     static const RightTab kWs1[] = {
         {"composite_layer", "图层"},
         {"inspector", "预测参数"},
-        {"predict_compare", "对比"},
+        {"predict_compare", "样式"},
     };
     static const RightTab kWs2[] = {
         {"constraint_panel", "约束"},
@@ -891,10 +885,9 @@ void AppShell::navigate_workspace(int workspace_index) {
     };
     const RightTab* ws_tabs = nullptr;
     size_t ws_tab_count = 0;
-    if (workspace_index == 0) {
-        ws_tabs = kWs0;
-        ws_tab_count = std::size(kWs0);
-    } else if (workspace_index == 1) {
+    // ws0 右列（数据属性 + 数据血缘竖排）是页内槽位，非壳层 dock —
+    // 稿 ws0 右栏两块同显不 tab 化（m5_data_install 注入页内）。
+    if (workspace_index == 1) {
         ws_tabs = kWs1;
         ws_tab_count = std::size(kWs1);
     } else if (workspace_index == 2) {
@@ -903,6 +896,14 @@ void AppShell::navigate_workspace(int workspace_index) {
     } else if (workspace_index == 3) {
         ws_tabs = kWs3;
         ws_tab_count = std::size(kWs3);
+    }
+    // 稿差异：同一 composite_layer dock —— ws1「图层」= 纯勾选清单，
+    // ws3「编图图层」= 参考图滑杆 + 底部图例/指北针勾选。
+    if (layer_tab_panel_ != nullptr) {
+        layer_tab_panel_->set_mode(
+            workspace_index == 3
+                ? CompilationLayerPanel::Mode::Compilation
+                : CompilationLayerPanel::Mode::Checklist);
     }
 
     if (scientific) {
@@ -947,9 +948,12 @@ void AppShell::navigate_workspace(int workspace_index) {
         first_shown->raise();
     }
 
-    // 底部阶段行（dock 嵌套 row0）：每工作区一份成员声明，非成员整
-    // 组隐藏后该行塌陷为 0 —— 工具行（任务|日志|验证记录）不动。
-    apply_stage_dock_profile(workspace_index);
+    // 页内阶段窗格选择（mockup：ws1 井震两联 / ws2 连井剖面 /
+    // ws3 单因素参考带 —— 中列底部固定区）。ws0/4 是别的页，
+    // 栈只在科学页内。
+    if (scientific && stage_stack_ != nullptr) {
+        stage_stack_->setCurrentIndex(workspace_index - 1);
+    }
 
     // 层位条：科学工作区 + 验证都显示（原型 ws1–4 顶部均有层位页签）；
     // ws0 数据管理隐藏。
@@ -982,8 +986,8 @@ void AppShell::sync_workflow_panel(int workspace_index) {
          "结果评估与导出",
          "predict.params|predict.overlay_well|predict.overlay_seismic|"
          "predict.overlay_well|predict.save"},
-        {"约束与单因素流程",
-         "约束要素编辑|单因素插值|连井剖面分析|等值线生成|成果输出",
+        {"约束分析",
+         "约束编辑|单因素插值|连井剖面（本页）|组合分析|结果输出",
          "factor.edit_sourcing|factor.compute|factor.crosswell_path|"
          "factor.contour|factor.save"},
         {"编图工作流",
@@ -1028,98 +1032,16 @@ void AppShell::sync_workspace_for_stage(const std::string& stage_value) {
     ribbon_->set_current_workspace(index);
 }
 
-void AppShell::apply_stage_dock_profile(int workspace_index) {
-    // 底部阶段行（dock 嵌套 row0）：每工作区一份成员声明，非成员整组
-    // 隐藏后该行塌陷为 0 —— 工具行（任务|日志|验证记录）不动。
-    static const char* kAllStageDocks[] = {
-        "data_preview", "data_history", "data_relations",
-        "pair_link",    "predict_task", "seismic_predict",
-        "crosswell",    "data_prep",    "strat_compare",
-        "seq_frame",    "factor_refs",
-    };
-    static const char* kWs0Stage[] = {"data_preview", "data_history",
-                                     "data_relations"};
-    static const char* kWs1Stage[] = {"pair_link", "predict_task",
-                                     "seismic_predict"};
-    static const char* kWs2Stage[] = {"crosswell", "data_prep",
-                                     "strat_compare", "seq_frame"};
-    static const char* kWs3Stage[] = {"factor_refs"};
-    const char* const* stage_ids = nullptr;
-    size_t stage_count = 0;
-    switch (workspace_index) {
-        case 0: stage_ids = kWs0Stage; stage_count = 3; break;
-        case 1: stage_ids = kWs1Stage; stage_count = 3; break;
-        case 2: stage_ids = kWs2Stage; stage_count = 4; break;
-        case 3: stage_ids = kWs3Stage; stage_count = 1; break;
-        default: break;
-    }
-    for (const char* id : kAllStageDocks) {
-        workstation_->set_dock_visible(id, false);
-    }
-    QDockWidget* first_stage = nullptr;
-    for (size_t i = 0; i < stage_count; ++i) {
-        // 占位护栏（#1450）：未注入真实面板的 dock 不显示。
-        if (!workstation_->has_panel_factory(stage_ids[i])) continue;
-        workstation_->set_dock_visible(stage_ids[i], true);
-        if (first_stage == nullptr) {
-            first_stage = workstation_->dock(stage_ids[i]);
-        }
-    }
-    if (first_stage == nullptr) return;
-    // 阶段行 tab 组 —— tabifyDockWidget 只对可见 dock 生效，且宿主未
-    // 显示时 setVisible 不落地；可见后把同组其余成员并到首个成员上。
-    // 已悬浮的成员跳过（尊重用户拖出），已在组内的成员幂等。
-    auto* host = workstation_->dock_host();
-    if (host != nullptr && host->isVisible()) {
-        for (size_t i = 0; i < stage_count; ++i) {
-            auto* member = workstation_->dock(stage_ids[i]);
-            if (member == nullptr || member == first_stage ||
-                member->isFloating() || !member->isVisible()) {
-                continue;
-            }
-            // 尊重用户重排：已移出底部区域的成员不拽回。
-            if (host->dockWidgetArea(member) !=
-                Qt::BottomDockWidgetArea) {
-                continue;
-            }
-            if (!host->tabifiedDockWidgets(first_stage).contains(member)) {
-                host->tabifyDockWidget(first_stage, member);
-            }
-        }
-    }
-    first_stage->raise();
-    if (stage_row_seeded_) return;
-    // 首次揭行才播种行高（resizeDocks 需要真实布局）——用户拖动后
-    // 不再干预；工具行高度已在 finish_dock_layout 落。
-    stage_row_seeded_ = true;
-    const auto* desc = ui_shell::workstation_dock_registry().get(
-        first_stage->property("pwbDockId").toString().toStdString());
-    const int row_height =
-        desc != nullptr && desc->preferred_height.has_value()
-            ? *desc->preferred_height
-            : 280;
-    QTimer::singleShot(0, this, [this, row_height] {
-        auto* host = workstation_->dock_host();
-        if (host == nullptr) return;
-        for (const char* id :
-             {"data_preview", "pair_link", "crosswell", "factor_refs"}) {
-            if (auto* d = workstation_->dock(id);
-                d != nullptr && d->isVisible() && !d->isFloating()) {
-                host->resizeDocks({d}, {row_height}, Qt::Vertical);
-                break;
-            }
-        }
-    });
-}
+
 
 void AppShell::apply_stage_composition(const std::string& stage_value) {
     const auto stage = pwb::tool_policy::stage_from_value(stage_value);
     if (!stage.has_value()) return;
-    // 阶段 = 工作区（1/2/3）——底部阶段行投影随工作区切换；外部
+    // 阶段 = 工作区（1/2/3）——页内阶段窗格随工作区切换；外部
     // stage 写者（stage.goto/恢复）经 sync_workspace_for_stage 走这里。
     const auto workspace = ui_ribbon::workspace_for_stage(*stage);
-    if (workspace.has_value()) {
-        apply_stage_dock_profile(static_cast<int>(*workspace));
+    if (workspace.has_value() && stage_stack_ != nullptr) {
+        stage_stack_->setCurrentIndex(static_cast<int>(*workspace) - 1);
     }
     // M5-2: 版式模式 = 抬起右栏「版式输出」dock。
     apply_compose_mode();
@@ -1245,43 +1167,30 @@ void AppShell::navigate_to(int hub_index, const QString& submodule_key) {
         return;
     }
     if (hub_index == ui_shell::kPageIndexWell) {
-        if (key == QStringLiteral("sequence")) {
+        // 层序格架/地层对比/预测任务均不在稿界面 —— 功能留在工程内，
+        // 路由收敛为工作区切换（稿内各工作区阶段窗格随页自明）。
+        if (key == QStringLiteral("sequence") ||
+            key == QStringLiteral("stratigraphy")) {
             navigate_workspace(
                 static_cast<int>(ui_ribbon::Workspace::ConstraintFactor));
-            focus_stage_dock(QStringLiteral("层序格架"));
             return;
         }
-        if (key == QStringLiteral("stratigraphy")) {
-            navigate_workspace(
-                static_cast<int>(ui_ribbon::Workspace::ConstraintFactor));
-            focus_stage_dock(QStringLiteral("地层对比"));
-            return;
-        }
-        // well_log（默认）→ ws1 智能预测的预测任务 tab。
         navigate_workspace(
             static_cast<int>(ui_ribbon::Workspace::IntelligentPrediction));
-        focus_stage_dock(QStringLiteral("预测任务"));
         return;
     }
     if (hub_index == ui_shell::kPageIndexSeismic) {
-        if (key == QStringLiteral("geomodel")) {
-            navigate_workspace(
-                static_cast<int>(ui_ribbon::Workspace::Validation));
-            focus_stage_tab(validation_page_->findChild<QTabWidget*>(
-                                QStringLiteral("ValidationRightTabs")),
-                            QStringLiteral("3D 对照"));
-        } else {
-            navigate_workspace(
-                static_cast<int>(ui_ribbon::Workspace::IntelligentPrediction));
-            focus_stage_dock(QStringLiteral("地震预测"));
-        }
+        navigate_workspace(
+            key == QStringLiteral("geomodel")
+                ? static_cast<int>(ui_ribbon::Workspace::Validation)
+                : static_cast<int>(
+                      ui_ribbon::Workspace::IntelligentPrediction));
         return;
     }
     if (hub_index == ui_shell::kPageIndexMapping) {
         if (key == QStringLiteral("preparation")) {
             navigate_workspace(
                 static_cast<int>(ui_ribbon::Workspace::ConstraintFactor));
-            focus_stage_dock(QStringLiteral("数据制备"));
             return;
         }
         if (key == QStringLiteral("review")) {
@@ -1302,47 +1211,6 @@ void AppShell::navigate_to(int hub_index, const QString& submodule_key) {
         emit status_message(tr("「可视化」页已退役：数据预览由数据管理的"
                                "读取面板承担"));
         return;
-    }
-}
-
-void AppShell::focus_stage_dock(const QString& title) {
-    // 底部阶段行 dock 按标题抬起（页内页签语义的 dock 版）——
-    // 标题→dock id 对照是 navigate_to 路由的稳定词表。
-    static const std::pair<const char*, const char*> kDockByTitle[] = {
-        {"井震两联", "pair_link"},
-        {"预测任务", "predict_task"},
-        {"地震预测", "seismic_predict"},
-        {"连井剖面", "crosswell"},
-        {"数据制备", "data_prep"},
-        {"地层对比", "strat_compare"},
-        {"层序格架", "seq_frame"},
-        {"单因素参考", "factor_refs"},
-        {"数据预览", "data_preview"},
-        {"版本历史", "data_history"},
-        {"关联关系", "data_relations"},
-    };
-    const char* dock_id = nullptr;
-    for (const auto& [tab_title, id] : kDockByTitle) {
-        if (title == QString::fromUtf8(tab_title)) {
-            dock_id = id;
-            break;
-        }
-    }
-    if (dock_id == nullptr ||
-        !workstation_->has_panel_factory(dock_id)) {
-        return;
-    }
-    workstation_->set_dock_visible(dock_id, true);
-    if (auto* d = workstation_->dock(dock_id)) d->raise();
-}
-
-void AppShell::focus_stage_tab(QTabWidget* tabs, const QString& title) {
-    if (tabs == nullptr) return;
-    for (int i = 0; i < tabs->count(); ++i) {
-        if (tabs->tabText(i) == title) {
-            tabs->setCurrentIndex(i);
-            return;
-        }
     }
 }
 
@@ -1450,6 +1318,10 @@ void AppShell::set_horizon_state(const QString& horizon,
         ribbon_horizon_combo_->setCurrentIndex(
             target.isEmpty() ? -1 : choices.indexOf(target));
         syncing_ribbon_horizon_ = false;
+    }
+    // ws2「单因素」签标题的层位后缀 —— 同一权威的第四处投影。
+    if (factor_atlas_ != nullptr) {
+        factor_atlas_->set_horizon(horizon);
     }
 }
 

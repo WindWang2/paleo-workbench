@@ -43,12 +43,17 @@ public:
 
 signals:
     void activate_layer_requested(const QString& layer_id);
+    // 勾选 = 该约束要素的图层可见性（稿式 checklist；宿主写回
+    // QgsLayerTree 的 itemVisibilityChecked —— 与图层树同一权威，
+    // 无第二可见性状态）。
+    void visibility_requested(const QString& layer_id, bool visible);
 
 private:
     void on_row_activated(QTreeWidgetItem* item, int column);
 
     FactsProvider facts_provider_;
     QTreeWidget* tree_ = nullptr;
+    bool syncing_checks_ = false;
 };
 
 }  // namespace pwb::ui

@@ -66,6 +66,8 @@ filter_dimensions(const FilterQuery& query) {
         dims.emplace_back("stage", "阶段: " + *query.stage);
     if (query.data_type)
         dims.emplace_back("type", "类型: " + *query.data_type);
+    if (query.status)
+        dims.emplace_back("status", "状态: " + *query.status);
     for (const auto& tag : query.tags)
         dims.emplace_back("tag:" + tag, "标签: " + tag);
     if (query.tags.size() > 1) {
@@ -93,6 +95,8 @@ remove_filter_dimension(const FilterQuery& query, const std::string& key) {
         out.stage.reset();
     } else if (key == "type") {
         out.data_type.reset();
+    } else if (key == "status") {
+        out.status.reset();
     } else if (key == "tag_operator") {
         out.tag_operator = "and";
     } else if (key.rfind("tag:", 0) == 0) {

@@ -31,6 +31,11 @@
 #include <QToolButton>
 #include <qgsapplication.h>
 
+#include "app_context.hpp"
+#include "closure_data_workspace.hpp"
+
+#include <pwb/ui_pages_data/qt/data_workspace.hpp>
+
 #include <pwb/qgis/qgis_runtime.hpp>
 #include <pwb/ui_composite/composite_document.hpp>
 #include <pwb/ui_ribbon/ribbon_state.hpp>
@@ -122,38 +127,68 @@ void structural_gate(AppShell* shell, const QString& phase) {
     check(shell->status_bar() != nullptr &&
               shell->status_bar()->isVisibleTo(shell),
           phase + QStringLiteral(": status bar present"));
-    // 面板化改订 —— 画布:阶段行比例。科学页 = 纯画布；阶段面板是底
-    // 部 row0 dock（resizeDocks 播种行高，用户可拖）。工具行
-    // （任务|日志）是常驻第二行，不计入比值。
+    // mockup-faithful 改订 —— 画布:阶段窗格比例。科学页 = 画布 + 页内
+    // 阶段窗格（QSplitter 第二格，用户可拖）。工具行（任务|日志）
+    // 是常驻底部 dock，不计入比值。
     if (qEnvironmentVariableIsSet("PWB_VIS_DEBUG")) {
-        for (const char* id :
-             {"data_preview", "pair_link", "crosswell", "data_prep",
-              "factor_refs"}) {
-            if (auto* d = shell->workstation()->dock(id)) {
+        if (auto* stack = shell->stage_stack()) {
+            std::fprintf(stderr, "[probe] stage stack vis=%d h=%d idx=%d\n",
+                         stack->isVisible() ? 1 : 0, stack->height(),
+                         stack->currentIndex());
+        }
+        for (const char* id : {"composite_layer", "inspector",
+                               "constraint_panel", "composite_input",
+                               "predict_compare", "reference_maps",
+                               "map_decor", "layout_output"}) {
+            auto* d = shell->workstation()->dock(id);
+            std::fprintf(stderr,
+                         "[probe] %s dock=%d vis=%d factory=%d widget=%d\n",
+                         id, d != nullptr ? 1 : 0,
+                         (d && d->isVisible()) ? 1 : 0,
+                         shell->workstation()->has_panel_factory(id) ? 1 : 0,
+                         (d && d->widget() != nullptr) ? 1 : 0);
+        }
+        if (auto* stack = shell->stage_stack()) {
+            if (auto* page = stack->currentWidget()) {
+                const auto kids = page->findChildren<QWidget*>();
+                for (auto* k : kids) {
+                    if (!k->isVisible()) continue;
+                    auto* lbl = qobject_cast<QLabel*>(k);
+                    std::fprintf(stderr,
+                                 "[probe]   stage child %s<%s> vis geo=%d,%d %dx%d text=%s\n",
+                                 k->objectName().toUtf8().constData(),
+                                 k->metaObject()->className(),
+                                 k->x(), k->y(), k->width(), k->height(),
+                                 lbl != nullptr
+                                     ? lbl->text().toUtf8().constData()
+                                     : "");
+                }
+            }
+        }
+        // Floating children over the canvas area (e.g. the CAD dock is a
+        // QDockWidget parented to a plain QWidget — a show() renders it as
+        // a floating child at the canvas top edge).
+        if (auto* comp = shell->composite()) {
+            const auto kids = comp->findChildren<QWidget*>();
+            for (auto* k : kids) {
+                if (!k->isVisible() || !k->isWindow() &&
+                    !qobject_cast<QDockWidget*>(k)) continue;
                 std::fprintf(stderr,
-                             "[probe] dock %s vis=%d h=%d min=%dx%d\n",
-                             id, d->isVisible() ? 1 : 0, d->height(),
-                             d->minimumSizeHint().width(),
-                             d->minimumSizeHint().height());
+                             "[probe]   canvas child %s<%s> title=%s geo=%d,%d %dx%d\n",
+                             k->objectName().toUtf8().constData(),
+                             k->metaObject()->className(),
+                             k->windowTitle().toUtf8().constData(),
+                             k->x(), k->y(), k->width(), k->height());
             }
         }
     }
-    // 画布:阶段行 ≈ 原型占比 —— 面板化后阶段面板是底部 row0 dock,
-    // 工具行常驻不计入比值。只在科学页当前时有意义（其他页几何退化）;
-    // skip 显式记录（G5: 静默跳过不能冒充覆盖）。
+    // 只在科学页当前时有意义（其他页几何退化）; skip 显式记录
+    // （G5: 静默跳过不能冒充覆盖）。
     const bool science_current =
         shell->workspace_host()->currentIndex() ==
         pwb::app::WorkspaceHostWidget::kPageScience;
-    int stage_row_h = 0;
-    for (const char* id :
-         {"pair_link", "predict_task", "seismic_predict", "crosswell",
-          "data_prep", "strat_compare", "seq_frame", "factor_refs"}) {
-        if (auto* d = shell->workstation()->dock(id);
-            d != nullptr && d->isVisible() && !d->isFloating()) {
-            stage_row_h = d->height();
-            break;
-        }
-    }
+    int stage_row_h =
+        shell->stage_stack() != nullptr ? shell->stage_stack()->height() : 0;
     const int canvas_h = shell->composite()->height();
     if (!science_current || stage_row_h <= 0 ||
         canvas_h + stage_row_h <= 100) {
@@ -179,6 +214,25 @@ void structural_gate(AppShell* shell, const QString& phase) {
         check(registry.get(id) != nullptr,
               phase + QStringLiteral(": primary ") + id);
     }
+}
+
+// ws0 稿式工具行（搜索/所有类型/所有状态/共N条）在产品里经
+// closure_preview::install → install_data_workspace 装上；该链不进
+// 测试二进制（VIZ_E/CLOSURE_PREVIEW 未编入），这里直调同一函数让
+// 抓图与出货形态一致。bus 在测试里无宿主 → nullptr（过滤行照常
+// 接线，行集刷新留空态）。
+void install_data_workspace_row(MainWindow& window) {
+#if defined(PWB_WITH_V14_DATA_LINEAGE)
+    auto* shell = window.appShell();
+    if (shell == nullptr || shell->data_workspace() == nullptr) return;
+    const auto wiring = pwb::app::v14_lineage::install_data_workspace(
+        *shell->data_workspace(), nullptr,
+        [&window]() { return window.context().projectStore(); },
+        &window);
+    (void)wiring;
+#else
+    (void)window;
+#endif
 }
 
 void run_matrix(MainWindow& window, const QString& tag) {
@@ -210,18 +264,11 @@ void run_matrix(MainWindow& window, const QString& tag) {
     ribbon->set_compact(false);
     pump();
 
-    // Validation surfaces: compare view + review panel visible states.
+    // Validation surfaces (mockup-faithful): 右列 = 验证结果 + 选中
+    // 问题详情竖排（无页签）；底部 = 井验证对比窗格。
     shell->navigate_workspace(4);
-    if (auto* tabs = shell->validation_page()->findChild<QTabWidget*>(
-            QStringLiteral("ValidationRightTabs"))) {
-        tabs->setCurrentIndex(1);  // 对比视图
-    }
     pump();
     capture(shell, QStringLiteral("%1-validation-compare").arg(tag));
-    if (auto* tabs = shell->validation_page()->findChild<QTabWidget*>(
-            QStringLiteral("ValidationRightTabs"))) {
-        tabs->setCurrentIndex(2);  // 复核记录
-    }
     pump();
     capture(shell, QStringLiteral("%1-validation-review").arg(tag));
 
@@ -261,6 +308,7 @@ int main(int argc, char** argv) {
 
     {
         MainWindow window;
+        install_data_workspace_row(window);
         window.resize(1672, 941);  // 设计画幅
         window.show();
         pump();
@@ -343,6 +391,7 @@ int main(int argc, char** argv) {
         QTemporaryDir sample_dir;
         qputenv("PALEO_SAMPLE_PROJECT_DIR", sample_dir.path().toLocal8Bit());
         MainWindow window;
+        install_data_workspace_row(window);
         window.resize(1672, 941);
         window.show();
         pump();

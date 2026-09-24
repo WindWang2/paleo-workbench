@@ -1,5 +1,6 @@
 #include <pwb/ui/edit_tool_controller.hpp>
 
+#include <QWidget>
 #include <qgsadvanceddigitizingdockwidget.h>
 #include <qgsfeature.h>
 #include <qgsmaplayer.h>
@@ -35,6 +36,17 @@ EditToolController::EditToolController(QgsMapCanvas* canvas,
     // canvas at teardown). Canvas-parented: dies before the tools it
     // enables, with the canvas's QObject tree.
     cad_dock_ = new QgsAdvancedDigitizingDockWidget(canvas_, canvas_);
+    // 对象必须存在（capture 工具 ctor/enable 路径持有它），但永不渲染
+    // —— canvas 是普通 QWidget 而非 QMainWindow，dock 一旦 show() 就
+    // 以浮窗子控件漂在画布上缘（曾在 ws1 截图以"Advanced Digitizing"
+    // 条带出现）。重父进 canvas 下的一个隐藏容器：任何 show() 只改
+    // 可见性标志，祖先隐藏则整棵子树不绘制；容器随 canvas 销毁，dock
+    // 生命周期不变（不会比 canvas 活得久）。工作台将来要提供 CAD 面板
+    // 时应走 dock 宿主收编，而不是撤掉这层隔离。
+    auto* cad_hidden_home = new QWidget(canvas_);
+    cad_hidden_home->setObjectName(QStringLiteral("CadDockHiddenHome"));
+    cad_hidden_home->hide();
+    cad_dock_->setParent(cad_hidden_home);
     select_tool_ = new QgsMapToolSelect(canvas_);
     add_point_tool_ = new QgsMapToolDigitizeFeature(
         canvas_, cad_dock_, QgsMapToolCapture::CapturePoint);

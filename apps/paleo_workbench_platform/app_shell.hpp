@@ -9,10 +9,9 @@
 //   WorkstationFrame.central = WorkspaceHostWidget (QStackedWidget, 3 pages)
 //     page 0 数据管理  = the hub-0 assembly (概述 pill + the adopted
 //                      composed data page) — moved OUT of the hub dock
-//     page 1 科学宿主 = 纯 CompositeDocument (宿主注入画布) —— 阶段
-//                      面板住进底部阶段行 dock（ws1 井震两联|预测任务|
-//                      地震预测 / ws2 连井剖面|数据制备|地层对比|层序格架
-//                      / ws3 单因素参考带），可悬浮/停靠/tab 化；
+//     page 1 科学宿主 = CompositeDocument + 页内阶段窗格（mockup
+//                      精确还原：井震两联/连井剖面/单因素参考带是中列
+//                      底部固定区，受左右栏夹界，不是全宽 dock）；
 //                      workspaces 1/2/3 share this ONE QGIS canvas authority
 //     page 2 验证     = ValidationWorkspacePage (M3, D5): 只读对照画布 +
 //                      地震剖面 + QcIssueTable + InteractiveQCHub 定位
@@ -107,7 +106,9 @@ class WorkstationFrame;
 }
 
 namespace pwb::app {
+class CompilationLayerPanel;
 
+class FactorAtlasPanel;
 class ValidationWorkspacePage;
 
 // Central workspace stack (D2). Three pages, fixed order: 数据管理 /
@@ -123,9 +124,11 @@ public:
     explicit WorkspaceHostWidget(QWidget* parent = nullptr);
 };
 
-// 底部阶段行（dock 嵌套 row0）：每工作区一份阶段/预览 dock 成员集
-// （navigate_workspace 投影；全隐时行塌陷）。成员 id 见注册表
-// data_preview…factor_refs —— 面板化后无页栈常量。
+// 页内阶段窗格（mockup-faithful-2026-09-24）：科学宿主页底部 QSplitter
+// 第二格 = QStackedWidget，ws1/2/3 各一页（井震两联/连井剖面/单因素
+// 参考带）。宿主安装器经 stage_pane_* 宿主指针注入真实内容；未注入
+// 时窗格保持诚实占位 hint。原底部阶段行 dock（pair_link 等）退役为
+// 隐藏注册表项（Python oracle parity 契约不动）。
 
 class AppShell : public QWidget {
     Q_OBJECT
@@ -213,12 +216,15 @@ public:
     // M2 chrome: the five-workspace ribbon and the central workspace stack.
     pwb::ui_ribbon::qt::RibbonBar* ribbon() const { return ribbon_; }
     WorkspaceHostWidget* workspace_host() const { return workspace_host_; }
-    // M3 science-host — 面板化改订：中央 = 纯 QGIS 画布；阶段面板住
-    // 进底部阶段行 dock（可悬浮/停靠/tab 化），测试与宿主经
-    // workstation()->dock(id) 按注册表 id 取 dock。
-    // ws2 底部「数据制备」dock 由 adopt_preparation_page 注入真实页面。
+    // M3 science-host — mockup 精确还原：中央 = QSplitter(V){QGIS 画布,
+    // 页内阶段窗格栈}。ws1/2/3 的底部区（井震两联/连井剖面/单因素
+    // 参考带）是中列固定区而非全宽 dock —— 宿主安装器经以下宿主
+    // 指针注入真实面板（缺席 = 窗格保持诚实 hint）。
+    QWidget* stage_pane_pair() const { return stage_pair_host_; }
+    QWidget* stage_pane_crosswell() const { return stage_crosswell_host_; }
+    QWidget* stage_pane_factor() const { return stage_factor_host_; }
+    QStackedWidget* stage_stack() const { return stage_stack_; }
     // 底部阶段行 dock 按页签标题抬起（navigate_to 路由语义）。
-    void focus_stage_dock(const QString& title);
     void set_stage3_compose(QWidget* panel);
     void set_compose_mode(bool on);
     bool compose_mode() const { return compose_mode_; }
@@ -231,8 +237,17 @@ public:
     pwb::ui_workstation::VerifyRecordsPanel* verify_records_panel() const {
         return verify_records_;
     }
+    // ws2「单因素」签面板（dock factory 惰性创建；未创建时 nullptr）。
+    pwb::app::FactorAtlasPanel* factor_atlas_panel() const {
+        return factor_atlas_;
+    }
     // ws3 右栏「图件整饰 / 版式输出」面板 —— 宿主经此接写回闭包。
     QWidget* map_decor_panel() const { return map_decor_; }
+    // 稿式图层 tab 容器（收编的 composite_layer dock 内件）——
+    // 宿主经它喂参考图层行 / 接整饰勾选写回。
+    CompilationLayerPanel* layer_tab_panel() const {
+        return layer_tab_panel_;
+    }
     // 版式输出面板由 m5_compose_install 经 set_stage3_compose 收编
     // 进 dock —— 读回经 dock->widget()（未收编时为占位/nullptr）。
     QWidget* layout_output_panel() const;
@@ -334,14 +349,11 @@ private:
     // 状态栏「坐标 · CRS · 比例尺」段 —— 画布信号分头更新缓存后合并
     // 重发（update_context 一次写全段；horizon 段由层位权威另路投影）。
     void sync_status_context();
-    // M3: 阶段组合 —— 底部阶段行 dock 投影（stage→workspace 成员集）；
-    // 行内显隐走占位护栏，行高首揭时一次性播种。
+    // M3: 阶段组合 —— 页内阶段窗格选择（stage→ws1/2/3 窗格页）；
+    // 原底部阶段行 dock 投影已退役（窗格进中列，见 stage_stack_）。
     void apply_stage_composition(const std::string& stage_value);
-    void apply_stage_dock_profile(int workspace_index);
     // M5-2: enter/leave 版式模式（抬起右栏「版式输出」dock，F:70）。
     void apply_compose_mode();
-    // M5-3: focus a validation rail tab by title (页内页签保留)。
-    static void focus_stage_tab(QTabWidget* tabs, const QString& title);
     // 左栏工作流面板按工作区换内容（步骤清单 / 验证设置勾选）；步骤
     // 点击经 command_registry 走既有命令路径（workflow_command_ids_
     // 为当前工作区的步骤→命令映射）。
@@ -351,9 +363,12 @@ private:
     pwb::ui_composite::CompositeDocument* composite_ = nullptr;
     WorkspaceHostWidget* workspace_host_ = nullptr;
     pwb::ui_ribbon::qt::RibbonBar* ribbon_ = nullptr;
-    // 底部阶段行行高已播种（首次揭行一次性 resizeDocks；之后用户
-    // 拖动即用户权威）。
-    bool stage_row_seeded_ = false;
+    // 科学宿主页内阶段窗格栈（ws1 井震两联 / ws2 连井剖面 / ws3
+    // 单因素参考带 —— 中列底部固定区，索引 = workspace_index - 1）。
+    QStackedWidget* stage_stack_ = nullptr;
+    QWidget* stage_pair_host_ = nullptr;
+    QWidget* stage_crosswell_host_ = nullptr;
+    QWidget* stage_factor_host_ = nullptr;
     bool compose_mode_ = false;
     ValidationWorkspacePage* validation_page_ = nullptr;
     pwb::ui_shell::AdaptivePageStack* page_stack_ = nullptr;
@@ -380,7 +395,11 @@ private:
     // dock factories; non-owning — docks own them).
     QWidget* predict_compare_ = nullptr;
     QWidget* map_decor_ = nullptr;
+    CompilationLayerPanel* layer_tab_panel_ = nullptr;
     pwb::ui_workstation::VerifyRecordsPanel* verify_records_ = nullptr;
+    // ws2「单因素」签 —— 单因素图层清单（factor_map_tasks 数据经
+    // workspace_compose 喂入；层位标题经 set_horizon_state 投影）。
+    pwb::app::FactorAtlasPanel* factor_atlas_ = nullptr;
 
     // Seismic volume service (07 closure): host-injected, window-owned
     // (D4 — the per-shell function-local static retired: no hidden

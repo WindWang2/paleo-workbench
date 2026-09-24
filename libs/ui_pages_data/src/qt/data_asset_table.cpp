@@ -45,19 +45,20 @@ DataAssetTable::DataAssetTable(QWidget* parent) : QWidget(parent) {
     });
     connect(chips_bar_, &FilterChipsBar::filter_applied, this,
             &DataAssetTable::apply_saved_filter);
+    // 稿 ws0 工具行只有 搜索/所有类型/所有状态/共N条 —— 已保存过滤器
+    // 行不入稿；逻辑保留（chip_removed/clear_all 仍可用），行隐藏。
+    chips_bar_->setVisible(false);
     layout->addWidget(chips_bar_);
 
-    auto* toolbar = new QHBoxLayout();
-    toolbar->setContentsMargins(0, 0, 0, 0);
-    toolbar->addStretch();
+    // 稿 ws0 表头区无列设置钮（列集由稿固定 8 列）—— 按钮/菜单对象
+    // 保留（apply_visible_columns 等代码路径不变），但不入布局、不渲染。
     column_settings_btn_ =
         new QPushButton(QStringLiteral("列设置"), this);
     column_settings_btn_->setObjectName(QStringLiteral("SecondaryButton"));
+    column_settings_btn_->setVisible(false);
     column_settings_menu_ = new QMenu(column_settings_btn_);
     build_column_settings_menu();
     column_settings_btn_->setMenu(column_settings_menu_);
-    toolbar->addWidget(column_settings_btn_);
-    layout->addLayout(toolbar);
 
     table_ = new QTableView(this);
     table_->setObjectName(QStringLiteral("DataAssetGrid"));
@@ -103,6 +104,8 @@ DataAssetTable::DataAssetTable(QWidget* parent) : QWidget(parent) {
     connect(table_, &QTableView::customContextMenuRequested, this,
             &DataAssetTable::on_context_menu);
     layout->addWidget(table_);
+    // 表格就绪后应用默认列集（稿式 8 列）。
+    apply_column_visibility();
 }
 
 void DataAssetTable::set_filter_fn(FilterIndexFn fn) {
@@ -327,10 +330,23 @@ void DataAssetTable::sync_column_actions() {
 void DataAssetTable::set_visible_columns(
     const std::vector<std::string>& keys) {
     visible_column_keys_ = ordered_column_keys(keys);
-    // Model column keys are the model's business (set_column_keys); the
-    // widget exposes them for the host to forward.
+    // 稿式 8 列：默认列集真实生效——视图按共享列词汇隐藏非选列；
+    // 列设置菜单仍可临时加回（真实功能不删）。
+    apply_column_visibility();
     sync_selection();
     sync_column_actions();
+}
+
+void DataAssetTable::apply_column_visibility() {
+    const std::set<std::string> visible(visible_column_keys_.begin(),
+                                        visible_column_keys_.end());
+    const auto& defs = column_definitions();
+    for (int i = 0; i < static_cast<int>(defs.size()); ++i) {
+        const auto& column = defs[static_cast<std::size_t>(i)];
+        const bool show = column.required ||
+                          visible.count(std::string(column.key)) != 0;
+        table_->setColumnHidden(i, !show);
+    }
 }
 
 void DataAssetTable::reset_columns() {

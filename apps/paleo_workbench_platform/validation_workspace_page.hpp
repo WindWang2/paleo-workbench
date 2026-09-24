@@ -1,23 +1,25 @@
 #pragma once
 
 // M3 (ribbon five-workspaces, plan 00-plan.md §4-M3 / D5) — the 验证
-// workspace (ws4) composition page:
+// workspace (ws4) composition page (mockup-faithful-2026-09-24 改订):
 //
 //   QSplitter(H):
 //     left  QSplitter(V):
-//             top    QSplitter(H): 只读 DisplayMapCanvas | 地震剖面窗格
-//             bottom QcIssueTable (结构化问题列表)
-//     right QTabWidget: 复核详情 (InteractiveQCHub + 定位)
-//                       | 解释 vs 预测对比 (M5 占位)
-//                       | 复核记录 (M5 占位)
+//             top    QSplitter(H): 只读 DisplayMapCanvas（验证对比）|
+//                                  地震剖面窗格（两套解释对照）
+//             bottom 井验证对比窗格（ComparisonView，宿主注入）
+//     right QSplitter(V):
+//             top    验证结果窗格（QcIssueTable 结构化问题列表）
+//             bottom 选中问题详情窗格（InteractiveQCHub 定位 +
+//                    复核处置面板，宿主注入）
 //
 // Contracts:
 //   * QC runs through the EXISTING IReviewActions (closure_review binding —
 //     the same provider the review page uses); no second review authority.
+//     Ribbon 的「运行验证」直调 run_qc() —— 单一命令入口。
 //   * Issue click → SmoothPanController::pan_to_extent on the read-only
 //     DisplayMapCanvas (locate point padded 10%) — never a text-only popup.
-//   * The M5 gaps (解释 vs 预测对比视图, 问题级人工复核状态机) are EXPLICIT
-//     placeholders — no fabricated comparison, no fake review state.
+//   * 未注入的窗格保持诚实空态 —— 无伪造对比、无假复核状态。
 
 #include <functional>
 #include <vector>
@@ -64,10 +66,14 @@ public:
     // Reports refresh (QualityReport dicts — active_quality_reports parity).
     void update_reports(const std::vector<pwb::domain::Json>& reports);
 
-    // M5: replace the 对比视图（M5）/ 复核记录（M5）placeholder tabs with
-    // the real widgets (ComparisonView / ReviewDispositionPanel).
+    // M5: inject the real widgets — ComparisonView 入底部「井验证
+    // 对比」窗格，ReviewDispositionPanel 并入「选中问题详情」窗格。
     void set_compare_view(QWidget* view);
     void set_review_panel(QWidget* panel);
+
+public slots:
+    // 「运行验证」唯一入口（ribbon verify.run / 复核面板 rerun 直调）。
+    void run_qc();
 
     // Test/inspection surface.
     pwb::ui_map::DisplayMapCanvas* map_canvas() const { return map_; }
@@ -87,17 +93,21 @@ signals:
     void reports_refreshed();
 
 private:
-    void run_qc();
     void locate_issue(const QVariantMap& issue);
     void locate_rule_row(int row, int column);
+    void refresh_result_stats();
 
     pwb::ui_map::DisplayMapCanvas* map_ = nullptr;
     QWidget* seismic_host_ = nullptr;
     QLabel* seismic_empty_ = nullptr;
     pwb::ui_review::qt::QcIssueTable* table_ = nullptr;
+    QLabel* stats_pass_ = nullptr;
+    QLabel* stats_pending_ = nullptr;
+    QLabel* stats_skipped_ = nullptr;
     pwb::ui_widgets::InteractiveQCHub* hub_ = nullptr;
     pwb::ui_widgets::SmoothPanController* pan_ = nullptr;
-    QTabWidget* right_tabs_ = nullptr;
+    QWidget* compare_host_ = nullptr;   // 「井验证对比」窗格内容槽
+    QWidget* detail_host_ = nullptr;    // 「选中问题详情」窗格内容槽
     QWidget* compare_view_ = nullptr;
     QWidget* review_panel_ = nullptr;
     std::function<pwb::ui_review::IReviewActions*()> actions_provider_;

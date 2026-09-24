@@ -128,6 +128,7 @@ Q_SIGNALS:
 
 private:
     void apply_filter();
+    void apply_column_visibility();
     void build_column_settings_menu();
     void set_column_visible_from_action(const std::string& key, bool on);
     void sync_column_actions();

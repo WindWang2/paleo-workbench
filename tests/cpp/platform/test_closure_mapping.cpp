@@ -272,17 +272,11 @@ int install_battery() {
     // M3 (P0-2): the real PreparationPage lives in the 约束与单因素
     // bottom stage row's 数据制备 dock — the hub slot keeps only a
     // legacy route.
-    auto* prep_dock = shell->workstation()->dock("data_prep");
-    PWB_CHECK_MSG(prep_dock != nullptr, "stage-2 数据制备 dock missing");
-    PWB_CHECK_MSG(prep_dock->widget() != nullptr,
-                  "数据制备 dock has no content");
-    // M6: the page rides in a BottomHost (Ignored policy) inside the
-    // dock — the page itself is inside the host.
-    auto* preparation =
-        prep_dock->widget()
-            ->findChild<pwb::ui_pages_data::qt::PreparationPage*>();
+    // mockup-faithful：稿 ws2 无「数据制备」面 —— 页收编进壳层
+    // （功能存续不进界面），shell->preparation_page() 是取用缝。
+    auto* preparation = shell->preparation_page();
     PWB_CHECK_MSG(preparation != nullptr,
-                  "PreparationPage not adopted into the ws2 dock");
+                  "PreparationPage not adopted into the shell");
     PWB_CHECK_MSG(preparation->objectName()
                       == QStringLiteral("PreparationPage"),
                   "preparation page object name");
@@ -748,12 +742,10 @@ int m5_compose_battery() {
     auto* ribbon = shell->ribbon();
     PWB_CHECK(ribbon != nullptr);
 
-    // 版式面板住右栏「版式输出」dock；ws3 底部阶段行的「单因素参考」
-    // dock 带参考缩略图（默认组版不动）。
-    auto* refs_dock = shell->workstation()->dock("factor_refs");
-    PWB_CHECK(refs_dock != nullptr);
-    PWB_CHECK(refs_dock->widget() != nullptr &&
-              refs_dock->widget()->findChild<QWidget*>(
+    // 版式面板住右栏「版式输出」dock；ws3 页内阶段窗格「单因素参考」
+    // 带参考缩略图（mockup：中列底部固定区，非 dock）。
+    PWB_CHECK(shell->stage_pane_factor() != nullptr);
+    PWB_CHECK(shell->stage_pane_factor()->findChild<QWidget*>(
                   "FactorReferenceStrip") != nullptr);
     auto* compose = shell->findChild<pwb::app::LayoutComposePanel*>();
     PWB_CHECK_MSG(compose != nullptr, "layout compose panel missing");

@@ -25,6 +25,9 @@ struct FilterQuery {
     std::string search_text;
     std::optional<std::string> stage;
     std::optional<std::string> data_type;
+    // 稿式「所有状态」下拉维度（asset status 等值——Python 侧未单列，
+    // 扩展字段不写入 7-field saved payload）。
+    std::optional<std::string> status;
     // Legacy singular tag field — unioned into `tags` at match time.
     std::optional<std::string> tag;
     std::optional<std::string> integrity;

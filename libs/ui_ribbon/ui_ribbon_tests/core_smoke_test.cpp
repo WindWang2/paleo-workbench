@@ -98,7 +98,7 @@ PWB_TEST(command_group_table_structure) {
     for (size_t i = 0; i < specs.size(); ++i) {
         CHECK(specs[i].workspace == kWorkspaceOrder[i]);
     }
-    // Group counts mirror the prototype's five pages (main.cpp:200-205):
+    // Group counts mirror the mockup's five pages:
     // 5 / 4 / 5 / 5 / 5 groups, every group non-empty with a label.
     const size_t expected_groups[] = {5, 4, 5, 5, 5};
     for (size_t i = 0; i < specs.size(); ++i) {
@@ -163,7 +163,10 @@ PWB_TEST(command_table_flags) {
 
     const auto& specs = workspace_specs();
     for (const auto& spec : specs) {
-        CHECK(overflow_count(spec) >= 3);  // 次级动作有溢出候选
+        // 设计稿五页 Ribbon 全直显 —— 无声明溢出；紧凑模式由
+        // ribbon_bar 的按宽度自动降级兜底（非 primary 的末位命令
+        // 在宽度不足时收进「更多」）。
+        CHECK(overflow_count(spec) == 0);
         CHECK(command_count(spec) >= 8);   // 每区命令面足够覆盖旧菜单
     }
     // M6: every command carries an icon asset (the declared map.opacity

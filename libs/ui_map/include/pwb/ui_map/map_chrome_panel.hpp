@@ -17,6 +17,7 @@ class QCheckBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QVBoxLayout;
 
 namespace pwb::ui_map {
 

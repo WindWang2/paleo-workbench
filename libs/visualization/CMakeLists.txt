@@ -7,6 +7,9 @@
 
 add_library(pwb_visualization STATIC
     src/seismic_volume.cpp
+    # Frozen FACIES_COLORS vocabulary (moved out of the WLE adapter so
+    # non-viewer consumers — ws2「参考」岩性图例 — share one definition).
+    src/facies_colors.cpp
 )
 add_library(Pwb::Visualization ALIAS pwb_visualization)
 set_target_properties(pwb_visualization PROPERTIES
