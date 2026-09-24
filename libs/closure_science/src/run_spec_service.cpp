@@ -234,7 +234,8 @@ ModelPackageSummary inspect_model_package(
 
 PreflightReport preflight_run(const CatalogDocument& document,
                               const std::vector<ResourceRef>& resources,
-                              const pwb::prediction::PredictionRunSpec& spec) {
+                              const pwb::prediction::PredictionRunSpec& spec,
+                              const std::filesystem::path& project_dir) {
     PreflightReport report;
     report.spec = spec;
 
@@ -289,11 +290,15 @@ PreflightReport preflight_run(const CatalogDocument& document,
         if (!package.ok) {
             report.errors.push_back("模型包校验失败: " + package.error);
         } else {
-            if (mv->checksum.has_value() && !mv->checksum->empty() &&
-                *mv->checksum != package.checksum) {
-                report.errors.push_back(
-                    "模型文件校验和不一致（登记 " + *mv->checksum +
-                    "，实际 " + package.checksum + "）——模型文件已变更");
+            if (mv->checksum.has_value() && !mv->checksum->empty()) {
+                if (*mv->checksum != package.checksum) {
+                    report.errors.push_back(
+                        "模型文件校验和不一致（登记 " + *mv->checksum +
+                        "，实际 " + package.checksum + "）——模型文件已变更");
+                }
+            } else {
+                report.warnings.push_back(
+                    "模型版本未登记校验和——模型文件被替换将无法检测");
             }
             model_identity["artifact_checksum"] = package.checksum;
             model_identity["expected_inputs"] = package.expected_inputs;
@@ -329,14 +334,95 @@ PreflightReport preflight_run(const CatalogDocument& document,
                     document.find_version(domain::VersionId(*version_id));
                 if (version == nullptr || version->trashed) {
                     report.errors.push_back("所选地震体版本不可用（已删除）");
-                } else if (!version->metadata.contains("grid_descriptor") ||
-                           !version->metadata["grid_descriptor"]
-                                .is_object()) {
-                    report.errors.push_back(
-                        "地震输入版本缺少 grid_descriptor（shape/dtype/CRS/"
-                        "geotransform 是 tiled 推理的必需声明）");
                 } else {
-                    model_identity["seismic_version_id"] = *version_id;
+                    // The cheap subset of the run's own input contract
+                    // (prediction_input validate): grid_descriptor shape,
+                    // crs, dtype — plus the payload file actually being
+                    // where the run will read it.
+                    const Json* grid = nullptr;
+                    if (version->metadata.contains("grid_descriptor") &&
+                        version->metadata["grid_descriptor"].is_object()) {
+                        grid = &version->metadata["grid_descriptor"];
+                    }
+                    if (grid == nullptr) {
+                        report.errors.push_back(
+                            "地震输入版本缺少 grid_descriptor（shape/dtype/CRS/"
+                            "geotransform 是 tiled 推理的必需声明）");
+                    } else {
+                        bool shape_ok = false;
+                        long long voxels = 0;
+                        if (grid->contains("shape") &&
+                            (*grid)["shape"].is_array() &&
+                            (*grid)["shape"].size() == 3) {
+                            shape_ok = true;
+                            for (const auto& dim : (*grid)["shape"]) {
+                                if (!dim.is_number_integer() ||
+                                    dim.get<long long>() <= 0) {
+                                    shape_ok = false;
+                                    break;
+                                }
+                                if (voxels == 0) {
+                                    voxels = dim.get<long long>();
+                                } else {
+                                    voxels *= dim.get<long long>();
+                                }
+                            }
+                        }
+                        if (!shape_ok) {
+                            report.errors.push_back(
+                                "地震输入的 shape 必须是三个正整数（inline/"
+                                "xline/time）");
+                        }
+                        const std::string dtype =
+                            grid->contains("dtype") &&
+                                    (*grid)["dtype"].is_string()
+                                ? (*grid)["dtype"].get<std::string>()
+                                : std::string();
+                        if (dtype != "float32") {
+                            report.errors.push_back(
+                                "地震输入 dtype 必须是 float32（当前: " +
+                                (dtype.empty() ? std::string("未声明") : dtype) +
+                                "）");
+                        }
+                        const std::string crs =
+                            grid->contains("crs") &&
+                                    (*grid)["crs"].is_string()
+                                ? (*grid)["crs"].get<std::string>()
+                                : std::string();
+                        if (crs.empty()) {
+                            report.errors.push_back(
+                                "地震输入未声明 CRS（tiled 推理按契约拒绝）");
+                        }
+                        // Payload file check (absolute or project-anchored).
+                        if (shape_ok && dtype == "float32" &&
+                            !version->path.empty() && !project_dir.empty()) {
+                            std::filesystem::path payload(version->path);
+                            if (payload.is_relative()) {
+                                payload = project_dir / payload;
+                            }
+                            std::error_code ec;
+                            if (!std::filesystem::exists(payload, ec)) {
+                                report.errors.push_back(
+                                    "地震体载荷文件不存在: " +
+                                    payload.generic_string());
+                            } else if (const auto size =
+                                           std::filesystem::file_size(payload,
+                                                                      ec);
+                                       !ec && shape_ok && voxels > 0 &&
+                                       size !=
+                                           static_cast<std::uintmax_t>(
+                                               voxels * 4)) {
+                                report.errors.push_back(
+                                    "地震体载荷大小与 shape×float32 不一致（"
+                                    "文件 " +
+                                    std::to_string(size) + " 字节，声明 " +
+                                    std::to_string(voxels * 4) + " 字节）");
+                            }
+                        }
+                        if (report.errors.empty()) {
+                            model_identity["seismic_version_id"] = *version_id;
+                        }
+                    }
                 }
             }
         }

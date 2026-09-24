@@ -16,6 +16,7 @@
 #include <pwb/domain/json.hpp>
 #include <pwb/prediction/run_spec.hpp>
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -115,13 +116,19 @@ struct PreflightReport {
 
 // Validates params, resolves the model (identity + checksum + package
 // validation + executor availability), resolves the seismic input version
-// (grid descriptor present, PWBVOL1) and the selected well versions, and
-// checks the input contract exactly like the run would (resolve_model_inputs).
-// Never mutates the catalog. Fail-closed: any problem lands in errors.
+// (grid descriptor + the cheap subset of the run's input contract: crs,
+// positive shape triple, dtype, payload file existence/size), and the
+// selected well versions, then checks the input contract exactly like
+// the run would (resolve_model_inputs). Never mutates the catalog.
+// *project_dir anchors project-relative version paths for the file
+// checks (empty = the file-level checks are skipped, metadata checks
+// still run). Fail-closed: any problem lands in errors; advisory notes
+// (empty registry checksum, demo models) land in warnings.
 [[nodiscard]] PreflightReport preflight_run(
     const catalog::CatalogDocument& document,
     const std::vector<ResourceRef>& resources,
-    const pwb::prediction::PredictionRunSpec& spec);
+    const pwb::prediction::PredictionRunSpec& spec,
+    const std::filesystem::path& project_dir = {});
 
 // The run parameters the binding builds from a RESOLVED spec — single
 // mapping point (pages' legacy parameter keys stay compatible: the run

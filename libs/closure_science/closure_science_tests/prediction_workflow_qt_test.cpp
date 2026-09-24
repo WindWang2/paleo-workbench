@@ -398,11 +398,46 @@ int main(int argc, char** argv) {
                       published.front()["id"].is_string(),
                   "published task carries its stable id");
         }
-        // Candidates API degrades honestly while busy (try-lock path is
-        // exercised implicitly by timing; here just the no-project error).
+
+        // ---- the RunSpec path end-to-end: controller->run() must mark
+        // the page in flight, deliver the completion past the session
+        // guard and publish the second task — the regression proof that
+        // a spec run is not silently dropped.
+        auto* controller = csq::install_prediction_workflow(
+            binding, &well_page, &seismic_page, nullptr);
+        Json stored;
+        csq::PredictionWorkflowController::ProjectSeams seams;
+        seams.read_run_spec = [&stored]() { return stored; };
+        seams.write_run_spec = [&stored](const Json& spec) {
+            stored = spec;
+            return pwb::domain::DataError(pwb::domain::ErrorCode::Ok, "");
+        };
+        controller->set_project_seams(seams);
         std::string candidate_error;
-        (void)binding->model_candidates(&candidate_error);
-        // (no assertion on text: depends on timing relative to the run)
+        const auto models = binding->model_candidates(&candidate_error);
+        std::string demo_id;
+        for (const auto& model : models) {
+            if (model.provider == "demo") {
+                demo_id = model.model_version_id;
+                break;
+            }
+        }
+        check(!demo_id.empty(), "demo model discoverable via candidates");
+        if (!demo_id.empty()) {
+            pwb::prediction::PredictionRunSpec spec;
+            spec.model_version_id = demo_id;
+            spec.params["tile_inline"] = 32;
+            spec.workflow = "seismic_facies";
+            spec.demo = true;
+            stored = spec.to_json();
+            check(controller->restore_persisted_spec(), "spec restored");
+            const std::size_t before = published.size();
+            check(controller->run(), "controller run starts the spec run");
+            check(wait_for_signal(updated_spy, 2, 30000),
+                  "spec-run completion reaches the page");
+            check(published.size() == before + 1,
+                  "spec-run task published (not dropped at the guard)");
+        }
     }
 
     if (g_failures == 0) {

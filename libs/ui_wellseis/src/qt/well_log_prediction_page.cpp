@@ -294,8 +294,14 @@ void WellLogPredictionPage::set_source_import_status(const QString& text) {
     evidence_panel_->set_status(text);
 }
 
-bool WellLogPredictionPage::select_well_resource(
-    const std::string& resource_id) {
+void WellLogPredictionPage::begin_external_run() {
+    // Mirrors start_inference's busy state so the queued completion from
+    // the RunSpec path passes the session guard.
+    inference_active_ = true;
+    evidence_panel_->set_inferring(true);
+}
+
+bool WellLogPredictionPage::select_well_resource(    const std::string& resource_id) {
     if (project_ == nullptr) {
         return false;
     }

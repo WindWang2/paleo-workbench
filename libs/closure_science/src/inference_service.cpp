@@ -806,6 +806,16 @@ domain::Result<ExecuteRunOutcome> execute_run(
                                        ? *model_version.checksum
                                        : "";
     parameters["_registered_model"] = std::move(registered_model);
+    // The RunSpec rides the run under a '_' key (kept out of the snapshot
+    // hash and the persisted payload envelope); the provider consumes its
+    // params verbatim through apply_prediction_params — forward it
+    // explicitly like _registered_model, or the UI-edited tile/batch/
+    // budget values would never reach the kernel while the run row still
+    // records them as provenance.
+    if (const auto run_spec = run.parameters.find("_run_spec");
+        run_spec != run.parameters.end() && run_spec->is_object()) {
+        parameters["_run_spec"] = *run_spec;
+    }
 
     // Run the provider. All provider-side failures — including a raised
     // TaskCancelled-shaped cancellation — are translated here so the run

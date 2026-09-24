@@ -227,7 +227,19 @@ public:
     [[nodiscard]] std::optional<std::string> production_model_id() {
         auto context = catalog();
         if (context == nullptr) return std::nullopt;
-        const std::lock_guard<std::mutex> lock(document_mutex_);
+        // try-lock: an in-flight run holds the document for its whole
+        // execute — the page's on_run must not freeze the GUI on it.
+        // Fall back to the last cached identity (the demo path's answer
+        // during a run); "not cached yet + busy" reads as 未配置生产模型,
+        // which the single-flight guard turns into a refusal anyway.
+        std::unique_lock<std::mutex> lock(document_mutex_,
+                                          std::try_to_lock);
+        if (!lock.owns_lock()) {
+            return cached_production_version_id_.empty()
+                       ? std::nullopt
+                       : std::optional<std::string>(
+                           cached_production_version_id_);
+        }
         const catalog::ModelVersion* version = catalog::find_production_model(
             context->core->document(), std::string(kCapabilityFacies));
         if (version == nullptr) return std::nullopt;
@@ -365,12 +377,14 @@ public:
             // sees the quiescent catalog the run will open against.
             const std::lock_guard<std::mutex> lock(document_mutex_);
             preflight = preflight_run(context->core->document(),
-                                      context->resources, spec);
+                                      context->resources, spec,
+                                      context->project_dir());
         }
         if (!preflight.ok) {
             out.errors = std::move(preflight.errors);
             return out;
         }
+        out.warnings = std::move(preflight.warnings);
         auto run = start_inference(
             context->core->document(), context->save_hook(),
             StartInferenceRequest{preflight.spec.model_version_id,
@@ -387,6 +401,20 @@ public:
             out.errors.push_back(launch_error);
             out.run_id.clear();
             return out;
+        }
+        // The completion lands in the page's on_inference_completed (queued
+        // — it cannot run before this slot returns to the event loop), but
+        // the RunSpec path bypasses the page's own start_inference: mark
+        // the run in flight here or the session guard drops the payload.
+        if (auto* well = qobject_cast<
+                pwb::ui_wellseis::qt::WellLogPredictionPage*>(page.data());
+            well != nullptr) {
+            well->begin_external_run();
+        } else if (auto* seismic = qobject_cast<
+                       pwb::ui_wellseis::qt::SeismicPredictionPage*>(
+                       page.data());
+                   seismic != nullptr) {
+            seismic->begin_external_run();
         }
         out.started = true;
         return out;
@@ -516,15 +544,17 @@ public:
                     if (page != nullptr && alive->load()) {
                         QMetaObject::invokeMethod(
                             page,
-                            [this, page, alive, payload, start_token]() {
+                            [this, page, alive, payload, start_token,
+                             context]() {
                                 if (!alive->load() || page == nullptr) return;
                                 // Token guard runs on the GUI thread: a
                                 // completion whose project was closed or
-                                // switched is dropped here (the catalog
-                                // rows already landed in THAT project's
-                                // store — reading the host's project state
-                                // from the worker thread would have been
-                                // unsynchronized).
+                                // switched is dropped for the UI — but the
+                                // catalog rows already landed in THAT
+                                // project's store, so the task is still
+                                // materialized + journaled against the
+                                // worker's own context (never invisible in
+                                // every project).
                                 std::filesystem::path current;
                                 if (config_.project_file != nullptr) {
                                     current = config_.project_file();
@@ -532,6 +562,18 @@ public:
                                 if (PredictionTaskJournal::
                                         token_for_project_path(current) !=
                                     start_token) {
+                                    if (payload.contains("run") &&
+                                        payload.contains("result") &&
+                                        payload["result"].is_object() &&
+                                        !payload["result"].empty()) {
+                                        // Journal into the worker's OWN
+                                        // project (context), never the
+                                        // newly opened one.
+                                        (void)materialize_task(
+                                            context, payload["run"],
+                                            payload["result"],
+                                            /*publish=*/false);
+                                    }
                                     return;
                                 }
                                 auto* well =
@@ -566,7 +608,7 @@ public:
 
     [[nodiscard]] PredictionTaskSlice materialize_task(
         std::shared_ptr<CatalogContext> context, const Json& run,
-        const Json& result) {
+        const Json& result, bool publish = true) {
         PredictionTaskOptions options;
         const Json parameters =
             run.contains("parameters") && run["parameters"].is_object()
@@ -630,7 +672,10 @@ public:
         // the pages' own update_state read the "prediction_tasks" section;
         // without this publish a finished run stays invisible to them. A
         // publish failure is flagged on the task, never fabricated.
-        if (config_.publish_task) {
+        // publish=false is the project-switched fallback: journal into the
+        // WORKER's project only — publishing there would write the old
+        // project's task into the newly opened project's document.
+        if (publish && config_.publish_task) {
             const domain::DataError published = config_.publish_task(task);
             if (published.code != domain::ErrorCode::Ok) {
                 task["model_metadata"]["publish_failed"] = published.message;
@@ -642,7 +687,12 @@ public:
     [[nodiscard]] std::vector<RunSlice> list_runs(
         std::shared_ptr<CatalogContext> context) {
         std::vector<RunSlice> runs;
-        const std::lock_guard<std::mutex> lock(document_mutex_);
+        // try-lock: the persisted-failure replay must not freeze the GUI
+        // while a run holds the document; empty reads as "nothing to
+        // replay" until the run lands.
+        std::unique_lock<std::mutex> lock(document_mutex_,
+                                          std::try_to_lock);
+        if (!lock.owns_lock()) return runs;
         for (const catalog::DataRun& run :
              context->core->document().runs) {
             if (run.operation != "prediction") continue;

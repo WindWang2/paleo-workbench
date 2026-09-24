@@ -92,7 +92,8 @@ public:
     // project-token guarded) — pass the seismic page for production runs.
     struct SpecRunResult {
         bool started = false;
-        std::vector<std::string> errors;  // preflight/start failures
+        std::vector<std::string> errors;    // preflight/start failures
+        std::vector<std::string> warnings;  // advisory (demo model, ...)
         std::string run_id;
     };
     SpecRunResult start_spec_run(

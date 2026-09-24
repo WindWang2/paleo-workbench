@@ -83,6 +83,11 @@ public:
     selected_seismic_resource_id() const;
     bool select_seismic_resource(const std::string& resource_id);
 
+    // External-run seam (see WellLogPredictionPage::begin_external_run):
+    // the RunSpec path marks the run in flight so the queued completion
+    // is accepted instead of dropped at the session guard.
+    void begin_external_run();
+
     // Panel access for the host's engine wiring + tests.
     [[nodiscard]] SeismicContextToolbar* context_toolbar() const;
     [[nodiscard]] SeismicAttributePanel* attribute_panel() const;

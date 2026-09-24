@@ -67,9 +67,11 @@ std::vector<PredictionParamSpec> prediction_param_schema() {
                       0, 0, 0, true, "",
                       "复用同指纹的既有分块标记，仅计算缺失分块"});
     schema.push_back({"output_budget_mb", "输出内存预算",
-                      PredictionParamSpec::Type::Int, 64, 4096, 2048, false,
+                      PredictionParamSpec::Type::Int, 64, 4096,
+                      kDefaultOutputBudgetBytes / (1024LL * 1024), false,
                       "MiB",
-                      "classmap+概率+掩膜运行时缓冲上限（默认 2048 MiB）"});
+                      "classmap+概率+掩膜运行时缓冲上限（默认即内核 "
+                      "kDefaultOutputBudgetBytes）"});
     schema.push_back({"seed", "随机种子", PredictionParamSpec::Type::Int, 0,
                       2147483647, 0, false, "",
                       "演示/可复现路径的种子；真实 tiled 推理是确定性的"});
@@ -190,6 +192,8 @@ std::optional<PredictionRunSpec> PredictionRunSpec::from_json(
         for (const auto& id : *it) {
             if (id.is_string() && !id.get<std::string>().empty()) {
                 spec.well_resource_ids.push_back(id.get<std::string>());
+            } else if (!id.is_string()) {
+                errors.push_back("well_resource_ids 含非字符串元素");
             }
         }
     }
@@ -207,23 +211,33 @@ std::optional<PredictionRunSpec> PredictionRunSpec::from_json(
     if (spec.model_version_id.empty() && require_model) {
         errors.push_back("未选择模型版本（model_version_id）");
     }
-    if (const auto it = value.find("params");
-        it != value.end() && it->is_object()) {
-        for (const std::string& problem : validate_prediction_params(*it)) {
-            errors.push_back(problem);
+    if (const auto it = value.find("params"); it != value.end()) {
+        if (it->is_object()) {
+            for (const std::string& problem : validate_prediction_params(*it)) {
+                errors.push_back(problem);
+            }
+            spec.params = *it;
+        } else {
+            errors.push_back("params 必须是对象");
         }
-        spec.params = *it;
     }
-    if (const auto it = value.find("workflow");
-        it != value.end() && it->is_string()) {
-        spec.workflow = it->get<std::string>();
+    for (const auto& [key, target] :
+         std::array<std::pair<const char*, std::string*>, 2>{
+             {{"workflow", &spec.workflow}, {"name_prefix", &spec.name_prefix}}}) {
+        if (const auto it = value.find(key); it != value.end()) {
+            if (it->is_string()) {
+                *target = it->get<std::string>();
+            } else {
+                errors.push_back(std::string(key) + " 必须是字符串");
+            }
+        }
     }
-    if (const auto it = value.find("name_prefix");
-        it != value.end() && it->is_string()) {
-        spec.name_prefix = it->get<std::string>();
-    }
-    if (const auto it = value.find("demo"); it != value.end() && it->is_boolean()) {
-        spec.demo = it->get<bool>();
+    if (const auto it = value.find("demo"); it != value.end()) {
+        if (it->is_boolean()) {
+            spec.demo = it->get<bool>();
+        } else {
+            errors.push_back("demo 必须是布尔值");
+        }
     }
     if (const auto it = value.find("resolved");
         it != value.end() && it->is_object()) {

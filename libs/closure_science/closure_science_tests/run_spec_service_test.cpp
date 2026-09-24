@@ -4,18 +4,30 @@
 // (real fixture package), the preflight failure matrix and the
 // run-parameters mapping (_run_spec verbatim for provenance). Qt-free,
 // ORT-free (a tiled_onnx preflight without ORT fails honestly — asserted).
+#include <pwb/catalog/model_registry.hpp>
 #include <pwb/catalog/models.hpp>
 #include <pwb/catalog/service_core.hpp>
 #include <pwb/closure_science/inference_service.hpp>
+#include <pwb/closure_science/model_seed.hpp>
+#include <pwb/closure_science/providers.hpp>
 #include <pwb/closure_science/run_spec_service.hpp>
 #include <pwb/domain/json.hpp>
 #include <pwb/prediction/onnx_session.hpp>
 #include <pwb/prediction/run_spec.hpp>
+#include <pwb/project/manager.hpp>
 
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -24,6 +36,14 @@ using pwb::catalog::CatalogDocument;
 using pwb::catalog::DataAsset;
 using pwb::catalog::DataVersion;
 using pwb::domain::Json;
+
+long get_pid() {
+#ifdef _WIN32
+    return static_cast<long>(_getpid());
+#else
+    return static_cast<long>(::getpid());
+#endif
+}
 
 int g_failures = 0;
 int g_checks = 0;
@@ -383,6 +403,103 @@ int main() {
               "well resource ids recorded");
         check(parameters["seismic_resource_ids"].size() == 1,
               "seismic resource id recorded");
+    }
+
+    // ---- the spec reaches the PROVIDER through execute_run ----------------
+    // (the '_' prefix keeps _run_spec out of the snapshot hash and the
+    // persisted envelope — execute_run must forward it explicitly or the
+    // UI-edited params silently run at kernel defaults while the run row
+    // still records them as provenance).
+    {
+        namespace fs = std::filesystem;
+        const fs::path dir =
+            fs::temp_directory_path() /
+            ("closure_science_runspec_" +
+             std::to_string(get_pid()));
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+        const fs::path project_file = dir / "runspec.paleo.json";
+        fs::create_directories(dir / "runspec.artifacts");
+        auto project_document =
+            pwb::project::ProjectDocument::create_new("runspec", "");
+        pwb::project::ProjectManager manager(project_file);
+        const auto saved = manager.save(project_document);
+        check(saved.is_ok(), "project save");
+        if (!saved.is_ok()) {
+            std::printf("closure_science.run_spec_service: FATAL save\n");
+            return 2;
+        }
+        auto opened = pwb::catalog::open_catalog(project_file);
+        check(opened.is_ok(), "catalog opens");
+        if (!opened.is_ok()) return 2;
+        pwb::catalog::CatalogServiceCore core(std::move(opened.value()));
+        const pwb::catalog::SaveHook save_hook =
+            [&core](const pwb::catalog::DirtySet& dirty) {
+                return core.save(dirty);
+            };
+        const auto seeded = pwb::closure_science::ensure_default_models(
+            core.document(), save_hook);
+        check(seeded.code == pwb::domain::ErrorCode::Ok,
+              "default models seeded");
+        const auto demo_version = pwb::catalog::get_model_version(
+            core.document(), pwb::closure_science::kModelIdDemo, "1");
+        check(demo_version.is_ok(), "demo version resolvable");
+
+        pwb::prediction::PredictionRunSpec spec;
+        spec.model_version_id = demo_version.value()->id;
+        spec.params = pwb::prediction::default_prediction_params();
+        spec.params["tile_inline"] = 48;
+        spec.params["prefer_gpu"] = true;
+
+        Json captured_parameters;
+        bool provider_invoked = false;
+        pwb::closure_science::ProviderRegistry registry;
+        registry.register_provider(
+            "demo",
+            [&captured_parameters, &provider_invoked](
+                const Json&, Json parameters,
+                const std::function<bool()>&) -> pwb::domain::Result<Json> {
+                captured_parameters = parameters;
+                provider_invoked = true;
+                return pwb::closure_science::make_demo_facies_provider()(
+                    Json::object(), std::move(parameters),
+                    [] { return false; });
+            });
+
+        auto run = pwb::closure_science::start_inference(
+            core.document(), save_hook,
+            {spec.model_version_id, {},
+             pwb::closure_science::run_parameters_from_spec(spec)});
+        check(run.is_ok(), "start_inference ok");
+        if (!run.is_ok()) return 2;
+        pwb::closure_science::ExecuteRunDeps deps;
+        deps.save = save_hook;
+        deps.providers = &registry;
+        deps.project_dir = dir;
+        deps.artifacts_root = dir / "runspec.artifacts";
+        const auto outcome = pwb::closure_science::execute_run(
+            core.document(), deps, run.value().id.str());
+        check(outcome.is_ok(), "execute_run ok: " +
+                                   (outcome.is_ok()
+                                        ? std::string()
+                                        : outcome.error().message));
+        check(provider_invoked, "provider invoked");
+        check(captured_parameters.contains("_run_spec") &&
+                  captured_parameters["_run_spec"].is_object(),
+              "_run_spec forwarded to the provider");
+        if (captured_parameters.contains("_run_spec")) {
+            check(captured_parameters["_run_spec"]["params"]
+                          ["tile_inline"]
+                              .get<long long>() == 48,
+                  "edited tile_inline reached the provider verbatim");
+        }
+        check(outcome.is_ok() &&
+                  outcome.value().run.status == "complete",
+              "run completed (status=" +
+                  (outcome.is_ok() ? outcome.value().run.status
+                                   : outcome.error().message) +
+                  ")");
+        fs::remove_all(dir);
     }
 
     if (g_failures == 0) {

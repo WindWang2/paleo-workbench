@@ -214,8 +214,12 @@ bool PredictionWorkflowController::run() {
                              QStringLiteral("预检未通过：\n%1").arg(joined));
         return false;
     }
-    emit status_message(QStringLiteral("预测运行已启动（run %1）")
-                            .arg(qs(result.run_id)));
+    QString status = QStringLiteral("预测运行已启动（run %1）")
+                         .arg(qs(result.run_id));
+    for (const auto& warning : result.warnings) {
+        status += QStringLiteral("\n注意: ") + qs(warning);
+    }
+    emit status_message(status);
     return true;
 }
 

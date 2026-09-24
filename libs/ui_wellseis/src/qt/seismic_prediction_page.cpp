@@ -204,6 +204,13 @@ SeismicPredictionPage::selected_seismic_resource_id() const {
     return selected_resource_id_;
 }
 
+void SeismicPredictionPage::begin_external_run() {
+    // Mirrors start_inference's busy state so the queued completion from
+    // the RunSpec path passes the session guard.
+    inference_active_ = true;
+    context_toolbar_->set_inferring(true);
+}
+
 bool SeismicPredictionPage::select_seismic_resource(
     const std::string& resource_id) {
     if (project_ == nullptr) {
