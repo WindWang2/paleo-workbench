@@ -115,6 +115,14 @@ target_sources(pwb_data PRIVATE
 )
 # END PWB-V14-DATA-LINEAGE
 
+# BEGIN PWB-DATA-GOVERNANCE
+# ws0 数据治理闭环：link/role（项目 JSON，entity_identity 内核）+ tags/
+# trash/restore/impact（catalog 深核 open_catalog）读写服务。
+target_sources(pwb_data PRIVATE
+    src/governance.cpp
+)
+# END PWB-DATA-GOVERNANCE
+
 if(BUILD_TESTING)
     enable_testing()
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../tests/cpp/data

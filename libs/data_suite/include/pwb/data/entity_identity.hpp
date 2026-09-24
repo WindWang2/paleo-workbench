@@ -160,6 +160,37 @@ std::vector<std::string> asset_ids_for_entity(
     const domain::Json& project_root, std::string_view entity_type,
     std::string_view entity_id, std::string_view role = "");
 
+// ---- governance edits (link/role write path; conv-governance) -------------
+
+// True when the (entity_type, entity_id) node exists in its section
+// (wells / seismic_surveys / geological_entities / auxiliary_entities).
+bool entity_exists(const domain::Json& project_root,
+                   std::string_view entity_type, std::string_view entity_id);
+
+// Remove the (entity_type, entity_id, asset_id) link row(s); role "" drops
+// every role of that pair, a non-empty role only the exact row (upsert's
+// key). Returns the number of removed rows. History stays explainable:
+// callers soft-delete via catalog tombstones, this is the explicit unlink.
+int remove_entity_asset_link(domain::Json& project_root,
+                             std::string_view entity_type,
+                             std::string_view entity_id,
+                             std::string_view asset_id,
+                             std::string_view role = "");
+
+enum class LinkRoleEdit { Ok, NotFound, Conflicts };
+
+// Move one link row's role. The row keeps its identity (id, is_primary,
+// unresolved, ordinal, note, metadata, created_at) — only `role` changes,
+// and a primary row demotes sibling primaries of the NEW role (the upsert
+// invariant). Conflicts (never a silent merge) when the pair already has a
+// row with new_role — the caller surfaces it.
+LinkRoleEdit set_link_role(domain::Json& project_root,
+                           std::string_view entity_type,
+                           std::string_view entity_id,
+                           std::string_view asset_id,
+                           std::string_view old_role,
+                           std::string_view new_role);
+
 // ---- link read views + entity domain ops (project/domain.py parity) -------
 
 // Stable read view of one link row (missing fields → schema defaults).

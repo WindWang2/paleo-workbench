@@ -53,6 +53,12 @@ public Q_SLOTS:
     // Publish a selection (nullopt clears). Ignored when the asset is not
     // among the current rows — selection must reference a real row.
     void set_current_asset(const std::optional<AssetRow>& asset);
+    // Re-emit the current selection from the LIVE row set. set_assets keeps
+    // a still-existing current without re-emitting (identity is unchanged),
+    // so panels bound to current_asset_changed go stale after a data write
+    // (tag/role/link/trash) mutates the same asset's row. Callers run this
+    // after the refresh that follows such a write.
+    void republish_current();
     // Clear everything (project closed).
     void clear();
 

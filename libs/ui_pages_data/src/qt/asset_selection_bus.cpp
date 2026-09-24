@@ -58,6 +58,22 @@ void AssetSelectionBus::set_current_asset(
     Q_EMIT current_asset_changed(current_);
 }
 
+void AssetSelectionBus::republish_current() {
+    if (!current_.has_value()) {
+        Q_EMIT current_asset_changed(current_);
+        return;
+    }
+    // Refresh the held row from the live set so listeners receive the
+    // post-write fields (tags/role/links), not the pre-write copy.
+    const auto it = std::find_if(
+        assets_.begin(), assets_.end(),
+        [this](const AssetRow& row) { return same_asset(row, *current_); });
+    if (it != assets_.end()) {
+        current_ = *it;
+    }
+    Q_EMIT current_asset_changed(current_);
+}
+
 void AssetSelectionBus::clear() {
     assets_.clear();
     project_id_.clear();

@@ -51,6 +51,11 @@ struct ProjectSnapshotV1 {
     std::vector<catalog::DataVersion> catalog_versions;
     std::vector<catalog::DataRun> catalog_runs;
     std::vector<catalog::AuditFinding> catalog_findings;
+    // Governance reads (tag filtering/display): the tag vocabulary plus
+    // (asset_id, tag_id) associations. Version-level tags stay in the
+    // catalog's own version_tags — the table surfaces asset-level tags.
+    std::vector<catalog::Tag> catalog_tags;
+    std::vector<std::pair<std::string, std::string>> catalog_asset_tags;
 };
 
 class DataFacade {
