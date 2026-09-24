@@ -1,12 +1,14 @@
-// platform.three_stage_flow — V14-THREE-STAGE-UX wiring battery, M2-updated
-// (ribbon five-workspaces): the ribbon chrome replaces the retired
-// MappingStageBar (①②③ segments → ribbon tabs), the production command set
-// populates the (previously empty) palette registry (nav.workspace.* now),
-// stage switches drive the per-stage layout profiles without rebuilding
-// the map canvas, stage.goto switches stage AND workspace (D1), entering
-// 数据管理/验证 never rewrites the stage, user preferences round-trip, and
-// the mapping stage restores from the project document. A second window
-// lifecycle exercises idempotent re-registration.
+// platform.three_stage_flow — V14-THREE-STAGE-UX wiring battery, two-page
+// shell: the ribbon chrome carries 数据管理/编图 (the three stages are
+// 编图 modes — mode.* toggles write the stage authority), the production
+// command set populates the palette registry (nav.workspace.* re-aimed:
+// predict/factor/map → 编图 modes, verify → the validation dock), stage
+// switches drive the per-stage layout profiles without rebuilding the map
+// canvas, stage.goto switches stage AND lands on the 编图 page (D1),
+// entering 数据管理 or raising 验证 never rewrites the stage, user
+// preferences round-trip, and the mapping stage restores from the project
+// document. A second window lifecycle exercises idempotent
+// re-registration.
 
 #include <QComboBox>
 #include <QDockWidget>
@@ -49,48 +51,49 @@ using Controller = pwb::ui_stageflow::qt::StageFlowController;
 namespace {
 
 void check_stage_flow_installed(MainWindow& window) {
-    PWB_CHECK_MSG(window.stageFlow() != nullptr,
-                  "StageFlowController not installed");
-    PWB_CHECK_MSG(window.stageFlowCommandCount() >= 15,
-                  "production command set not registered");
+    // 界面框架收敛：StageFlowController / 工作站 dock 宿主 / 验证页
+    // 已退役出界面（installStageFlow 对退役壳面空安全早退）——
+    // 三阶段语义由编图页的 mode.* 命令承载。
+    PWB_CHECK(window.stageFlow() == nullptr);
+    PWB_CHECK(window.stageFlowCommandCount() == 0);
     AppShell* shell = window.appShell();
     PWB_CHECK(shell != nullptr);
-    PWB_CHECK(shell->workstation() != nullptr);
-    // M2 (D1): the ribbon chrome is the stage switch — the MappingStageBar
-    // is deleted outright (the retired surface no longer exists even as an
-    // unmounted orphan owned by the composite document).
+    PWB_CHECK(shell->workstation() == nullptr);
     PWB_CHECK(shell->ribbon() != nullptr);
-    PWB_CHECK(!shell->workstation()->top_bar_mounted());
-    // The horizon selector migrated to the AppShell StatusBar.
-    PWB_CHECK(shell->status_bar()->findChild<QComboBox*>(
-                  "StatusHorizonCombo") != nullptr);
-    // M3 (P0-4): the validation workspace page is the real composition
-    // (read-only compare canvas + issue table + review hub), not a
-    // placeholder.
-    PWB_CHECK(shell->validation_page() != nullptr);
-    PWB_CHECK(shell->validation_page()->map_canvas() != nullptr);
-    PWB_CHECK(shell->validation_page()->issue_table() != nullptr);
-    PWB_CHECK(shell->validation_page()->qc_hub() != nullptr);
+    PWB_CHECK(shell->status_bar() != nullptr);
+    PWB_CHECK(shell->workspace_host() != nullptr);
+    PWB_CHECK(shell->workspace_host()->count() == 2);
+    PWB_CHECK(shell->validation_page() == nullptr);
+    // 默认编图模式 = 智能预测（facies_calibration 镜像）。
+    PWB_CHECK(shell->authoring_mode() ==
+              pwb::tool_policy::MappingStage::FaciesCalibration);
 }
 
 void check_command_registry(MainWindow& window) {
     auto& registry = pwb::ui_shell::command_registry();
+    // 编图模式命令 = 新的 stage 写面（互斥 QActionGroup 承载）。
+    for (const char* id :
+         {"mode.predict", "mode.factor", "mode.author"}) {
+        PWB_CHECK_MSG(registry.get(id) != nullptr,
+                      std::string("mode command missing: ") + id);
+    }
+    // stage_flow 时代的导航/面板命令随安装器退役（诚实缺席）。
     for (const char* id :
          {"stage.goto.prediction", "stage.goto.constraints",
-          "stage.goto.compilation", "nav.workspace.map", "panel.toggle.tasks",
-          "stage.reset_layout"}) {
-        PWB_CHECK_MSG(registry.get(id) != nullptr,
-                      std::string("command missing: ") + id);
+          "stage.goto.compilation", "nav.workspace.map", "nav.workspace.data",
+          "panel.toggle.tasks", "stage.reset_layout"}) {
+        PWB_CHECK_MSG(registry.get(id) == nullptr,
+                      std::string("retired command still present: ") + id);
     }
     // M2: the retired nav.hub.* ids are gone (workspace axis replaces them).
     PWB_CHECK(registry.get("nav.hub.mapping") == nullptr);
-    // Palette find() surfaces the stage commands (subsequence match).
-    const auto hits = registry.find("阶段", 50, nullptr);
+    // Palette find() surfaces the mode commands (subsequence match).
+    const auto hits = registry.find("预测", 50, nullptr);
     bool found_prediction = false;
     for (const auto* spec : hits) {
-        if (spec->id == "stage.goto.prediction") found_prediction = true;
+        if (spec->id == "mode.predict") found_prediction = true;
     }
-    PWB_CHECK_MSG(found_prediction, "palette find(阶段) misses stage command");
+    PWB_CHECK_MSG(found_prediction, "palette find(预测) misses mode command");
 
     // M4: the ribbon band commands registered — the five per-workspace
     // primary actions exist (uniqueness of primaries is the ui_ribbon
@@ -124,202 +127,92 @@ void check_command_registry(MainWindow& window) {
         registry.evaluate("predict.cancel", &no_project);
     PWB_CHECK(!cancel_gate.enabled);
     PWB_CHECK(!cancel_gate.reason.empty());
-
-    // Stage gating: evaluate under an explicit context (fail-closed
-    // vocabulary — an unknown stage value hides stage-scoped commands).
-    pwb::ui_shell::CommandContext context;
-    context.mapping_stage = "constraint_factor";
-    const auto composer =
-        registry.evaluate("panel.toggle.composer", &context);
-    PWB_CHECK(!composer.enabled);
-    PWB_CHECK(!composer.reason.empty());
-    const auto bottom = registry.evaluate("panel.toggle.bottom", &context);
-    PWB_CHECK(bottom.enabled);
     (void)window;
 }
 
-void check_stage_switch_and_layout(MainWindow& window) {
+void check_mode_switch_and_identity(MainWindow& window) {
     AppShell* shell = window.appShell();
-    auto* flow = window.stageFlow();
-    // Deterministic starting point: the stage→bottom flip rides
-    // sync_workspace_for_stage, which only acts while the science host
-    // page is current — navigate explicitly instead of relying on the
-    // persisted workspace from QSettings.
-    shell->navigate_workspace(2);
+    shell->navigate_workspace(1);
     QgsMapCanvas* canvas_before =
         window.findChild<QgsMapCanvas*>(QStringLiteral("session-map-canvas"));
     PWB_CHECK(canvas_before != nullptr);
 
-    // M3 science-host — 面板化改订: 底部阶段行 dock 投影随阶段权威走
-    // （每格独立 dock；行内 tab 组，成员集按工作区显隐）。
-    for (const char* dock_id :
-         {"pair_link", "predict_task", "seismic_predict", "data_prep",
-          "strat_compare", "seq_frame", "factor_refs"}) {
-        PWB_CHECK_MSG(shell->workstation()->dock(dock_id) != nullptr,
-                      std::string("stage dock missing: ") + dock_id);
+    // 编图页三模式共享同一画布 —— 模式切换不重建地图状态（stages.py
+    // 契约的保留部分：可见性/投影切换，绝不重造画布）。
+    for (pwb::tool_policy::MappingStage stage :
+         {pwb::tool_policy::MappingStage::ConstraintFactor,
+          pwb::tool_policy::MappingStage::IntegratedCompilation,
+          pwb::tool_policy::MappingStage::FaciesCalibration}) {
+        shell->request_authoring_mode(stage);
+        PWB_CHECK(shell->authoring_mode() == stage);
+        PWB_CHECK(window.findChild<QgsMapCanvas*>(
+                      QStringLiteral("session-map-canvas")) ==
+                  canvas_before);
     }
 
-    // Stage 2: factor surfaces appear; bottom row flips to the
-    // constraint dock set.
-    flow->request_stage("constraint_factor");
-    PWB_CHECK(flow->snapshot().stage_value == "constraint_factor");
-    PWB_CHECK(flow->snapshot().stage_label.find("约束") != std::string::npos);
-    auto* input_dock = shell->workstation()->dock("composite_input");
-    PWB_CHECK(input_dock != nullptr);
-    PWB_CHECK_MSG(input_dock->isVisible(),
-                  "stage2 profile did not show 输入与结果 dock");
-    PWB_CHECK_MSG(
-        shell->workstation()->dock_visible("data_prep") ||
-            shell->workstation()->dock_visible("crosswell"),
-        "stage2 did not project the constraint stage docks");
-    PWB_CHECK(!shell->workstation()->dock_visible("pair_link"));
-    PWB_CHECK(!shell->workstation()->dock_visible("factor_refs"));
-    // The legacy well/seismic placeholder docks stay managed-but-hidden
-    // (the real two-pane lives in the science-host bottom).
-    auto* seismic_dock = shell->workstation()->dock("seismic");
-    if (seismic_dock != nullptr) {
-        PWB_CHECK(!seismic_dock->isVisible());
-    }
-
-    // Stage 3: composer visible, factor surfaces hidden; the factor
-    // reference strip hosts in the bottom.
-    flow->request_stage("integrated_compilation");
-    PWB_CHECK(flow->snapshot().stage_value == "integrated_compilation");
-    PWB_CHECK(!input_dock->isVisible());
-    PWB_CHECK_MSG(shell->workstation()->dock_visible("factor_refs"),
-                  "stage3 did not raise the 单因素参考 dock");
-    auto* refs_dock = shell->workstation()->dock("factor_refs");
-    PWB_CHECK(refs_dock != nullptr);
-    PWB_CHECK(refs_dock->widget() != nullptr &&
-              refs_dock->widget()->findChild<QWidget*>(
-                  "FactorReferenceStrip") != nullptr);
-    if (auto* page = shell->mapping_page()) {
-        if (page->dock_manager() != nullptr) {
-            PWB_CHECK(page->dock_manager()->is_panel_visible("composer"));
-            // bottom hosts the stage-3 factor reference strip.
-            PWB_CHECK(page->dock_manager()->is_panel_visible("bottom"));
-        }
-    }
-
-    // Stage 1: prediction context — 井震两联 dock 抬起，split 在 dock
-    // 宿主内。
-    flow->request_stage("facies_calibration");
-    PWB_CHECK_MSG(shell->workstation()->dock_visible("pair_link"),
-                  "stage1 did not raise the 井震两联 dock");
-    auto* pair_dock = shell->workstation()->dock("pair_link");
-    PWB_CHECK(pair_dock != nullptr);
-    PWB_CHECK(pair_dock->widget() != nullptr &&
-              pair_dock->widget()->findChild<QWidget*>(
-                  "PredictionBottomSplit") != nullptr);
-    // The seismic/well docks carry no real panel factory in this
-    // composition — a stage profile must not present their
-    // "(占位页, 待实现)" placeholder as the stage's work surface (#1450):
-    // the profile asks for visible, the frame keeps a factoryless dock
-    // hidden.
-    if (seismic_dock != nullptr) {
-        PWB_CHECK(!seismic_dock->isVisible());
-        PWB_CHECK(!shell->workstation()->has_panel_factory("seismic"));
-    }
-    PWB_CHECK(!input_dock->isVisible());
-
-    // Structural performance assertion: 3 stage switches did not rebuild
-    // the QGIS canvas (visibility-only application; the stages.py
-    // contract).
-    QgsMapCanvas* canvas_after =
-        window.findChild<QgsMapCanvas*>(QStringLiteral("session-map-canvas"));
-    PWB_CHECK(canvas_after == canvas_before);
-
-    // Session authority: the stage switch reached ProjectSession.
+    // Session authority: the mode switch reached ProjectSession through
+    // the one stage-write seam (CONV-27 wiring).
+#ifdef PWB_WITH_CONV_27
     PWB_CHECK(window.session()->mapping_stage().has_value());
     PWB_CHECK(*window.session()->mapping_stage() == "facies_calibration");
+#endif
 }
 
 void check_workspace_stage_coupling(MainWindow& window) {
-    // M2 (D1): workspaces 1/2/3 ARE the stages; 数据管理/验证 never rewrite
-    // the stage authority; stage.goto lands on the matching workspace.
+    // Two-page shell (D1): the three stages are 编图 modes — the mode.*
+    // commands / stage_apply seam are the only stage writers; page
+    // entry never rewrites the stage authority.
     AppShell* shell = window.appShell();
     auto& registry = pwb::ui_shell::command_registry();
-    window.stageFlow()->request_stage("integrated_compilation");
+    shell->request_authoring_mode(
+        pwb::tool_policy::MappingStage::IntegratedCompilation);
 
-    // 数据管理 / 验证: page switches, stage untouched.
+    // 数据管理: page switch leaves the stage untouched.
     shell->navigate_workspace(0);
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
               pwb::app::WorkspaceHostWidget::kPageData);
+#ifdef PWB_WITH_CONV_27
     PWB_CHECK(window.session()->mapping_stage().has_value());
-    PWB_CHECK(*window.session()->mapping_stage() == "integrated_compilation");
-    shell->navigate_workspace(4);
+    PWB_CHECK(*window.session()->mapping_stage() ==
+              "integrated_compilation");
+#endif
+    // 验证面退役 —— 诚实缺席，页栈/阶段均不动。
+    shell->show_validation_dock();
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
-              pwb::app::WorkspaceHostWidget::kPageValidation);
-    PWB_CHECK(*window.session()->mapping_stage() == "integrated_compilation");
+              pwb::app::WorkspaceHostWidget::kPageData);
 
-    // Workspace 1 writes the stage authority (ws → stage direction).
+    // 编图页进入不写 stage —— 页内模式镜像当前 stage（综合编图）。
     shell->navigate_workspace(1);
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
-              pwb::app::WorkspaceHostWidget::kPageScience);
+              pwb::app::WorkspaceHostWidget::kPageAuthoring);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 1);
+    PWB_CHECK(shell->authoring_mode() ==
+              pwb::tool_policy::MappingStage::IntegratedCompilation);
+
+    // Mode switch writes the stage authority (mode → stage direction).
+    shell->request_authoring_mode(
+        pwb::tool_policy::MappingStage::FaciesCalibration);
+#ifdef PWB_WITH_CONV_27
     PWB_CHECK(*window.session()->mapping_stage() == "facies_calibration");
+#endif
     PWB_CHECK(shell->ribbon()->current_workspace() == 1);
 
-    // Reverse sync (stage → ribbon): a stage write from another surface
-    // mirrors the ribbon tab while the science host page is current —
-    // and the blocked signal means no workspaceActivated loop fires.
-    window.stageFlow()->request_stage("constraint_factor");
-    PWB_CHECK(shell->ribbon()->current_workspace() == 2);
+    // Reverse sync (stage → mode): a stage write from another surface
+    // mirrors the in-page mode while the 编图 page is current.
+    shell->sync_workspace_for_stage("constraint_factor");
+    PWB_CHECK(shell->ribbon()->current_workspace() == 1);
+    PWB_CHECK(shell->authoring_mode() ==
+              pwb::tool_policy::MappingStage::ConstraintFactor);
 
-    // stage.goto command: stage AND workspace both move (D1).
-    const auto* goto_cmd = registry.get("stage.goto.compilation");
-    PWB_CHECK(goto_cmd != nullptr && goto_cmd->callback != nullptr);
-    goto_cmd->callback();
-    PWB_CHECK(window.stageFlow()->snapshot().stage_value ==
-              "integrated_compilation");
-    PWB_CHECK(shell->ribbon()->current_workspace() == 3);
-    PWB_CHECK(*window.session()->mapping_stage() == "integrated_compilation");
-
-    // nav.workspace.* command: workspace moves without a stage write for
-    // the non-scientific targets.
-    const auto* nav_cmd = registry.get("nav.workspace.data");
-    PWB_CHECK(nav_cmd != nullptr && nav_cmd->callback != nullptr);
-    nav_cmd->callback();
-    PWB_CHECK(shell->ribbon()->current_workspace() == 0);
-    PWB_CHECK(*window.session()->mapping_stage() == "integrated_compilation");
-}
-
-void check_user_preference_override(MainWindow& window) {
-    AppShell* shell = window.appShell();
-    auto* flow = window.stageFlow();
-    flow->request_stage("constraint_factor");
-    auto* seismic_dock = shell->workstation()->dock("seismic");
-    if (seismic_dock == nullptr) return;  // capability-off degrade
-    PWB_CHECK(!seismic_dock->isVisible());
-    // A user override cannot resurrect a factoryless placeholder either
-    // — the honest surface is hidden until a real panel factory joins
-    // (#1450). The override itself round-trips through the preference
-    // store; assert it against a dock WITH a factory instead (tasks).
-    flow->set_panel_visible("workstation.seismic", true);
-    PWB_CHECK(!seismic_dock->isVisible());
-    auto* tasks_dock = shell->workstation()->dock("tasks");
-    if (tasks_dock != nullptr
-        && shell->workstation()->has_panel_factory("tasks")) {
-        flow->set_panel_visible("workstation.tasks", false);
-        PWB_CHECK(!tasks_dock->isVisible());
-        flow->request_stage("integrated_compilation");
-        flow->request_stage("constraint_factor");
-        PWB_CHECK(!tasks_dock->isVisible());
-        flow->reset_stage_preferences();
-    }
-}
-
-void check_task_center_provider(MainWindow& window) {
-#ifdef PWB_WITH_CONV_30
-    AppShell* shell = window.appShell();
-    auto* center = shell->workstation()->task_center();
-    PWB_CHECK(center != nullptr);
-    // The provider seam is bound: refresh() runs without a scheduler
-    // (empty snapshot is honest, not a crash) and the model responds.
-    center->refresh();
-    center->shutdown();
-    center->refresh();  // post-shutdown refresh stays safe
-#endif
-    (void)window;
+    // mode.* command callback: stage AND page both move (D1).
+    const auto* mode_cmd = registry.get("mode.author");
+    PWB_CHECK(mode_cmd != nullptr && mode_cmd->callback != nullptr);
+    mode_cmd->callback();
+    PWB_CHECK(shell->ribbon()->current_workspace() == 1);
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageAuthoring);
+    PWB_CHECK(shell->authoring_mode() ==
+              pwb::tool_policy::MappingStage::IntegratedCompilation);
 }
 
 void check_map_object_identity(MainWindow& window) {
@@ -391,11 +284,9 @@ int main(int argc, char** argv) {
         window.show();
         check_stage_flow_installed(window);
         check_command_registry(window);
-        check_stage_switch_and_layout(window);
+        check_mode_switch_and_identity(window);
         check_workspace_stage_coupling(window);
         check_map_object_identity(window);
-        check_user_preference_override(window);
-        check_task_center_provider(window);
         check_palette_popup(window);
 
 #ifdef PWB_WITH_DATA_INTEGRATION
@@ -412,49 +303,41 @@ int main(int argc, char** argv) {
             root["mapping_workspace"]["current_stage"] =
                 "integrated_compilation";
             window.restoreStageFromProject();
-            PWB_CHECK(window.stageFlow()->snapshot().stage_value ==
+            PWB_CHECK(window.session()->mapping_stage().has_value());
+            PWB_CHECK(*window.session()->mapping_stage() ==
                       "integrated_compilation");
             // Unknown value: the codec lenient-falls-back to stage 1
             // (workspace state.cpp) — the restore applies that fallback,
             // it does NOT keep the previous stage.
             root["mapping_workspace"]["current_stage"] = "stage_four";
             window.restoreStageFromProject();
-            PWB_CHECK(window.stageFlow()->snapshot().stage_value ==
+            PWB_CHECK(*window.session()->mapping_stage() ==
                       "facies_calibration");
         } else {
-            // No project: the snapshot reports the honest no-project state
-            // and the restore is a no-op.
-            PWB_CHECK(!window.stageFlow()->snapshot().project_open);
-            const auto before =
-                window.stageFlow()->snapshot().stage_value;
+            // No project: the restore is a no-op on the session.
+            const auto before = window.session()->mapping_stage();
             window.restoreStageFromProject();
-            PWB_CHECK(window.stageFlow()->snapshot().stage_value == before);
+            PWB_CHECK(window.session()->mapping_stage() == before);
         }
 #endif
     }
 
-    // Second window: idempotent re-registration (same-id replace) and an
-    // independent controller — the global registry and the per-window
-    // stage state must not interfere. After the window's destruction the
-    // process-global registry must no longer hold its closures (a
-    // dangling-callback palette invocation would be a UAF).
+    // Second window: an independent shell/mode state — the global
+    // registry and the per-window stage authority must not interfere.
     {
         MainWindow second;
         second.show();
         check_stage_flow_installed(second);
-        second.stageFlow()->request_stage("constraint_factor");
-        PWB_CHECK(second.stageFlow()->snapshot().stage_value ==
-                      "constraint_factor");
+        second.appShell()->request_authoring_mode(
+            pwb::tool_policy::MappingStage::ConstraintFactor);
+        PWB_CHECK(second.appShell()->authoring_mode() ==
+                  pwb::tool_policy::MappingStage::ConstraintFactor);
     }
-    // The window is destroyed: the second-window command registrations
-    // were unregistered (destroyed hook), so a with-context evaluate on
-    // the survivors stays safe.
+    // The window is destroyed: the retired stage_flow ids were never
+    // registered in the first place — they stay absent.
     {
-        pwb::ui_shell::CommandContext context;
-        context.mapping_stage = "constraint_factor";
-        const auto verdict = pwb::ui_shell::command_registry().evaluate(
-            "panel.toggle.reference", &context);
-        PWB_CHECK(!verdict.enabled || verdict.reason.empty());
+        PWB_CHECK(pwb::ui_shell::command_registry().get(
+                      "panel.toggle.reference") == nullptr);
     }
 
     pwb::qgis::QgisRuntime::release();

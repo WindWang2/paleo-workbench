@@ -31,48 +31,18 @@ namespace {
 void check_single_data_page(MainWindow& window) {
     AppShell* shell = window.appShell();
     PWB_CHECK_MSG(shell != nullptr, "AppShell missing");
-    auto* workspace = shell->data_workspace();
-    PWB_CHECK_MSG(workspace != nullptr, "management workspace missing");
+    // 界面框架收敛：VizE 数据页 / 选择总线 / 预览面板退役出界面
+    // （功能保留在项目内）—— accessor 诚实返回空。
+    PWB_CHECK_MSG(shell->data_workspace() == nullptr,
+                  "retired data workspace still mounted");
+    // 两页壳第 0 页 = 数据管理页（列表 + 信息）。
+    PWB_CHECK_MSG(shell->data_page() != nullptr,
+                  "data management page missing");
 
-    // The hub's workspace was ADOPTED by the composed page: its parent is
-    // the VizEDataPage (never the hub stack), and the hub submodule slot
-    // holds that composite.
-    auto* page = qobject_cast<pwb::viz_e::VizEDataPage*>(workspace->parent());
-    PWB_CHECK_MSG(page != nullptr,
-                  "management workspace was not adopted by a VizEDataPage");
-    PWB_CHECK(page->workspace() == workspace);
-    PWB_CHECK_MSG(shell->findChild<QDockWidget*>("viz-e-data-dock") == nullptr,
-                  "duplicate data dock still installed next to the shell page");
-
-    // Single real asset-selection state, bound into the workspace.
-    auto* bus = workspace->selection_bus();
-    PWB_CHECK_MSG(bus != nullptr, "asset selection bus not bound");
-    PWB_CHECK(!bus->current_asset().has_value());
-    PWB_CHECK(bus->assets().empty());
-
-    // Format-family targets registered (json_tree/media hooks complete the
-    // page's capability set alongside the native text/table/image/pdf).
-    auto* reader = workspace->reader_panel();
-    PWB_CHECK(reader != nullptr);
-    PWB_CHECK(reader->findChild<pwb::ui_pages_preview::JsonTreePreviewWidget*>()
-              != nullptr);
-    PWB_CHECK(reader->findChild<pwb::ui_pages_preview::MediaPreviewWidget*>()
-              != nullptr);
-    // Loading cancel affordance armed (取消 in-flight preview).
-    PWB_CHECK(reader->has_cancel_hook());
-
-    // D→E seismic presenter registered process-wide (dependency state is
-    // surfaced through the honest-unavailable path, never hidden).
-    bool seismic_registered = false;
-    for (const auto& status : pwb::viz_e::registered_presenters()) {
-        if (status.kind == "seismic") seismic_registered = true;
-    }
-    PWB_CHECK_MSG(seismic_registered, "seismic presenter not registered");
-
-    // Project-refresh notification without a store: honest empty state,
-    // idempotent (no crash, no phantom rows).
+    // Project-refresh notification without a bound workspace: honest
+    // no-op, idempotent (no crash on the retired surface).
     pwb::closure_preview::notify_project_store_changed();
-    PWB_CHECK(bus->assets().empty());
+    pwb::closure_preview::notify_project_store_changed();
 }
 
 }  // namespace

@@ -125,6 +125,15 @@ void RibbonBar::set_quick_access_actions(const QuickAccessActions& actions) {
 }
 
 void RibbonBar::set_command_action(const QString& command_id, QAction* action) {
+    // Remember the binding so context groups injected later (编图 mode
+    // groups land via set_context_group) still resolve it — see the
+    // header note on command_bindings_.
+    const std::string key = command_id.toStdString();
+    if (action != nullptr) {
+        command_bindings_[key] = action;
+    } else {
+        command_bindings_.erase(key);
+    }
     for_each_group([&](GroupWidgets& group) {
         for (auto& command : group.commands) {
             if (command.id != command_id) continue;
@@ -175,7 +184,7 @@ QWidget* RibbonBar::band_trailing_host() const { return band_trailing_; }
 void RibbonBar::set_band_trailing(QWidget* widget) {
     if (band_trailing_ == nullptr || widget == nullptr) return;
     // 宿主控件只有一个实例 — 每个工作区共享同一尾部槽位（层位选择器
-    // 在所有五页常驻，prototype 行为）。
+    // 在两页常驻，prototype 行为）。
     auto* host_layout = qobject_cast<QHBoxLayout*>(band_trailing_->layout());
     if (host_layout == nullptr) return;
     while (auto* item = host_layout->takeAt(0)) {
@@ -278,6 +287,19 @@ void RibbonBar::set_context_group(
     context.key = key;
     context.separator = create_group_separator();
     context.group = build_group(spec);
+    // Apply stored bindings: commands injected after set_command_action
+    // would otherwise stay placeholder-routed (commandTriggered) even
+    // though a governed QAction exists (D4 single identity).
+    for (auto& command : context.group.commands) {
+        const auto binding = command_bindings_.find(command.id.toStdString());
+        if (binding == command_bindings_.end() ||
+            binding->second == nullptr) {
+            continue;
+        }
+        command.bound_action = binding->second;
+        command.button->setDefaultAction(binding->second);
+        QObject::disconnect(command.clicked_connection);
+    }
     // Insert in front of the trailing stretch: the static groups stay
     // left-packed and never move (R:33 layout stability — the stretch
     // absorbs the width change).

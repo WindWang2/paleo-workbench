@@ -40,24 +40,20 @@ int overflow_count(const RibbonWorkspaceSpec& spec) {
 // ---------------------------------------------------------------- registry
 
 PWB_TEST(workspace_registry_fixed_order) {
-    CHECK(kWorkspaceCount == 5);
-    CHECK(kWorkspaceOrder.size() == 5);
+    // Two-page shell: 数据管理 / 编图 — the three stages are modes
+    // inside 编图 (authoring_mode_* below).
+    CHECK(kWorkspaceCount == 2);
+    CHECK(kWorkspaceOrder.size() == 2);
     const Workspace expected[] = {
-        Workspace::DataManagement,      Workspace::IntelligentPrediction,
-        Workspace::ConstraintFactor,    Workspace::IntegratedCompilation,
-        Workspace::Validation,
+        Workspace::DataManagement,
+        Workspace::Authoring,
     };
     for (int i = 0; i < kWorkspaceCount; ++i) {
         CHECK(kWorkspaceOrder[static_cast<size_t>(i)] == expected[i]);
     }
-    CHECK(std::string(workspace_label(Workspace::DataManagement)) == "数据管理");
-    CHECK(std::string(workspace_label(Workspace::IntelligentPrediction)) ==
-          "1 智能预测");
-    CHECK(std::string(workspace_label(Workspace::ConstraintFactor)) ==
-          "2 约束与单因素");
-    CHECK(std::string(workspace_label(Workspace::IntegratedCompilation)) ==
-          "3 综合编图");
-    CHECK(std::string(workspace_label(Workspace::Validation)) == "验证");
+    CHECK(std::string(workspace_label(Workspace::DataManagement)) ==
+          "数据管理");
+    CHECK(std::string(workspace_label(Workspace::Authoring)) == "编图");
 
     // id round-trip + tolerant lookups.
     for (const auto workspace : kWorkspaceOrder) {
@@ -68,39 +64,75 @@ PWB_TEST(workspace_registry_fixed_order) {
     }
     CHECK(!workspace_from_id("nope").has_value());
     CHECK(!workspace_from_label("nope").has_value());
+    // Retired five-workspace ids never resurrect.
+    CHECK(!workspace_from_id("predict").has_value());
+    CHECK(!workspace_from_id("validation").has_value());
 }
 
 PWB_TEST(workspace_stage_mapping) {
-    // The middle three workspaces ARE stage views (D1); 数据管理/验证
-    // have no stage — entering them must not rewrite the stage.
+    // D1 preserved: NEITHER page rewrites the stage — the 编图 modes do
+    // it through the mode.* toggle commands.
     CHECK(!workspace_stage(Workspace::DataManagement).has_value());
-    CHECK(!workspace_stage(Workspace::Validation).has_value());
-    CHECK(workspace_stage(Workspace::IntelligentPrediction) ==
-          MappingStage::FaciesCalibration);
-    CHECK(workspace_stage(Workspace::ConstraintFactor) ==
-          MappingStage::ConstraintFactor);
-    CHECK(workspace_stage(Workspace::IntegratedCompilation) ==
-          MappingStage::IntegratedCompilation);
-
+    CHECK(!workspace_stage(Workspace::Authoring).has_value());
+    // Every stage lives inside 编图 as a mode.
     CHECK(workspace_for_stage(MappingStage::FaciesCalibration) ==
-          Workspace::IntelligentPrediction);
+          Workspace::Authoring);
     CHECK(workspace_for_stage(MappingStage::ConstraintFactor) ==
-          Workspace::ConstraintFactor);
+          Workspace::Authoring);
     CHECK(workspace_for_stage(MappingStage::IntegratedCompilation) ==
-          Workspace::IntegratedCompilation);
+          Workspace::Authoring);
+}
+
+PWB_TEST(authoring_mode_vocabulary) {
+    // mode.* toggle command ids ⇄ MappingStage (kStageOrder coverage).
+    for (const auto stage : pwb::tool_policy::kStageOrder) {
+        const char* id = authoring_mode_command_id(stage);
+        CHECK(id != nullptr);
+        const auto parsed = authoring_mode_for_command(id);
+        CHECK(parsed.has_value() && *parsed == stage);
+    }
+    CHECK(std::string(
+              authoring_mode_command_id(MappingStage::FaciesCalibration)) ==
+          "mode.predict");
+    CHECK(std::string(
+              authoring_mode_command_id(MappingStage::ConstraintFactor)) ==
+          "mode.factor");
+    CHECK(std::string(
+              authoring_mode_command_id(
+                  MappingStage::IntegratedCompilation)) == "mode.author");
+    CHECK(!authoring_mode_for_command("nope").has_value());
+
+    // Every mode projects a non-empty group set; the toggle ids are
+    // declared in the 编图 static band (group author_mode).
+    for (const auto stage : pwb::tool_policy::kStageOrder) {
+        const auto groups = authoring_mode_groups(stage);
+        CHECK(!groups.empty());
+        for (const auto& group : groups) {
+            CHECK(!group.commands.empty());
+            CHECK(!group.id.empty());
+            CHECK(!group.label.empty());
+        }
+    }
+    CHECK(find_group(Workspace::Authoring, "author_mode") != nullptr);
+    CHECK(find_command("mode.predict") != nullptr);
+    // The retired stage-workspace commands live in the mode groups —
+    // the global lookup still resolves them.
+    CHECK(find_command("predict.run") != nullptr);
+    CHECK(find_command("factor.compute") != nullptr);
+    CHECK(find_command("map.select") != nullptr);
 }
 
 // ---------------------------------------------------------------- table
 
 PWB_TEST(command_group_table_structure) {
     const auto& specs = workspace_specs();
-    CHECK(specs.size() == 5);
+    CHECK(specs.size() == 2);
     for (size_t i = 0; i < specs.size(); ++i) {
         CHECK(specs[i].workspace == kWorkspaceOrder[i]);
     }
-    // Group counts mirror the prototype's five pages (main.cpp:200-205):
-    // 5 / 4 / 5 / 5 / 5 groups, every group non-empty with a label.
-    const size_t expected_groups[] = {5, 4, 5, 5, 5};
+    // 数据管理 5 组原样保留；编图静态带 = 编图模式 toggle 组 + 常驻
+    // 输出组（模式的命令集在 authoring_mode_groups，按模式注入）。
+    const size_t expected_groups[] = {5, 2};
     for (size_t i = 0; i < specs.size(); ++i) {
         CHECK(specs[i].groups.size() == expected_groups[i]);
         for (const auto& group : specs[i].groups) {
@@ -111,18 +143,18 @@ PWB_TEST(command_group_table_structure) {
     }
     // Lookup by workspace + id, and global by id.
     CHECK(find_command(Workspace::DataManagement, "data.import") != nullptr);
-    CHECK(find_command(Workspace::Validation, "data.import") == nullptr);
-    CHECK(find_command("verify.run") != nullptr);
+    CHECK(find_command(Workspace::Authoring, "data.import") == nullptr);
+    CHECK(find_command(Workspace::Authoring, "mode.predict") != nullptr);
     CHECK(find_command("no.such") == nullptr);
-    CHECK(find_group(Workspace::ConstraintFactor, "factor_contour") !=
-          nullptr);
-    CHECK(find_workspace_spec("validation") != nullptr);
+    CHECK(find_group(Workspace::Authoring, "map_output") != nullptr);
+    CHECK(find_workspace_spec("authoring") != nullptr);
     CHECK(find_workspace_spec("nope") == nullptr);
 }
 
 PWB_TEST(command_table_integrity) {
-    // Healthy table: unique ids, one primary per workspace, the declared
-    // primary resolves to a Primary-kind command.
+    // Healthy table: unique ids (mode groups share the pool), one
+    // primary per workspace spec, the declared primary resolves to a
+    // Primary-kind command.
     const auto problems = table_integrity_problems();
     for (const auto& problem : problems) {
         std::fprintf(stderr, "  integrity: %s\n", problem.c_str());
@@ -132,10 +164,7 @@ PWB_TEST(command_table_integrity) {
     // The per-workspace default primary actions (R:29).
     const auto& specs = workspace_specs();
     CHECK(specs[0].primary_command_id == "data.import");
-    CHECK(specs[1].primary_command_id == "predict.run");
-    CHECK(specs[2].primary_command_id == "factor.compute");
-    CHECK(specs[3].primary_command_id == "map.export");
-    CHECK(specs[4].primary_command_id == "verify.run");
+    CHECK(specs[1].primary_command_id == "map.export");
     for (const auto& spec : specs) {
         const auto* primary = find_command(spec.primary_command_id);
         CHECK(primary != nullptr);
@@ -148,6 +177,20 @@ PWB_TEST(command_table_integrity) {
         }
         CHECK(primaries == 1);
     }
+    // Mode primaries stay distinct: 智能预测/单因素 each declare one in
+    // their mode set; 编图 mode's primary is the static map.export.
+    const auto count_primaries = [](MappingStage stage) {
+        int n = 0;
+        for (const auto& group : authoring_mode_groups(stage)) {
+            for (const auto& command : group.commands) {
+                if (command.kind == CommandKind::Primary) ++n;
+            }
+        }
+        return n;
+    };
+    CHECK(count_primaries(MappingStage::FaciesCalibration) == 1);
+    CHECK(count_primaries(MappingStage::ConstraintFactor) == 1);
+    CHECK(count_primaries(MappingStage::IntegratedCompilation) == 0);
 }
 
 PWB_TEST(command_table_flags) {
@@ -162,12 +205,21 @@ PWB_TEST(command_table_flags) {
     CHECK(snap->kind == CommandKind::Toggle);
 
     const auto& specs = workspace_specs();
-    for (const auto& spec : specs) {
-        CHECK(overflow_count(spec) >= 3);  // 次级动作有溢出候选
-        CHECK(command_count(spec) >= 8);   // 每区命令面足够覆盖旧菜单
+    // 数据管理带保持原密度；编图静态带刻意轻（模式组 + 输出组）——
+    // 命令面的大头在按模式注入的上下文组里。
+    CHECK(overflow_count(specs[0]) >= 3);
+    CHECK(command_count(specs[0]) >= 8);
+    CHECK(command_count(specs[1]) >= 5);
+    for (const auto stage : pwb::tool_policy::kStageOrder) {
+        int mode_commands = 0;
+        for (const auto& group : authoring_mode_groups(stage)) {
+            mode_commands += static_cast<int>(group.commands.size());
+        }
+        CHECK(mode_commands >= 8);
     }
     // M6: every command carries an icon asset (the declared map.opacity
-    // gap closed with rb-opacity.svg in the repo set).
+    // gap closed with rb-opacity.svg in the repo set) — mode groups
+    // included (the aggregate scan covers them).
     const auto gaps = commands_without_icon();
     CHECK(gaps.empty());
 }

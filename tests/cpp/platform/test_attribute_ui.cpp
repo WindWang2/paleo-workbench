@@ -1,11 +1,11 @@
 // platform.attribute_ui — M1 end-to-end in the REAL MainWindow with the
-// real B store, real E kernels and D's slice viewer (no substitutes):
-// open a project that carries a PWBVOL1 version, run an attribute through
-// MainWindow::runAttribute (phase 4: synchronous QgsProcessingRegistry run
-// + CatalogResultPublisher into B), reach a durable success with a
-// published version, then display that version in the seismic dock via
-// openVolumeVersion and assert the viewer reached the ok state with a
-// real slice.
+// real B store, real E kernels and the native seismic volume service
+// (no substitutes): open a project that carries a PWBVOL1 version, run
+// an attribute through MainWindow::runAttribute (phase 4: synchronous
+// QgsProcessingRegistry run + CatalogResultPublisher into B), reach a
+// durable success with a published version, then open that version
+// through SeismicVolumeService (the slice-dock display leg is retired
+// out of the two-page shell — openVolumeVersion reports honest absence).
 
 #include <cmath>
 #include <filesystem>
@@ -22,7 +22,9 @@
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/application/adapters/volume_payload.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
-#include <pwb/seismic_viewer/seismic_slice_widget.hpp>
+#if defined(PWB_WITH_SEISMIC_SERVICE)
+#include <pwb/seismic_service/volume_service.hpp>
+#endif
 
 #include "main_window.hpp"
 
@@ -224,25 +226,34 @@ int main(int argc, char** argv) {
                           "run status=" + run_status);
         }
 
-        // Display the result in D's slice dock (the widget carries no
-        // Q_OBJECT — reach it through its object-named dock, WLE style).
+        // 两页壳层：地震视图面板已退役出界面 —— openVolumeVersion 诚实
+        // 报告无显示宿主；链路验证改走服务端开卷（与 openVolumeVersion
+        // 内部同一条 SeismicVolumeService 路径）。
         const QString view_error = window.openVolumeVersion(
             outcome.version_id);
-        PWB_CHECK_MSG(view_error.isEmpty(),
-                      view_error.toStdString());
-        QDockWidget* dock = window.findChild<QDockWidget*>("seismic-dock");
-        PWB_CHECK(dock != nullptr);
-        auto* viewer = static_cast<pwb::seismic_viewer::SeismicSliceWidget*>(
-            dock->widget());
-        PWB_CHECK(viewer != nullptr);
-        for (int spin = 0; spin < 200 && viewer->state()
-                 != pwb::seismic_viewer::ViewerState::ok; ++spin) {
-            QCoreApplication::processEvents();
-            QThread::msleep(5);
+        PWB_CHECK(!view_error.isEmpty());   // 诚实缺席，不伪造显示
+#if defined(PWB_WITH_SEISMIC_SERVICE)
+        {
+            fs::path payload_path;
+            std::string reopen_error;
+            auto reopened = pwb::application::PwbDataStore::open(
+                project_file, &reopen_error);
+            PWB_CHECK_MSG(reopened != nullptr, reopen_error);
+            auto snapshot = reopened->snapshot();
+            PWB_CHECK(snapshot.is_ok());
+            for (const auto& version :
+                 snapshot.value().catalog_versions) {
+                if (version.id.str() == outcome.version_id) {
+                    payload_path = work / version.path;
+                }
+            }
+            PWB_CHECK(!payload_path.empty());
+            pwb::seismic_service::SeismicVolumeService service;
+            std::string open_error;
+            auto opened = service.open_pwbvol(payload_path, &open_error);
+            PWB_CHECK_MSG(opened.volume != nullptr, open_error);
         }
-        PWB_CHECK_MSG(viewer->state()
-                          == pwb::seismic_viewer::ViewerState::ok,
-                      "slice viewer did not reach ok state");
+#endif
         break;
     }
     PWB_CHECK_MSG(reached_terminal, "attribute run never reached a terminal state");
@@ -310,22 +321,32 @@ int main(int argc, char** argv) {
             break;
         }
 
-        // The imported volume itself displays in the slice dock.
+        // 同样，被导入体版本经服务端开卷可达（显示面板已退役）。
         const QString view_error = window.openVolumeVersion(imported);
-        PWB_CHECK_MSG(view_error.isEmpty(),
-                      view_error.toStdString());
-        QDockWidget* dock = window.findChild<QDockWidget*>("seismic-dock");
-        auto* viewer = static_cast<pwb::seismic_viewer::SeismicSliceWidget*>(
-            dock != nullptr ? dock->widget() : nullptr);
-        PWB_CHECK(viewer != nullptr);
-        for (int spin = 0; spin < 200 && viewer->state()
-                 != pwb::seismic_viewer::ViewerState::ok; ++spin) {
-            QCoreApplication::processEvents();
-            QThread::msleep(5);
+        PWB_CHECK(!view_error.isEmpty());
+#if defined(PWB_WITH_SEISMIC_SERVICE)
+        {
+            fs::path payload_path;
+            std::string reopen_error;
+            auto reopened = pwb::application::PwbDataStore::open(
+                project_file, &reopen_error);
+            PWB_CHECK_MSG(reopened != nullptr, reopen_error);
+            auto snapshot = reopened->snapshot();
+            PWB_CHECK(snapshot.is_ok());
+            for (const auto& version :
+                 snapshot.value().catalog_versions) {
+                if (version.id.str() == imported
+                    && version.format == "PWBVOL1") {
+                    payload_path = work / version.path;
+                }
+            }
+            PWB_CHECK(!payload_path.empty());
+            pwb::seismic_service::SeismicVolumeService service;
+            std::string open_error;
+            auto opened = service.open_pwbvol(payload_path, &open_error);
+            PWB_CHECK_MSG(opened.volume != nullptr, open_error);
         }
-        PWB_CHECK_MSG(viewer->state()
-                          == pwb::seismic_viewer::ViewerState::ok,
-                      "imported volume did not reach ok state");
+#endif
     }
 #endif
 

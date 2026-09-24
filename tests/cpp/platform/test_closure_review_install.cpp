@@ -21,6 +21,7 @@
 #include <pwb/ui_review/compare_core.hpp>
 #include <pwb/ui_review/qt/qc_issue_table.hpp>
 #include <pwb/ui_review/qt/review_export_page.hpp>
+#include <pwb/ui_shell/command_registry.hpp>
 
 #include "app_shell.hpp"
 #include "closure_review_install.hpp"
@@ -69,29 +70,26 @@ int main(int argc, char** argv) {
     const fs::path project_file = work / "typical.paleo.json";
     PWB_CHECK(fs::exists(project_file));
 
-    // ---- MainWindow construction installs the binding --------------------
+    // ---- MainWindow construction: the review PAGE is retired from the
+    // two-page shell (feature code stays in the project); the installer
+    // must stay honest on the retired surface — no crash, no fake page.
     MainWindow window;
     auto* shell = window.appShell();
     PWB_CHECK_MSG(shell != nullptr, "AppShell missing");
-    auto* page = shell->review_page();
-    PWB_CHECK_MSG(page != nullptr, "review page missing");
-    // install_review_actions is idempotent — a second call (the ctor
-    // already installed with the real context) must be a harmless
-    // refresh (no duplicate binding, no crash).
+    PWB_CHECK_MSG(shell->review_page() == nullptr,
+                  "retired review page still mounted");
+    // install_review_actions is idempotent AND null-safe on the retired
+    // shell: a second call must be a harmless refresh (no duplicate
+    // binding, no crash).
+    pwb::app::closure_review::install_review_actions(shell,
+                                                     &window.context());
     pwb::app::closure_review::install_review_actions(shell,
                                                      &window.context());
 
-    // ---- openProject re-binds the page to the live document --------------
+    // ---- openProject still re-binds the document path ------------------
     const QString open_error = window.openProject(
         QString::fromStdWString(project_file.wstring()));
     PWB_CHECK_MSG(open_error.isEmpty(), open_error.toStdString());
-
-    // The installer refresh pushed the document state onto the page: the
-    // legacy report carries exactly one issue → one rendered QC row.
-    const int legacy_rows = page->qc_table()->table()->rowCount();
-    PWB_CHECK_MSG(legacy_rows >= 1,
-                  "expected the legacy report issue row on the page, got " +
-                      std::to_string(legacy_rows));
 
     // ---- the document save seam persists document-level mutations --------
     // (the store the window opened is private; the seam itself is store-
@@ -124,60 +122,23 @@ int main(int argc, char** argv) {
         PWB_CHECK(report_it->at(0).at("status") == "pass");
     }
 
-    // ---- M5: the validation gaps are installed ----------------------------
+    // ---- M5: the validation page is retired from the shell — the
+    // accessor answers honestly empty; the command vocabulary it fed
+    // (verify.*) stays registered by ribbon_commands with honest gates.
     {
-        auto* validation = shell->validation_page();
-        PWB_CHECK_MSG(validation != nullptr, "validation page missing");
-        // The placeholders became the real widgets.
-        PWB_CHECK(validation->compare_view() != nullptr);
-        PWB_CHECK(validation->review_panel() != nullptr);
-        PWB_CHECK(validation->compare_view()->objectName() ==
-                  QStringLiteral("ComparisonView"));
-        PWB_CHECK(validation->review_panel()->objectName() ==
-                  QStringLiteral("ReviewDispositionPanel"));
-        // Mode action group exists and switches the view mode (the
-        // verify.side_by_side/overlay/difference commands trigger these).
-        auto* overlay = validation->findChild<QAction*>(
-            QStringLiteral("VerifyModeOverlay"));
-        auto* side_by_side = validation->findChild<QAction*>(
-            QStringLiteral("VerifyModeSideBySide"));
-        PWB_CHECK(overlay != nullptr && side_by_side != nullptr);
-        overlay->trigger();
-        auto* compare = qobject_cast<pwb::app::ComparisonView*>(
-            validation->compare_view());
-        PWB_CHECK(compare != nullptr);
-        PWB_CHECK(compare->mode() == pwb::ui_review::CompareMode::Overlay);
-        side_by_side->trigger();
-        PWB_CHECK(compare->mode() ==
-                  pwb::ui_review::CompareMode::SideBySide);
-        // Exclusive group: only one mode checked at a time.
-        PWB_CHECK(!overlay->isChecked() && side_by_side->isChecked());
-        // F:75: no time-depth calibration in the document → the link
-        // toggle is disabled with its honest reason.
-        auto* link = validation->findChild<QAction*>(
-            QStringLiteral("VerifyLinkToggle"));
-        PWB_CHECK(link != nullptr && !link->isEnabled());
-        // Ribbon checkable bindings reference the same actions.
+        PWB_CHECK_MSG(shell->validation_page() == nullptr,
+                      "retired validation page still mounted");
         PWB_CHECK(shell->ribbon() != nullptr);
-
-        // Review panel: note is mandatory — empty note refuses the save.
-        auto* panel = qobject_cast<pwb::app::ReviewDispositionPanel*>(
-            validation->review_panel());
-        PWB_CHECK(panel != nullptr);
-        QVariantMap issue;
-        issue.insert(QStringLiteral("rule"), QStringLiteral("rule.a"));
-        issue.insert(QStringLiteral("severity"),
-                     QStringLiteral("error"));
-        issue.insert(QStringLiteral("message"),
-                     QStringLiteral("测试问题"));
-        issue.insert(QStringLiteral("key"), QStringLiteral("rule.a|f1"));
-        panel->set_selected_issue(issue);
-        PWB_CHECK(!panel->save_button()->isEnabled());  // note empty
-        panel->note_editor()->setPlainText(QStringLiteral("专家确认"));
-        PWB_CHECK(panel->save_button()->isEnabled());
-        // The original verdict text stays visible beside the draft.
-        PWB_CHECK(panel->findChild<QLabel*>(
-                      QStringLiteral("ReviewOriginalVerdict")) != nullptr);
+        auto& registry = pwb::ui_shell::command_registry();
+        for (const char* id :
+             {"verify.select_object", "verify.side_by_side",
+              "verify.link", "verify.run"}) {
+            PWB_CHECK_MSG(registry.get(id) != nullptr,
+                          std::string("verify command missing: ") + id);
+        }
+        pwb::ui_shell::CommandContext ctx;
+        ctx.mapping_stage = "integrated_compilation";
+        PWB_CHECK(!registry.evaluate("verify.side_by_side", &ctx).enabled);
     }
 
     return pwb::test::report("platform.closure_review_install");
