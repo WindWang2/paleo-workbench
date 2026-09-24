@@ -1,14 +1,12 @@
-// platform.app_shell — W5/UI-17 wiring battery, two-page shell (ribbon
-// 数据管理/编图): MainWindow's central widget is the AppShell composition
+// platform.app_shell — W5/UI-17 wiring battery, M2-updated (ribbon
+// five-workspaces): MainWindow's central widget is the AppShell composition
 // root, the ribbon chrome sits above the workstation frame, the central
-// workspace stack carries the two host pages (数据管理 / 编图), the three
-// stages are 编图 modes (request_authoring_mode writes the stage authority
-// through the host seam), 验证 lives in the "validation" dock
-// (show_validation_dock), navigate_workspace is the navigation authority,
-// navigate_to survives as the legacy routing seam (hub 0 → 数据管理页,
-// canvas → 编图页·综合编图模式, review → 验证 dock), the palette
-// pops/dismisses, and a second window lifecycle exercises the global
-// shortcut-registry re-registration path.
+// workspace stack carries the three host pages (数据管理 / 科学宿主 / 验证),
+// navigate_workspace is the navigation authority, navigate_to survives as
+// the legacy routing seam (hub 0 → workspace 0, 编图 canvas → workspace 3,
+// review → workspace 4, well/seismic/viz stay on the 功能页 dock), the
+// palette pops/dismisses, and a second window lifecycle exercises the
+// global shortcut-registry re-registration path.
 
 #include <QDockWidget>
 #include <QLabel>
@@ -51,8 +49,6 @@ namespace { long test_pid() {
 
 #include "app_context.hpp"
 #include "app_shell.hpp"
-#include "data_management_page.hpp"
-#include "qgis_authoring_page.hpp"
 #include "validation_workspace_page.hpp"
 #include "main_window.hpp"
 
@@ -69,48 +65,62 @@ void check_shell(MainWindow& window) {
                   "AppShell missing — PWB_WITH_APP_SHELL not wired");
     PWB_CHECK(window.centralWidget() == shell);
 
-    // QGIS-native two-page frame: ribbon + status bar + 数据管理/编图 host.
+    PWB_CHECK(shell->workstation() != nullptr);
+    PWB_CHECK(shell->composite() != nullptr);
     PWB_CHECK(shell->status_bar() != nullptr);
+    PWB_CHECK(shell->page_stack() != nullptr);
+    // M2: the ribbon chrome + the three-page workspace host.
     PWB_CHECK(shell->ribbon() != nullptr);
     PWB_CHECK(shell->workspace_host() != nullptr);
-    PWB_CHECK(shell->workspace_host()->count() == 2);
-    PWB_CHECK(shell->data_page() != nullptr);
-    PWB_CHECK(shell->authoring_page() != nullptr);
-    PWB_CHECK(shell->workspace_host()->widget(
-                  pwb::app::WorkspaceHostWidget::kPageData) ==
-              static_cast<QWidget*>(shell->data_page()));
-    PWB_CHECK(shell->workspace_host()->widget(
-                  pwb::app::WorkspaceHostWidget::kPageAuthoring) ==
-              static_cast<QWidget*>(shell->authoring_page()));
+    PWB_CHECK(shell->workspace_host()->count() == 3);
+    // M3 面板化改订: 科学宿主 = 纯 QGIS 画布页；阶段面板是底部阶段行
+    // 的独立 dock（可悬浮/停靠/tab 化，navigate_workspace 投影成员）。
+    auto* science_page = shell->workspace_host()->findChild<QWidget*>(
+        QStringLiteral("ScienceHostPage"));
+    PWB_CHECK(science_page != nullptr);
+    for (const char* dock_id :
+         {"data_preview", "data_history", "data_relations", "pair_link",
+          "predict_task", "seismic_predict", "crosswell", "data_prep",
+          "strat_compare", "seq_frame", "factor_refs", "data_props",
+          "data_lineage"}) {
+        PWB_CHECK_MSG(shell->workstation()->dock(dock_id) != nullptr,
+                      std::string("stage dock missing: ") + dock_id);
+    }
+    PWB_CHECK(shell->validation_page() != nullptr);
+    PWB_CHECK(shell->validation_page()->findChild<QWidget*>(
+                  "ValidationRunQc") != nullptr);
+    // M5-3: hub 轴已拆 —— page_stack_ 只剩「编图工具」dock 的单页内容
+    // （mapping_page_）；kPageIndex*/hub_names 保留为路由词汇与
+    // deferred-binding flush 键（ui_shell oracle 冻结数据不动）。
+    PWB_CHECK(shell->page_stack() != nullptr);
+    PWB_CHECK(shell->page_stack()->count() == 1);
 
-    // Retired feature surfaces answer honestly empty (feature code stays
-    // in the project; nothing is fabricated into the shell).
-    PWB_CHECK(shell->workstation() == nullptr);
-    PWB_CHECK(shell->composite() == nullptr);
-    PWB_CHECK(shell->page_stack() == nullptr);
-    PWB_CHECK(shell->validation_page() == nullptr);
-    PWB_CHECK(shell->map_decor_panel() == nullptr);
+    // The session canvas is injected into the composite document (the
+    // science host page — the canvas-injection contract survives the
+    // central-widget swap).
+    PWB_CHECK(window.findChild<QgsMapCanvas*>() != nullptr);
 
-    // The session canvas is the 编图 page's central widget (the QGIS
-    // canvas authority survives the page host; the page is an inner
-    // QMainWindow with the message bar over the canvas).
-    auto* canvas = window.findChild<QgsMapCanvas*>();
-    PWB_CHECK(canvas != nullptr);
-    PWB_CHECK(shell->authoring_page()->canvas() == canvas);
-    PWB_CHECK(shell->authoring_page()->message_bar() != nullptr);
-
-    // The layer-tree dock is adopted into the 编图 page's own dock area
-    // (QGIS idiom — docks belong to the map window, not the outer host).
-    auto* layer_dock =
-        window.findChild<QDockWidget*>(QStringLiteral("layer-tree-dock"));
-    PWB_CHECK(layer_dock != nullptr);
-    PWB_CHECK(layer_dock->parentWidget() ==
-              static_cast<QWidget*>(shell->authoring_page()));
+    // Composite sub-panels dock through the workstation frame.
+    for (const char* dock_id : {"hub", "composite_layer", "composite_input",
+                                "composite_linked", "facies_palette",
+                                "mapping_stage"}) {
+        PWB_CHECK_MSG(shell->workstation()->dock(dock_id) != nullptr,
+                      std::string("dock missing: ") + dock_id);
+    }
 #ifdef PWB_WITH_CONV_27
+    auto* layer_dock = shell->workstation()->dock("composite_layer");
     if (window.layerPanel() != nullptr) {
         PWB_CHECK(static_cast<const void*>(layer_dock->widget()) ==
                   static_cast<const void*>(window.layerPanel()));
     }
+    // The retired prototype LayerManagerPanel is deleted (no hidden
+    // second layer-list surface); the dock identity check above is the
+    // surviving contract: composite_layer hosts the native tree panel.
+
+    auto* map_toolbar = shell->composite()->map_toolbar();
+    PWB_CHECK(map_toolbar != nullptr && !map_toolbar->actions().isEmpty());
+    PWB_CHECK(map_toolbar->actions().contains(
+        window.governedAction(QStringLiteral("pan"))));
 #endif
 }
 
@@ -125,65 +135,89 @@ void check_workspace_navigation(MainWindow& window) {
 
     shell->navigate_workspace(1);
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
-              pwb::app::WorkspaceHostWidget::kPageAuthoring);
+              pwb::app::WorkspaceHostWidget::kPageScience);
     PWB_CHECK(shell->ribbon()->current_workspace() == 1);
-    // 编图模式投影跟随 stage 权威（默认 facies_calibration = 智能预测）。
-    PWB_CHECK(shell->authoring_mode() ==
-              pwb::tool_policy::MappingStage::FaciesCalibration);
+    // M3 面板化: 进 ws1 → 底部阶段行投影预测组 —— 井震两联 dock 抬起
+    // 可见；预测任务/地震预测同组 tab 成员；ws2/ws3 成员隐藏。
+    auto* host = shell->workstation()->dock_host();
+    auto* pair = shell->workstation()->dock("pair_link");
+    PWB_CHECK(pair != nullptr && pair->isVisible());
+    PWB_CHECK(host->tabifiedDockWidgets(pair).contains(
+        shell->workstation()->dock("predict_task")));
+    PWB_CHECK(host->tabifiedDockWidgets(pair).contains(
+        shell->workstation()->dock("seismic_predict")));
+    PWB_CHECK(!shell->workstation()->dock_visible("strat_compare"));
+    PWB_CHECK(!shell->workstation()->dock_visible("factor_refs"));
 
-    // 模式请求：停在编图页，模式镜像换位（写路径经宿主 stage_apply
-    // seam —— CONV_27 下还会把会话 stage 一并换位）。
-    shell->request_authoring_mode(
-        pwb::tool_policy::MappingStage::IntegratedCompilation);
+    // Workspaces 1/2/3 share the ONE science host page.
+    shell->navigate_workspace(3);
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
-              pwb::app::WorkspaceHostWidget::kPageAuthoring);
-    PWB_CHECK(shell->ribbon()->current_workspace() == 1);
-    PWB_CHECK(shell->authoring_mode() ==
-              pwb::tool_policy::MappingStage::IntegratedCompilation);
-#ifdef PWB_WITH_CONV_27
-    PWB_CHECK(window.context().session().mapping_stage() ==
-              "integrated_compilation");
-#endif
+              pwb::app::WorkspaceHostWidget::kPageScience);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 3);
+    PWB_CHECK(shell->workstation()->dock_visible("factor_refs"));
+    PWB_CHECK(!shell->workstation()->dock_visible("pair_link"));
 
-    // 验证面已退役 —— 入口诚实缺席：页栈不动，无面板伪造。
-    const int page_before_validation =
-        shell->workspace_host()->currentIndex();
-    shell->show_validation_dock();
+    shell->navigate_workspace(4);
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
-              page_before_validation);
+              pwb::app::WorkspaceHostWidget::kPageValidation);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 4);
 
     // Out-of-range navigation is ignored (Python guard parity).
     shell->navigate_workspace(99);
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
-              pwb::app::WorkspaceHostWidget::kPageAuthoring);
+              pwb::app::WorkspaceHostWidget::kPageValidation);
 
-    // hub 0 → 数据管理页 (+ in-page submodule switch)。
+    // -- legacy routing seam (M5-3: hub 轴已解散，纯工作区路由) -------------
+    QDockWidget* hub_dock = shell->workstation()->dock("hub");
+    PWB_CHECK(hub_dock != nullptr);  // 现仅为「编图工具」dock
+
+    // hub 0 → workspace 0 (+ in-page submodule switch).
     shell->navigate_to(pwb::ui_shell::kPageIndexData,
                        QStringLiteral("management"));
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
               pwb::app::WorkspaceHostWidget::kPageData);
     PWB_CHECK(shell->ribbon()->current_workspace() == 0);
 
-    // 编图 canvas → 编图页（子模块键不再携带模式语义 —— 纯路由）。
+    // 编图 canvas → workspace 3 (science host page) + 编图工具 dock raise。
     shell->navigate_to(pwb::ui_shell::kPageIndexMapping,
                        QStringLiteral("canvas"));
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
-              pwb::app::WorkspaceHostWidget::kPageAuthoring);
-    PWB_CHECK(shell->ribbon()->current_workspace() == 1);
+              pwb::app::WorkspaceHostWidget::kPageScience);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 3);
 
-    // 其余 hub 轴目标（well/seismic/viz…）一律落编图页 —— 功能面
-    // 已退役，路由只负责页归属。
+    // 编图 review → workspace 4 (验证).
+    shell->navigate_to(pwb::ui_shell::kPageIndexMapping,
+                       QStringLiteral("review"));
+    PWB_CHECK(shell->workspace_host()->currentIndex() ==
+              pwb::app::WorkspaceHostWidget::kPageValidation);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 4);
+
+    // M5-3 migrated homes: sequence → ws2 层序格架 dock；well_log → ws1；
+    // seismic → ws1 地震预测 dock；geomodel → ws4 3D 对照 tab；viz → ws0。
     shell->navigate_to(pwb::ui_shell::kPageIndexWell,
                        QStringLiteral("sequence"));
     PWB_CHECK(shell->workspace_host()->currentIndex() ==
-              pwb::app::WorkspaceHostWidget::kPageAuthoring);
+              pwb::app::WorkspaceHostWidget::kPageScience);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 2);
+    PWB_CHECK(shell->workstation()->dock_visible("seq_frame"));
+
+    shell->navigate_to(pwb::ui_shell::kPageIndexWell);
     PWB_CHECK(shell->ribbon()->current_workspace() == 1);
 
     shell->navigate_to(pwb::ui_shell::kPageIndexSeismic);
     PWB_CHECK(shell->ribbon()->current_workspace() == 1);
+    PWB_CHECK(shell->workstation()->dock_visible("seismic_predict"));
+
+    shell->navigate_to(pwb::ui_shell::kPageIndexSeismic,
+                       QStringLiteral("geomodel"));
+    PWB_CHECK(shell->ribbon()->current_workspace() == 4);
 
     shell->navigate_to(pwb::ui_shell::kPageIndexVisualization);
-    PWB_CHECK(shell->ribbon()->current_workspace() == 1);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 0);
+
+    // Out-of-range legacy navigation is ignored.
+    shell->navigate_to(99);
+    PWB_CHECK(shell->ribbon()->current_workspace() == 0);
 }
 
 }  // namespace
@@ -301,18 +335,13 @@ int main(int argc, char** argv) {
         }
         // END CPP-CLOSE-12
 
-        // -- pages: feature surfaces retired from the shell — honest
-        // nullptr for every compiled call-site (code stays in the
-        // project; nothing is instantiated into the frame).
-        PWB_CHECK(shell->home_page() == nullptr);
-        PWB_CHECK(shell->data_workspace() == nullptr);
-        PWB_CHECK(shell->mapping_page() == nullptr);
-        PWB_CHECK(shell->review_page() == nullptr);
-        PWB_CHECK(shell->visualization_page() == nullptr);
-        PWB_CHECK(shell->geomodel_page() == nullptr);
-        PWB_CHECK(shell->well_log_page() == nullptr);
-        PWB_CHECK(shell->seismic_page() == nullptr);
-        PWB_CHECK(shell->sequence_page() == nullptr);
+        // -- pages: real widgets, deferred seams honest --------------------
+        PWB_CHECK(shell->home_page() != nullptr);
+        PWB_CHECK(shell->data_workspace() != nullptr);
+        PWB_CHECK(shell->mapping_page() != nullptr);
+        PWB_CHECK(shell->review_page() != nullptr);
+        PWB_CHECK(shell->visualization_page() != nullptr);
+        PWB_CHECK(shell->geomodel_page() != nullptr);  // unavailable host
 
         // -- teardown: worker shutdown is idempotent -----------------------
         shell->shutdown_workers();

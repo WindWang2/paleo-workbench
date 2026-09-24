@@ -50,11 +50,8 @@
 #include <pwb/workflow_engine/ops.hpp>
 #endif
 
-#if defined(PWB_WITH_DATA_INTEGRATION)
-#include <pwb/application/adapters/data_store.hpp>
-#endif
-#if defined(PWB_WITH_SEISMIC_SERVICE)
-#include <pwb/seismic_service/volume_service.hpp>
+#if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
+#include <pwb/seismic_viewer/seismic_slice_widget.hpp>
 #endif
 
 #include <filesystem>
@@ -606,8 +603,7 @@ QVector<SelfCheck::Result> SelfCheck::run(const QString& source_dir) {
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_SEISMIC_VIEWER) \
     && defined(PWB_WITH_SEISMIC_ATTRIBUTES)
     {
-        // M3 chain: SEG-Y import -> attribute run -> service-side open.
-        // The slice-display leg is retired (two-page shell). The
+        // M3 chain: SEG-Y import -> attribute run -> slice display. The
         // real fixture only exists in dev trees; deployed packages skip
         // the check (like the LAS dock check above).
         Result r{QStringLiteral("seismic_chain"), true, {}};
@@ -647,50 +643,41 @@ QVector<SelfCheck::Result> SelfCheck::run(const QString& source_dir) {
                         r.passed = false;
                         r.detail = QStringLiteral("attribute run never finished");
                     } else if (r.passed) {
-                        // 界面框架收敛：地震视图面板已退役出两页壳层 ——
-                        // 链路校验改走服务端（SeismicVolumeService 元数据
-                        // 开卷），不依赖显示宿主。
-#if defined(PWB_WITH_SEISMIC_SERVICE)
-                        std::filesystem::path payload_path;
-                        if (window.context().projectStore() != nullptr) {
-                            auto snapshot =
-                                window.context().projectStore()->snapshot();
-                            if (snapshot.is_ok()) {
-                                const auto project_dir =
-                                    window.context().projectStore()
-                                        ->project_file()
-                                        .parent_path();
-                                for (const auto& v :
-                                     snapshot.value().catalog_versions) {
-                                    if (v.id.str() == imported
-                                        && v.format == "PWBVOL1") {
-                                        payload_path = project_dir / v.path;
-                                        break;
-                                    }
+                        const QString view_error = window.openVolumeVersion(imported);
+                        if (!view_error.isEmpty()) {
+                            r.passed = false;
+                            r.detail = view_error;
+                        } else {
+                            QDockWidget* seismic_dock =
+                                window.findChild<QDockWidget*>("seismic-dock");
+                            auto* slice =
+                                static_cast<pwb::seismic_viewer::SeismicSliceWidget*>(
+                                    seismic_dock != nullptr
+                                        ? seismic_dock->widget()
+                                        : nullptr);
+                            if (slice == nullptr) {
+                                r.passed = false;
+                                r.detail = QStringLiteral("seismic dock missing");
+                            } else {
+                                for (int spin = 0;
+                                     spin < 200
+                                     && slice->state()
+                                            != pwb::seismic_viewer::ViewerState::ok;
+                                     ++spin) {
+                                    QCoreApplication::processEvents();
+                                    QThread::msleep(5);
+                                }
+                                if (slice->state()
+                                    != pwb::seismic_viewer::ViewerState::ok) {
+                                    r.passed = false;
+                                    r.detail = QStringLiteral(
+                                        "slice viewer did not reach ok state");
+                                } else {
+                                    r.detail = QStringLiteral(
+                                        "import->rms->publish->view ok");
                                 }
                             }
                         }
-                        if (payload_path.empty()) {
-                            r.passed = false;
-                            r.detail = QStringLiteral(
-                                "published volume version not in catalog");
-                        } else {
-                            pwb::seismic_service::SeismicVolumeService service;
-                            std::string open_error;
-                            auto opened = service.open_pwbvol(
-                                payload_path, &open_error);
-                            if (opened.volume == nullptr) {
-                                r.passed = false;
-                                r.detail = QString::fromStdString(open_error);
-                            } else {
-                                r.detail = QStringLiteral(
-                                    "import->rms->publish->service-open ok");
-                            }
-                        }
-#else
-                        r.detail = QStringLiteral(
-                            "import->rms->publish ok (display retired)");
-#endif
                     }
                 }
             }

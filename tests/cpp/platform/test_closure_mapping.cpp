@@ -64,8 +64,6 @@ namespace { long test_pid() {
 #include "test_framework.hpp"
 
 #ifdef PWB_WITH_APP_SHELL
-#include <QDockWidget>
-#include <qgsmapcanvas.h>
 #include <pwb/qgis/qgis_runtime.hpp>
 #include <pwb/ui_map/mapping_page.hpp>
 #include <pwb/ui_shell/navigation.hpp>
@@ -261,37 +259,569 @@ int install_battery() {
     window.show();
     AppShell* shell = window.appShell();
     PWB_CHECK_MSG(shell != nullptr, "AppShell missing");
-    // 界面框架收敛：closure_mapping 安装器不接线 —— 上下文物件诚实
-    // 缺席（功能保留在项目内），preparation/mapping/验证页全部退役。
     PWB_CHECK_MSG(
         window.property("closure_mapping_context").value<QObject*>()
-            == nullptr,
-        "retired closure context still installed");
-    PWB_CHECK(shell->page_stack() == nullptr);
-    PWB_CHECK(shell->workstation() == nullptr);
-    PWB_CHECK(shell->preparation_page() == nullptr);
-    PWB_CHECK(shell->mapping_page() == nullptr);
-    // 两页壳架面：数据管理 + 编图（QGIS 画布 + 图层树 dock 收编）。
-    PWB_CHECK(shell->workspace_host() != nullptr);
-    PWB_CHECK(shell->workspace_host()->count() == 2);
-    PWB_CHECK(shell->data_page() != nullptr);
-    PWB_CHECK(shell->authoring_page() != nullptr);
-    PWB_CHECK(window.findChild<QgsMapCanvas*>() != nullptr);
-    PWB_CHECK(window.findChild<QDockWidget*>(
-                  QStringLiteral("layer-tree-dock")) != nullptr);
+            != nullptr,
+        "closure context not installed");
 
-    // -- save routing: no installed bank -> honest failure --------------
+    // -- preparation: M3 moved it into the ws2 bottom (数据制备 tab) ---------
+    // M5-3: hub 外壳已拆 —— mapping hub 不再存在；mapping_page 住在
+    // 「编图工具」dock（page_stack_ 唯一页）。
+    PWB_CHECK(shell->page_stack() != nullptr);
+    PWB_CHECK(shell->page_stack()->count() == 1);
+    // M3 (P0-2): the real PreparationPage lives in the 约束与单因素
+    // bottom stage row's 数据制备 dock — the hub slot keeps only a
+    // legacy route.
+    auto* prep_dock = shell->workstation()->dock("data_prep");
+    PWB_CHECK_MSG(prep_dock != nullptr, "stage-2 数据制备 dock missing");
+    PWB_CHECK_MSG(prep_dock->widget() != nullptr,
+                  "数据制备 dock has no content");
+    // M6: the page rides in a BottomHost (Ignored policy) inside the
+    // dock — the page itself is inside the host.
+    auto* preparation =
+        prep_dock->widget()
+            ->findChild<pwb::ui_pages_data::qt::PreparationPage*>();
+    PWB_CHECK_MSG(preparation != nullptr,
+                  "PreparationPage not adopted into the ws2 dock");
+    PWB_CHECK_MSG(preparation->objectName()
+                      == QStringLiteral("PreparationPage"),
+                  "preparation page object name");
+    // The preparation panel placeholders were replaced by the real shims.
+    PWB_CHECK(preparation->findChild<QWidget*>("run_qc_btn") != nullptr);
+    PWB_CHECK(preparation->task_panel() != nullptr);
+    PWB_CHECK(preparation->well_table_panel() != nullptr);
+    PWB_CHECK(preparation->preview_grid() != nullptr);
+    PWB_CHECK(preparation->boundary_panel() != nullptr);
+
+    // -- mapping page: the real widgets displaced the placeholders --------
+    auto* mapping_page = shell->mapping_page();
+    PWB_CHECK(mapping_page != nullptr);
+    PWB_CHECK(mapping_page->findChild<MapEditView*>() != nullptr);
+    PWB_CHECK(mapping_page->findChild<MapEditScene*>() != nullptr);
+    auto* layout_editor =
+        mapping_page->findChild<pwb::qgis::LayoutEditorPanel*>();
+    PWB_CHECK(layout_editor != nullptr);
+    // The "（未迁移）" placeholders were replaced in the dock/float
+    // registries: the page's composition slot hosts the real panel.
+    PWB_CHECK_MSG(mapping_page->center_stack()->count() == 2,
+                  "center stack: edit view + preview host");
+
+    // -- save routing: no project store bound -> honest failure -----------
     std::string error;
     PWB_CHECK(!pwb::app::closure_mapping::save_documents(&window, &error));
 
-    // BEGIN V14-COMPILATION-PUBLISH — the layout authority is not a UI
-    // surface: template instantiation + the unified exporter still
-    // run under the two-page frame (the editor panel hook is guarded).
+    // BEGIN V14-COMPILATION-PUBLISH — the composition panel's three
+    // previously-unwired surfaces (template library / preview renderer /
+    // export executor) must be live, not the honest-failure texts.
     layout_battery(window);
     // END V14-COMPILATION-PUBLISH
     return pwb::test::failure_count();
 }
 
+#ifdef PWB_WITH_FACTOR_KERNEL
+// Part 3 — V14-FACTOR real-kernel E2E through the installed product
+// surface: open a real project → 批量生成 (real WorkerHost thread + real
+// scheduler + real kernels) → 等值线初稿 → constraint/value change →
+// selective recompute → save → reopen with intact lineage.
+int factor_kernel_battery(QgsApplication& app) {
+    namespace fs = std::filesystem;
+    const fs::path tmp = fs::temp_directory_path()
+        / ("pwb_v14_factor_e2e_" + std::to_string(test_pid()));
+    fs::create_directories(tmp);
+    const fs::path project_file = tmp / "e2e.paleo.json";
+
+    Json points = Json::array();
+    for (int i = 0; i < 10; ++i) {
+        points.push_back(Json{{"well", "W" + std::to_string(i)},
+                              {"x", 100.0 + 0.1 * i},
+                              {"y", 30.0 + 0.08 * i},
+                              {"value", 12.0 + 1.7 * i}});
+    }
+    Json points2 = Json::array();
+    for (int i = 0; i < 10; ++i) {
+        points2.push_back(Json{{"well", "V" + std::to_string(i)},
+                               {"x", 100.5 + 0.09 * i},
+                               {"y", 30.2 + 0.07 * i},
+                               {"value", 40.0 - 1.3 * i}});
+    }
+    Json ring = Json::array();
+    for (int i = 0; i <= 4; ++i) {
+        const double a = i * 2.0 * std::acos(-1.0) / 4.0;
+        ring.push_back(Json::array({100.4 + 6.5 * std::cos(a),
+                                    30.3 + 6.5 * std::sin(a)}));
+    }
+    Json document = Json::object();
+    document["schema_version"] = 1;
+    document["meta"] = Json{{"name", "V14 因子 E2E"},
+                            {"project_root", "."},
+                            {"created_at", "2026-09-20T00:00:00+00:00"},
+                            {"updated_at", "2026-09-20T00:00:00+00:00"}};
+    document["coordinate"] =
+        Json{{"project_crs", "EPSG:32650"},
+             {"crs_locked", false},
+             {"display_crs", "EPSG:4326 / WGS84"}};
+    document["stratigraphy"] = Json{{"target_horizon", "C6"}};
+    document["constraint_layers"] = Json::array({Json{
+        {"id", "clayers_e2e"},
+        {"name", "约束层"},
+        {"target_horizon", "C6"},
+        {"crs", "EPSG:32650"},
+        {"lines",
+         Json::array({Json{{"id", "cline_b"},
+                           {"role", "boundary"},
+                           {"active", true},
+                           {"coordinates", ring}}})}}});
+    document["factor_map_tasks"] = Json::array({
+        Json{{"id", "factor_e2e_a"},
+             {"name", "C6 地层厚度"},
+             {"target_horizon", "C6"},
+             {"factor_type", "地层厚度"},
+             {"method", "IDW"},
+             {"status", "pending"},
+             {"source_kind", "mixed"},
+             {"parameters", Json{{"sample_points", points}}}},
+        Json{{"id", "factor_e2e_c"},
+             {"name", "C6 砂地比"},
+             {"target_horizon", "C6"},
+             {"factor_type", "砂地比"},
+             {"method", "约束IDW"},
+             {"status", "pending"},
+             {"source_kind", "mixed"},
+             {"parameters", Json{{"sample_points", points2}}}}});
+    document["paleomap_documents"] = Json::array();
+    document["contour_drafts"] = Json::array();
+    document["well_tables"] = Json::array();
+    document["resources"] = Json::array();
+    {
+        std::ofstream out(project_file, std::ios::binary | std::ios::trunc);
+        out << pwb::domain::dump_json_python_compatible(document);
+    }
+
+    const auto wait_for = [&](const std::function<bool()>& ready,
+                              const char* what) {
+        for (int i = 0; i < 3000; ++i) {  // ~30s
+            app.processEvents();
+            if (ready()) return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        std::fprintf(stderr, "TIMEOUT waiting for %s\n", what);
+        return false;
+    };
+    const auto read_document = [&]() {
+        std::ifstream in(project_file, std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        return Json::parse(text);
+    };
+
+    {
+        MainWindow window;
+        window.show();
+        const QString open_error =
+            window.openProject(QString::fromStdString(project_file.string()));
+        PWB_CHECK_MSG(open_error.isEmpty(),
+                      "openProject failed");
+        auto* preparation =
+            window.appShell()
+                ->findChild<pwb::ui_pages_data::qt::PreparationPage*>();
+        PWB_CHECK(preparation != nullptr);
+        auto* panel = preparation->task_panel();
+        PWB_CHECK(panel != nullptr);
+
+        // 1) 批量生成单因素图 — the real kernel path.
+        QMetaObject::invokeMethod(panel, "generate_requested",
+                                  Q_ARG(QString, QStringLiteral("IDW")));
+        const bool generated = wait_for(
+            [&] {
+                return panel->summary_label() != nullptr
+                       && panel->summary_label()
+                              ->text()
+                              .contains(QStringLiteral("已制备"));
+            },
+            "prepare completion");
+        PWB_CHECK_MSG(generated, "prepare run did not complete");
+        PWB_CHECK_MSG(panel->summary_label()->text()
+                          .contains(QStringLiteral("计算 2")),
+                      "both tasks computed on the first run");
+
+        // 2) 等值线初稿 — pushes drafts + map documents.
+        QMetaObject::invokeMethod(panel, "contour_draft_requested");
+        const bool contoured = wait_for(
+            [&] {
+                return panel->summary_label() != nullptr
+                       && panel->summary_label()
+                              ->text()
+                              .contains(QStringLiteral("等值线初稿"));
+            },
+            "contour completion");
+        PWB_CHECK_MSG(contoured, "contour run did not complete");
+        PWB_CHECK_MSG(
+            !panel->summary_label()->text().contains(
+                QStringLiteral("没有可提取")),
+            "contour produced drafts");
+
+        // 3) persist everything through the production save route.
+        QString save_error_q;
+        save_error_q = pwb::app::shell_project_actions::save_open_project(
+            window);
+        PWB_CHECK_MSG(save_error_q.isEmpty(), "save failed");
+
+        // 4) selective recompute: change task A's VALUES only, rerun.
+        {
+            Json live = read_document();
+            // the committed document now carries the completed tasks
+            PWB_CHECK_MSG(live["factor_map_tasks"].size() == 2,
+                          "two tasks committed");
+            int complete = 0;
+            std::string version_id_a;
+            for (const auto& task : live["factor_map_tasks"]) {
+                if (task["status"] == "complete") ++complete;
+                if (task["id"] == "factor_e2e_a") {
+                    version_id_a = task.value("grid_artifact_version_id",
+                                              std::string());
+                }
+            }
+            PWB_CHECK_MSG(complete == 2, "both tasks complete after run 1");
+            PWB_CHECK_MSG(!version_id_a.empty(),
+                          "task A carries a catalog version id");
+            PWB_CHECK_MSG(live["contour_drafts"].size() == 2,
+                          "two contour drafts committed");
+            PWB_CHECK_MSG(live["paleomap_documents"].size() == 2,
+                          "two map documents hold the contour features");
+            for (const auto& doc : live["paleomap_documents"]) {
+                PWB_CHECK_MSG(
+                    !doc["line_features"].empty()
+                        && doc["line_features"][0]["role"] == "contour",
+                    "map document carries contour line features");
+            }
+            PWB_CHECK(fs::exists(tmp / "workflow_provenance.json"));
+        }
+
+        // rerun unchanged -> all reused (no compute)
+        QMetaObject::invokeMethod(panel, "generate_requested",
+                                  Q_ARG(QString, QStringLiteral("IDW")));
+        const bool reused = wait_for(
+            [&] {
+                return panel->summary_label() != nullptr
+                       && panel->summary_label()
+                              ->text()
+                              .contains(QStringLiteral("已制备"));
+            },
+            "reuse rerun");
+        PWB_CHECK_MSG(reused, "reuse rerun did not complete");
+        PWB_CHECK_MSG(panel->summary_label()->text()
+                          .contains(QStringLiteral("复用 2")),
+                      "unchanged rerun reuses both tasks");
+        PWB_CHECK_MSG(
+            panel->summary_label()->text().contains(
+                QStringLiteral("计算 0")),
+            "unchanged rerun computes nothing");
+
+        // 4b) change ONE task's values (coordinates held) -> selective
+        // recompute: exactly one task recomputes, the other stays reused.
+        {
+            Json live = read_document();
+            Json points = live["factor_map_tasks"][0]["parameters"]
+                              ["sample_points"];
+            for (auto& point : points) {
+                point["value"] = point["value"].get<double>() + 11.0;
+            }
+            live["factor_map_tasks"][0]["parameters"]["sample_points"] =
+                points;
+            {
+                std::ofstream out(project_file,
+                                  std::ios::binary | std::ios::trunc);
+                out << pwb::domain::dump_json_python_compatible(live);
+            }
+            // One-window-one-project contract: edit the file on disk, then
+            // re-enter the page through a FRESH window (the first window
+            // keeps its live store). The generation counter is per-page,
+            // so the new run supersedes cleanly.
+            window.hide();
+            preparation = nullptr;
+            panel = nullptr;
+            auto* reopen_window =
+                new MainWindow();  // owned by the test scope
+            reopen_window->show();
+            const QString reopen_error = reopen_window->openProject(
+                QString::fromStdString(project_file.string()));
+            PWB_CHECK_MSG(reopen_error.isEmpty(),
+                          "reopen after value edit failed");
+            preparation = reopen_window->appShell()
+                              ->findChild<
+                                  pwb::ui_pages_data::qt::PreparationPage*>();
+            PWB_CHECK(preparation != nullptr);
+            panel = preparation->task_panel();
+            PWB_CHECK(panel != nullptr);
+            reopen_window->hide();
+        }
+        QMetaObject::invokeMethod(panel, "generate_requested",
+                                  Q_ARG(QString, QStringLiteral("IDW")));
+        const bool recomputed = wait_for(
+            [&] {
+                return panel->summary_label() != nullptr
+                       && panel->summary_label()
+                              ->text()
+                              .contains(QStringLiteral("已制备"));
+            },
+            "selective recompute");
+        PWB_CHECK_MSG(recomputed, "selective recompute did not complete");
+        PWB_CHECK_MSG(panel->summary_label()->text()
+                          .contains(QStringLiteral("复用 1")),
+                      "unchanged task reused after the value edit");
+        PWB_CHECK_MSG(
+            panel->summary_label()->text().contains(
+                QStringLiteral("计算 1")),
+            "exactly the edited task recomputed");
+    }
+
+    // 5) save/reopen: a fresh window recovers the tasks + provenance rail.
+    {
+        MainWindow window;
+        window.show();
+        const QString open_error =
+            window.openProject(QString::fromStdString(project_file.string()));
+        PWB_CHECK_MSG(open_error.isEmpty(), "reopen failed");
+        const Json reopened = read_document();
+        int complete = 0;
+        std::set<std::string> version_ids;
+        for (const auto& task : reopened["factor_map_tasks"]) {
+            if (task["status"] == "complete") ++complete;
+            version_ids.insert(
+                task.value("grid_artifact_version_id", std::string()));
+        }
+        PWB_CHECK_MSG(complete == 2, "reopen: both tasks complete");
+        PWB_CHECK_MSG(version_ids.size() == 2 && !version_ids.count(""),
+                      "reopen: both version ids intact");
+        PWB_CHECK_MSG(reopened["contour_drafts"].size() == 2,
+                      "reopen: contour drafts intact");
+        // provenance rail survives the process boundary (same JSON file)
+        std::ifstream in(tmp / "workflow_provenance.json", std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        const Json rail = Json::parse(text);
+        PWB_CHECK_MSG(rail["store_version"] == 1, "provenance store header");
+        // First window: 2 committed tasks (2 runs). Recompute window: only
+        // the edited task recomputes and re-registers (1 more run, 1 more
+        // asset) — the reused task never re-registers.
+        PWB_CHECK_MSG(rail["runs"].size() == 3,
+                      "three factor_map runs on the rail (2 + 1 recompute)");
+        PWB_CHECK_MSG(rail["assets"].size() == 3,
+                      "three grid assets (recompute adds one)");
+    }
+
+    fs::remove_all(tmp);
+    return pwb::test::failure_count();
+}
+#endif  // PWB_WITH_FACTOR_KERNEL
+
+// #1455 regression — window close while the preparation page's worker
+// runs: the destruction must be BOUNDED (AppShell::shutdown_workers now
+// reaches the adopted PreparationPage → WorkerHost::shutdown instead of
+// the destructor's unbounded join), a shutdown timeout detaches a thread
+// that only holds shared_ptr state (no UAF on the destroyed host — the
+// marshalled deliveries are dropped by the released guard), and the
+// process survives the event loop afterwards.
+int prepare_shutdown_battery(QgsApplication& app) {
+    namespace fs = std::filesystem;
+    const fs::path tmp = fs::temp_directory_path()
+        / ("pwb_v14_prep_shutdown_" + std::to_string(test_pid()));
+    fs::create_directories(tmp);
+    const fs::path project_file = tmp / "shutdown.paleo.json";
+
+    // One kriging task sized so the numeric core plausibly outlives the
+    // bounded shutdown (LOO R^2 alone is O(N) linear solves): 260 wells.
+    Json points = Json::array();
+    for (int i = 0; i < 260; ++i) {
+        points.push_back(Json{{"well", "W" + std::to_string(i)},
+                              {"x", 100.0 + 0.02 * i},
+                              {"y", 30.0 + 0.015 * i},
+                              {"value", 12.0 + 0.37 * i}});
+    }
+    Json document = Json::object();
+    document["schema_version"] = 1;
+    document["meta"] = Json{{"name", "prep shutdown"},
+                            {"project_root", "."},
+                            {"created_at", "2026-09-22T00:00:00+00:00"},
+                            {"updated_at", "2026-09-22T00:00:00+00:00"}};
+    document["coordinate"] = Json{{"project_crs", "EPSG:32650"},
+                                  {"crs_locked", false},
+                                  {"display_crs", "EPSG:4326 / WGS84"}};
+    document["stratigraphy"] = Json{{"target_horizon", "C6"}};
+    document["constraint_layers"] = Json::array();
+    document["factor_map_tasks"] = Json::array({Json{
+        {"id", "factor_shutdown"},
+        {"name", "C6 砂地比"},
+        {"target_horizon", "C6"},
+        {"factor_type", "砂地比"},
+        {"method", "克里金"},
+        {"status", "pending"},
+        {"source_kind", "mixed"},
+        {"parameters", Json{{"sample_points", points}}}}});
+    document["paleomap_documents"] = Json::array();
+    document["contour_drafts"] = Json::array();
+    document["well_tables"] = Json::array();
+    document["resources"] = Json::array();
+    {
+        std::ofstream out(project_file, std::ios::binary | std::ios::trunc);
+        out << pwb::domain::dump_json_python_compatible(document);
+    }
+
+    // Declared outside the window scope: the destruction timing must
+    // survive the scope that owns the MainWindow.
+    auto destroy_start = std::chrono::steady_clock::now();
+    {
+        MainWindow window;
+        window.show();
+        const QString open_error =
+            window.openProject(QString::fromStdString(project_file.string()));
+        PWB_CHECK_MSG(open_error.isEmpty(), "openProject failed");
+        auto* preparation =
+            window.appShell()->preparation_page() != nullptr
+                ? window.appShell()->preparation_page()
+                : window.appShell()
+                      ->findChild<
+                          pwb::ui_pages_data::qt::PreparationPage*>();
+        PWB_CHECK(preparation != nullptr);
+        // Deterministic wiring pin (#1455): the shell must REMEMBER the
+        // adopted page — the shutdown path depends on this pointer, and
+        // findChild alone cannot tell a dropped adoption from a
+        // later-found child.
+        PWB_CHECK(window.appShell()->preparation_page() == preparation);
+        auto* panel = preparation->task_panel();
+        PWB_CHECK(panel != nullptr);
+
+        // Fire the batch and wait until the worker actually OWNS the run
+        // (the seams report busy through the real WorkerHost).
+        QMetaObject::invokeMethod(panel, "generate_requested",
+                                  Q_ARG(QString,
+                                        QStringLiteral("克里金")));
+        bool running_seen = false;
+        for (int i = 0; i < 500 && !running_seen; ++i) {
+            app.processEvents();
+            running_seen = preparation->is_prepare_running();
+        }
+        PWB_CHECK_MSG(running_seen,
+                      "prepare run never registered as running");
+
+        // Destroy the window mid-run: the scoped destructor runs
+        // ~MainWindow → AppShell::shutdown_workers → PreparationPage::
+        // shutdown_workers (bounded) — never an unbounded GUI join.
+        destroy_start = std::chrono::steady_clock::now();
+        window.hide();
+    }
+    const double destroy_ms =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - destroy_start)
+            .count();
+    // Bounded destruction: the window destructor stops the joint host
+    // (1000 ms) + JobCenter owners (1000 ms each) + every owned page
+    // worker (preparation 3000 ms worst case) + the scheduler drain
+    // (~2 s) and tears down QGIS — the bound must cover that SUM, while
+    // the pre-#1455 behavior froze here until a slow grid kernel
+    // finished between cancellation points (potentially unbounded).
+    PWB_CHECK_MSG(destroy_ms < 15000.0,
+                  "window destruction blocked the GUI thread for "
+                      + std::to_string(destroy_ms)
+                      + " ms (unbounded join?)");
+    // The abandoned worker's marshalled deliveries are dropped (the
+    // released guard): pumping events after destruction must be safe —
+    // a late delivery firing into the dead page is the UAF family.
+    for (int i = 0; i < 50; ++i) {
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    fs::remove_all(tmp);
+    return pwb::test::failure_count();
+}
+
+// M5-2: 版式轻量页 + 上下文 Ribbon 组（编图场景真实选中驱动）。
+int m5_compose_battery() {
+    MainWindow window;
+    window.show();
+    AppShell* shell = window.appShell();
+    PWB_CHECK_MSG(shell != nullptr, "AppShell missing");
+    auto* bank = pwb::app::closure_mapping::document_bank(&window);
+    PWB_CHECK(bank != nullptr);
+    auto* scene = bank->edit_scene();
+    PWB_CHECK(scene != nullptr);
+    auto* ribbon = shell->ribbon();
+    PWB_CHECK(ribbon != nullptr);
+
+    // 版式面板住右栏「版式输出」dock；ws3 底部阶段行的「单因素参考」
+    // dock 带参考缩略图（默认组版不动）。
+    auto* refs_dock = shell->workstation()->dock("factor_refs");
+    PWB_CHECK(refs_dock != nullptr);
+    PWB_CHECK(refs_dock->widget() != nullptr &&
+              refs_dock->widget()->findChild<QWidget*>(
+                  "FactorReferenceStrip") != nullptr);
+    auto* compose = shell->findChild<pwb::app::LayoutComposePanel*>();
+    PWB_CHECK_MSG(compose != nullptr, "layout compose panel missing");
+    PWB_CHECK(!shell->compose_mode());
+    shell->set_compose_mode(true);
+    PWB_CHECK(shell->compose_mode());
+    shell->set_compose_mode(false);
+    PWB_CHECK(!shell->compose_mode());
+    // 真实模板清单（内置 9 模板）+ 图件整饰四项（图例/指北针/比例尺/标题栏）。
+    PWB_CHECK(compose->template_selector()->count() >= 9);
+    PWB_CHECK(compose->chrome_checks().size() == 4);
+    PWB_CHECK(compose->paper_selector()->count() == 5);
+    // 导出入口复用 governed map_export（同一 QAction，D4）。
+    PWB_CHECK(compose->findChild<QPushButton*>(
+                  QStringLiteral("ComposeExport")) != nullptr);
+
+    // 上下文组：选中 line（约束线）→ ws2/ws3 出现「约束线编辑」。
+    pwb::domain::Json doc = pwb::domain::Json::object();
+    scene->load_document(&doc);
+    const auto line_id = scene->create_feature(pwb::domain::Json{
+        {"id", "ln-1"},
+        {"kind", "line"},
+        {"name", "物源线1"},
+        {"coordinates",
+         pwb::domain::Json::array({pwb::domain::Json::array({0.0, 0.0}),
+                                   pwb::domain::Json::array({5.0, 5.0})})}});
+    PWB_CHECK(line_id.has_value());
+    static_cast<pwb::ui_data_qt::LineItem*>(scene->item_by_id(*line_id))
+        ->setSelected(true);
+    QCoreApplication::processEvents();
+    PWB_CHECK(ribbon->context_group_keys(2).contains(
+        QStringLiteral("constraint")));
+    PWB_CHECK(ribbon->context_group_keys(3).contains(
+        QStringLiteral("constraint")));
+
+    // 改选 label（标注）→ 标注组取代约束线组。
+    for (QGraphicsItem* item : scene->items()) item->setSelected(false);
+    const auto label_id = scene->create_feature(pwb::domain::Json{
+        {"id", "lb-1"},
+        {"kind", "label"},
+        {"name", "注记1"},
+        {"coordinates", pwb::domain::Json::array({1.0, 1.0})}});
+    PWB_CHECK(label_id.has_value());
+    static_cast<pwb::ui_data_qt::LabelItem*>(scene->item_by_id(*label_id))
+        ->setSelected(true);
+    QCoreApplication::processEvents();
+    PWB_CHECK(ribbon->context_group_keys(3).contains(
+        QStringLiteral("annotation")));
+    PWB_CHECK(!ribbon->context_group_keys(2).contains(
+        QStringLiteral("constraint")));
+
+    // 清空选择 → 组消失（R:33 不残留）。
+    for (QGraphicsItem* item : scene->items()) item->setSelected(false);
+    QCoreApplication::processEvents();
+    PWB_CHECK(ribbon->context_group_keys(2).isEmpty());
+    PWB_CHECK(ribbon->context_group_keys(3).isEmpty());
+
+    // 捕捉 QAction 与场景 snap_manager 同一状态（禁止第二份）。
+    auto* snap =
+        shell->findChild<QAction*>(QStringLiteral("FactorSnapToggle"));
+    PWB_CHECK(snap != nullptr);
+    const bool snap_before = scene->snap_enabled();
+    snap->trigger();
+    PWB_CHECK(scene->snap_enabled() == !snap_before);
+    snap->trigger();  // 还原
+    PWB_CHECK(scene->snap_enabled() == snap_before);
+    return pwb::test::failure_count();
+}
 #endif  // PWB_WITH_APP_SHELL
 
 }  // namespace
@@ -302,9 +832,11 @@ int main(int argc, char** argv) {
     bank_battery(app);
 #ifdef PWB_WITH_APP_SHELL
     install_battery();
-    // 退役电池的调用面已随界面收敛移除（prepare_shutdown /
-    // factor_kernel / m5_compose 全部驱动已退役的功能面板——功能
-    // 保留在项目内，界面层不再实例化，电池不再可达）。
+    prepare_shutdown_battery(app);
+#ifdef PWB_WITH_FACTOR_KERNEL
+    factor_kernel_battery(app);
+#endif
+    m5_compose_battery();
 #else
     std::fprintf(stdout,
                  "SKIP install battery — PWB_WITH_APP_SHELL not defined\n");

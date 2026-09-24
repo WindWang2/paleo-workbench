@@ -1,12 +1,12 @@
 #pragma once
 
-// UI-18 — RibbonBar: the Qt Widgets shell of the workspace ribbon
-// chrome (two-page shell per
-// docs/ui-redesign/two-page-shell-2026-09-24/README.md; design contract
-// docs/ui-redesign/qt-ribbon-workspaces-2026-09-21/README.md).
+// UI-18 — RibbonBar: the Qt Widgets shell of the five-workspace ribbon
+// chrome (M1, docs/development/ribbon-five-workspaces/00-plan.md D3;
+// design contract docs/ui-redesign/qt-ribbon-workspaces-2026-09-21/
+// README.md).
 //
 // Structure mirrors the prototype's chrome (prototypes/qt_ribbon_native/
-// main.cpp:114-124, 207-211) — ONE nav row (file button + QAT + the
+// main.cpp:114-124, 207-211) — ONE nav row (file button + QAT + five
 // workspace tabs + stretch + command search + compact/collapse toggles)
 // over a QStackedWidget of per-workspace command bands (group frames with
 // a horizontal QToolButton row + bottom group label + separators).
@@ -26,8 +26,6 @@
 
 #include <array>
 #include <functional>
-#include <map>
-#include <string>
 #include <vector>
 
 #include <QAction>
@@ -240,13 +238,6 @@ private:
     // M5 context groups per workspace (R:33).
     std::array<std::vector<ContextGroup>, pwb::ui_ribbon::kWorkspaceCount>
         context_groups_;
-
-    // Persistent id → host QAction bindings (D4): context groups
-    // injected AFTER set_command_action (e.g. the 编图 mode groups)
-    // pick up their bindings from this map in set_context_group —
-    // otherwise late-built buttons would fire the placeholder
-    // commandTriggered path while carrying no bound action.
-    std::map<std::string, QAction*> command_bindings_;
 
     pwb::ui_shell::ShortcutRegistry* shortcut_registry_ = nullptr;
     QStringList missing_icons_;  // gap report (sorted, deduplicated)

@@ -28,7 +28,6 @@
 #include <pwb/tool_policy/stages.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
 #include <pwb/ui/edit_tool_controller.hpp>
-#include <pwb/ui/stage_readiness.hpp>
 #include <pwb/ui/workbench_layout.hpp>
 
 #include "main_window.hpp"
@@ -54,12 +53,10 @@ int main(int argc, char** argv) {
     pwb::application::ProjectSession* session = window.session();
 
     // ---- surface presence ------------------------------------------------
-    // 两页壳层：stage/constraint 面板已退役出界面（功能留在库内）——
-    // 诚实缺席，不伪造面板；图层树/编辑工具仍接线在编图页。
-    PWB_CHECK(window.stageDock() == nullptr);
+    PWB_CHECK(window.stageDock() != nullptr);
     PWB_CHECK(window.layerPanel() != nullptr);
     PWB_CHECK(window.editTools() != nullptr);
-    PWB_CHECK(window.constraintPanel() == nullptr);
+    PWB_CHECK(window.constraintPanel() != nullptr);
     PWB_CHECK(window.layerPanel()->findChild<QLineEdit*>(
                   QStringLiteral("LayerTreeFilter")) != nullptr);
     PWB_CHECK(window.layerPanel()->findChild<QSlider*>(
@@ -68,19 +65,17 @@ int main(int argc, char** argv) {
     // Default stage is the Python default (facies_calibration).
     PWB_CHECK(session->mapping_stage().has_value());
     PWB_CHECK(*session->mapping_stage() == "facies_calibration");
+    PWB_CHECK(window.stageDock()->current_stage()
+              == pwb::tool_policy::MappingStage::FaciesCalibration);
 
     // ---- readiness reflects the unconfigured truth ------------------------
-    // The dock surface is retired; the Qt-free evaluator it displayed is
-    // still the authority — unconfigured inputs must flag the missing
-    // horizon error item.
     {
-        const auto readiness = pwb::ui::evaluate_stage_readiness(
-            pwb::tool_policy::MappingStage::FaciesCalibration,
-            pwb::ui::ReadinessInputs{});
+        const QStringList rows = window.stageDock()->readiness_rows();
+        PWB_CHECK(!rows.isEmpty());
         bool horizon_error = false;
-        for (const auto& item : readiness.items) {
-            if (item.status == pwb::ui::ReadinessItemStatus::Error
-                && item.title.find("未设定编图层位") != std::string::npos) {
+        for (const QString& row : rows) {
+            if (row.contains(QStringLiteral("未设定编图层位"))
+                && row.startsWith(QStringLiteral("✕"))) {
                 horizon_error = true;
             }
         }
@@ -230,6 +225,20 @@ int main(int argc, char** argv) {
         window.governedAction("rollback")->trigger();
         PWB_CHECK(layer->featureCount() == before);
         PWB_CHECK(!session->edit().editing("fixture.facies_boundary"));
+    }
+
+    // ---- constraint panel reflects constraint-role layers ----------------
+    {
+        window.refreshActionStates();
+        const QStringList rows = window.constraintPanel()->constraint_rows();
+        PWB_CHECK(!rows.isEmpty());
+        // The fixture layer counts 3 polygons under the constraint-role
+        // fallback (facies_boundary is in the constraint role set).
+        bool found = false;
+        for (const QString& row : rows) {
+            if (row.endsWith(QStringLiteral("|3"))) found = true;
+        }
+        PWB_CHECK_MSG(found, "constraint panel must list the 3-feature layer");
     }
 
     // ---- layout persistence: save/restore/corrupt/reset -------------------

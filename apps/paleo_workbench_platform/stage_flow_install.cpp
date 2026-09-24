@@ -125,22 +125,20 @@ const std::vector<CommandSeed>& command_seeds() {
         {"stage.goto.compilation", "切换到 ③ 综合编图",
          "进入综合编图阶段", "阶段 stage 综合 compilation 编图 三",
          "阶段", "3", {}, false},
-        // M2 (D1 revised): two-page shell — workspaces are the navigation
-        // axis but the three stages are MODES of the 编图 page; verify
-        // raises its dock instead of a page.
-        {"nav.workspace.data", "打开 数据管理 页", "切到数据管理页",
+        // M2 (D1): the five workspaces are the navigation axis — the
+        // retired nav.hub.* seeds become nav.workspace.* (labels per the
+        // ui_ribbon workspace registry).
+        {"nav.workspace.data", "打开 数据管理 工作区", "切到数据管理工作区",
          "导航 工作区 workspace data 数据", "导航", "", {}, false},
-        {"nav.workspace.predict", "编图 · 智能预测 模式",
-         "切到编图页并进入智能预测模式",
-         "导航 工作区 workspace predict 预测 模式", "导航", "", {}, false},
-        {"nav.workspace.factor", "编图 · 单因素图 模式",
-         "切到编图页并进入约束与单因素模式",
-         "导航 工作区 workspace factor 约束 因素 模式", "导航", "", {},
-         false},
-        {"nav.workspace.map", "编图 · 综合编图 模式",
-         "切到编图页并进入综合编图模式",
-         "导航 工作区 workspace map 编图 模式", "导航", "", {}, false},
-        {"nav.workspace.verify", "打开 验证 面板", "抬起验证面板",
+        {"nav.workspace.predict", "打开 智能预测 工作区",
+         "切到智能预测工作区", "导航 工作区 workspace predict 预测",
+         "导航", "", {}, false},
+        {"nav.workspace.factor", "打开 约束与单因素 工作区",
+         "切到约束与单因素工作区",
+         "导航 工作区 workspace factor 约束 因素", "导航", "", {}, false},
+        {"nav.workspace.map", "打开 综合编图 工作区", "切到综合编图工作区",
+         "导航 工作区 workspace map 编图", "导航", "", {}, false},
+        {"nav.workspace.verify", "打开 验证 工作区", "切到验证工作区",
          "导航 工作区 workspace verify 验证", "导航", "", {}, false},
         {"panel.toggle.tasks", "任务中心 开/关", "显示或隐藏任务中心",
          "面板 任务 task center 后台", "面板", "", {}, false},
@@ -167,6 +165,19 @@ const std::vector<CommandSeed>& command_seeds() {
          "阶段", "", {}, false},
     };
     return seeds;
+}
+
+// Which workspace index a nav command addresses (pwb::ui_ribbon
+// kWorkspaceOrder — the ribbon tab order is load-bearing).
+const std::map<std::string, int>& nav_targets() {
+    static const std::map<std::string, int> targets = {
+        {"nav.workspace.data", 0},
+        {"nav.workspace.predict", 1},
+        {"nav.workspace.factor", 2},
+        {"nav.workspace.map", 3},
+        {"nav.workspace.verify", 4},
+    };
+    return targets;
 }
 
 }  // namespace
@@ -606,39 +617,28 @@ void MainWindow::installStageFlow() {
                 id == "stage.goto.prediction" ? kStage1Value
                 : id == "stage.goto.constraints" ? kStage2Value
                                                  : kStage3Value;
-            // Two-page shell: a stage command lands on the 编图 page —
-            // request_stage writes the authority; the emitted
-            // stage_applied syncs the in-page mode projection.
-            spec.callback = [this, target]() {
+            // D1: the stage workspaces ARE the ribbon tabs — a stage
+            // command also lands the user on the matching workspace.
+            const int workspace =
+                id == "stage.goto.prediction"
+                    ? static_cast<int>(pwb::ui_ribbon::Workspace::
+                                           IntelligentPrediction)
+                : id == "stage.goto.constraints"
+                    ? static_cast<int>(
+                          pwb::ui_ribbon::Workspace::ConstraintFactor)
+                    : static_cast<int>(pwb::ui_ribbon::Workspace::
+                                           IntegratedCompilation);
+            spec.callback = [this, target, workspace]() {
                 if (stage_flow_ != nullptr) stage_flow_->request_stage(target);
                 if (appShell() != nullptr) {
-                    appShell()->navigate_workspace(static_cast<int>(
-                        pwb::ui_ribbon::Workspace::Authoring));
+                    appShell()->navigate_workspace(workspace);
                 }
             };
         } else if (id.rfind("nav.workspace.", 0) == 0) {
-            // Two-page shell (D2 revised): predict/factor/map are 编图
-            // modes (stage write + page); verify raises its dock —
-            // no central page grab.
-            spec.callback = [this, id]() {
-                AppShell* shell = appShell();
-                if (shell == nullptr) return;
-                if (id == "nav.workspace.data") {
-                    shell->navigate_workspace(static_cast<int>(
-                        pwb::ui_ribbon::Workspace::DataManagement));
-                } else if (id == "nav.workspace.verify") {
-                    shell->show_validation_dock();
-                } else {
-                    const auto stage =
-                        id == "nav.workspace.predict"
-                            ? pwb::tool_policy::MappingStage::
-                                  FaciesCalibration
-                        : id == "nav.workspace.factor"
-                            ? pwb::tool_policy::MappingStage::
-                                  ConstraintFactor
-                            : pwb::tool_policy::MappingStage::
-                                  IntegratedCompilation;
-                    shell->request_authoring_mode(stage);
+            const int workspace = nav_targets().at(id);
+            spec.callback = [this, workspace]() {
+                if (appShell() != nullptr) {
+                    appShell()->navigate_workspace(workspace);
                 }
             };
         } else if (id.rfind("panel.toggle.", 0) == 0) {

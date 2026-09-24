@@ -170,30 +170,18 @@ public:
                 Qt::QueuedConnection);
         }
 
-        // Terminal deliveries (completed/failed/cancelled) clear the
-        // lane's busy flag INSIDE the delivered wrapper, before the page
-        // callback runs. marshal() is a non-blocking post: clearing busy
-        // on the worker thread after body() returns leaves a window where
-        // the GUI already ran the terminal callback (label updated) while
-        // busy() still reads true — an entry guard querying
-        // is_running() in that window pops a "still running" modal. The
-        // GUI-side clear restores the engineered happens-before:
-        // terminal callback observed ⇒ busy already false.
+        // Terminal-callback variant: clears the lane's busy flag inside
+        // the GUI-side delivery BEFORE running fn. marshal() posts are
+        // non-blocking, so clearing busy after body() returns races the
+        // queued callback — a page could observe the terminal state while
+        // busy() still read true and pop a "still running" modal.
+        // Clearing inside the delivery restores the happens-before:
+        // terminal observed ⇒ not busy.
         void marshal_terminal(std::function<void()> fn) const {
-            auto* pump = worker_delivery_pump();
-            if (pump == nullptr || QCoreApplication::instance() == nullptr) {
-                return;
-            }
-            auto guard = released_;
-            auto busy = busy_;
-            QMetaObject::invokeMethod(
-                pump,
-                [guard, busy, fn = std::move(fn)]() {
-                    busy->store(false, std::memory_order_release);
-                    if (guard->load()) return;  // run released: drop
-                    fn();
-                },
-                Qt::QueuedConnection);
+            marshal([busy = busy_, fn = std::move(fn)]() {
+                busy->store(false, std::memory_order_release);
+                fn();
+            });
         }
 
     private:
@@ -241,9 +229,11 @@ public:
         // busy_ is the retired Control::busy flag, NOT owner_->is_running():
         // the task STATUS flips on the worker thread only after the
         // blocking finished() handshake reached the GUI. Terminal
-        // callbacks go through Client::marshal_terminal, which clears the
-        // flag inside the delivered wrapper BEFORE the page callback runs
-        // — happens-before: terminal callback observed ⇒ not busy.
+        // callbacks go through marshal_terminal() which clears busy
+        // inside the GUI-side delivery itself — a page that observes a
+        // terminal callback can never still read busy() true. The
+        // body-thread store below remains as the backstop for bodies
+        // that never marshal a terminal callback.
         auto busy = busy_;
         busy->store(true, std::memory_order_release);
         owner_->start(
@@ -254,8 +244,7 @@ public:
                 body(client, ctx);
                 // Marshals exactly one terminal callback itself
                 // (completed/cancelled/failed); the task-level outcome is
-                // projection only. This store covers bodies that exit
-                // without a terminal marshal (exception escapes).
+                // projection only.
                 busy->store(false, std::memory_order_release);
                 return true;
             },

@@ -202,9 +202,6 @@ public:
     // Empty return on success/idempotent-no-store; non-empty = the user
     // cancelled or a dirty save failed (project stays open).
     QString closeProject();
-    // Re-pushes the live catalog snapshot into the 数据管理 page (list +
-    // info). Called on project open/close/save; no project → empty list.
-    void sync_data_page();
 #endif
 #if defined(PWB_WITH_SEISMIC_IO) && defined(PWB_WITH_DATA_INTEGRATION)
     // Imports one post-stack SEG-Y file as a new Raw seismic_volume asset
