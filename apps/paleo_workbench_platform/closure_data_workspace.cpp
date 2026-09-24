@@ -37,6 +37,7 @@
 #include <QMessageBox>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <fstream>
 #include <map>
 #include <stdexcept>
@@ -420,6 +421,9 @@ WorkspaceWiring install_data_workspace(updqt::DataWorkspace& workspace,
     // 搜索/类型/状态 → 资产表 FilterQuery；行集刷新 → 下拉候选与
     // 「共 N 条」计数。过滤 seam 此前无宿主——装真实本地过滤
     // （搜索子串 + 类型/状态等值），UI-03 宿主到来时可整体替换。
+    // 治理闭环扩展：标签（多选 and/or，词表来自 TagStore 正规化）、
+    // 关联角色（entity_role 等值）与回收站 guard（行集本身只含 live
+    // 资产——trash 视图走回收站对话框，node_type=trash 诚实空集）。
     auto* asset_table = workspace.asset_table();
     if (asset_table != nullptr) {
         asset_table->set_filter_fn(
@@ -427,14 +431,30 @@ WorkspaceWiring install_data_workspace(updqt::DataWorkspace& workspace,
                 std::vector<int> out;
                 if (bus == nullptr) return out;
                 const auto& rows = bus->assets();
+                if (query.node_type == "trash") {
+                    return out;  // 回收站内容不进资产表行集（诚实空集）
+                }
                 const std::string& needle = query.search_text;  // 已规范化
+                // 标签维度：legacy 单选 tag 并入 tags；and=全部命中，
+                // or=任一命中；空 tags = 不过滤。
+                std::vector<std::string> want_tags = query.tags;
+                if (query.tag.has_value() &&
+                    !query.tag->empty() &&
+                    std::find(want_tags.begin(), want_tags.end(),
+                              *query.tag) == want_tags.end()) {
+                    want_tags.push_back(*query.tag);
+                }
+                const bool tags_or = query.tag_operator == "or";
                 for (std::size_t i = 0; i < rows.size(); ++i) {
                     const upd::AssetView& v = rows[i].view;
+                    if (v.is_trashed) continue;  // live-only 行集守卫
                     if (!needle.empty()) {
-                        const std::string haystack =
+                        std::string haystack =
                             pwb::domain::lowercase_utf8(
                                 v.name + " " + v.type + " " + v.path + " " +
-                                v.source_label + " " + v.linked_label);
+                                v.source_label + " " + v.linked_label + " " +
+                                v.role);
+                        for (const auto& tag : v.tags) haystack += " " + tag;
                         if (haystack.find(needle) == std::string::npos) {
                             continue;
                         }
@@ -444,6 +464,21 @@ WorkspaceWiring install_data_workspace(updqt::DataWorkspace& workspace,
                     }
                     if (query.status && v.status != *query.status) {
                         continue;
+                    }
+                    if (query.entity_role.has_value() &&
+                        v.role != *query.entity_role) {
+                        continue;
+                    }
+                    if (!want_tags.empty()) {
+                        bool matched = !tags_or;  // and: 需全部命中；or: 任一
+                        for (const auto& want : want_tags) {
+                            const bool hit =
+                                std::find(v.tags.begin(), v.tags.end(),
+                                          want) != v.tags.end();
+                            matched = tags_or ? (matched || hit)
+                                              : (matched && hit);
+                        }
+                        if (!matched) continue;
                     }
                     out.push_back(static_cast<int>(i));
                 }

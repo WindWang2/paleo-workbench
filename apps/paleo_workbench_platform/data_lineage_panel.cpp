@@ -2,6 +2,7 @@
 
 #include <QHeaderView>
 #include <QLabel>
+#include <QListWidget>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -11,6 +12,9 @@
 
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/ui_pages_data/qt/asset_selection_bus.hpp>
+#if defined(PWB_WITH_V14_DATA_LINEAGE)
+#include <pwb/data/governance.hpp>
+#endif
 
 namespace pwb::app {
 
@@ -73,8 +77,11 @@ DataLineagePanel::DataLineagePanel(QWidget* parent) : QWidget(parent) {
     lineage_ = new QTableWidget(tabs_);
     lineage_->setObjectName(QStringLiteral("DataLineageRelations"));
     setup_table(lineage_);
+    impact_ = new QListWidget(tabs_);
+    impact_->setObjectName(QStringLiteral("DataLineageImpact"));
     tabs_->addTab(history_, QStringLiteral("版本历史"));
     tabs_->addTab(lineage_, QStringLiteral("来源关系"));
+    tabs_->addTab(impact_, QStringLiteral("影响分析"));
     layout->addWidget(tabs_, 1);
 }
 
@@ -106,6 +113,7 @@ void DataLineagePanel::refresh() {
         header_->setText(QStringLiteral("未选择资产 — 在资产表中选择后显示版本历史与来源关系"));
         history_->setRowCount(0);
         lineage_->setRowCount(0);
+        impact_->clear();
         return;
     }
     const QString label = QStringLiteral("%1（%2）")
@@ -114,6 +122,7 @@ void DataLineagePanel::refresh() {
     header_->setText(QStringLiteral("选中资产：%1").arg(label));
     fill_table(history_, QStringLiteral("ancestors"), label);
     fill_table(lineage_, QStringLiteral("descendants"), label);
+    fill_impact(label);
 }
 
 void DataLineagePanel::fill_table(QTableWidget* table,
@@ -167,6 +176,56 @@ void DataLineagePanel::fill_table(QTableWidget* table,
     (void)table; (void)direction; (void)asset_label;
     emit status_message(
         QStringLiteral("血缘查询切片未参与本次构建（V14-DATA-LINEAGE）"));
+#endif
+}
+
+void DataLineagePanel::fill_impact(const QString& asset_label) {
+    impact_->clear();
+#if defined(PWB_WITH_V14_DATA_LINEAGE)
+    // 影响分析（治理闭环）：若删除/替换当前版本会破坏什么——
+    // 直接+间接下游、断裂血缘边、关联实体与处置建议（ImpactService
+    // 真实读模型，环守卫与节点预算在服务内）。
+    const auto store =
+        context_ != nullptr ? context_->projectStore() : nullptr;
+    if (store == nullptr) {
+        impact_->addItem(QStringLiteral("请先打开工程"));
+        return;
+    }
+    const auto asset =
+        bus_ != nullptr ? bus_->current_asset() : std::nullopt;
+    if (!asset.has_value()) return;
+    const auto version_id = resolve_version_id(context_, *asset);
+    if (!version_id.has_value()) {
+        impact_->addItem(
+            QStringLiteral("「%1」暂无目录版本记录，无影响可分析")
+                .arg(asset_label));
+        return;
+    }
+    const auto facts = pwb::data::governance::delete_impact_facts(
+        store->project_file(), version_id, std::nullopt);
+    if (!facts.ok) {
+        impact_->addItem(QStringLiteral("影响分析失败：%1").arg(
+            QString::fromStdString(facts.error)));
+        return;
+    }
+    impact_->addItem(QStringLiteral("受影响版本: %1").arg(
+        facts.affected_versions));
+    impact_->addItem(
+        QStringLiteral("存活下游（直接+间接）: %1").arg(facts.live_descendants));
+    impact_->addItem(
+        QStringLiteral("断裂血缘边: %1").arg(facts.broken_edges));
+    impact_->addItem(
+        QStringLiteral("关联实体: %1").arg(facts.linked_entities));
+    if (facts.live_descendants == 0 && facts.linked_entities == 0) {
+        impact_->addItem(QStringLiteral("无存活下游依赖——删除/替换仅影响本资产"));
+    }
+    for (const auto& advice : facts.advice) {
+        impact_->addItem(QString::fromStdString(advice));
+    }
+#else
+    (void)asset_label;
+    impact_->addItem(
+        QStringLiteral("影响分析切片未参与本次构建（V14-DATA-LINEAGE）"));
 #endif
 }
 

@@ -6,12 +6,14 @@
 #include "closure_preview_adapters.hpp"
 
 #include "app_shell.hpp"
+#include "main_window.hpp"
 #include "job_center.hpp"
 
 #include <pwb/qgis_processing/job_compat.hpp>
 
 #ifdef PWB_WITH_V14_DATA_LINEAGE
 #include "closure_data_workspace.hpp"
+#include "data_governance_workspace.hpp"
 #endif
 
 #include <pwb/ui_seqviz/qt/visualization_page.hpp>
@@ -414,6 +416,43 @@ pwb::viz_e::VizEDataPage* install(const Install& parts) {
     pwb::app::v14_lineage::install_data_workspace(*page->workspace(), bus,
                                                   parts.store, page);
 // END PWB-V14-DATA-LINEAGE
+    // BEGIN PWB-DATA-GOVERNANCE: tag filter/manager + toolbar 移出→软删除流
+    // + 多选跟踪（治理行为在 data_governance_*，此处仅一行装配）。
+    // refresh_notify 组合：治理写走短命 session/深核——写后原位重开常驻
+    // store（重建磁盘基线，否则它自己的下一次 save 会被 stale-write
+    // 守卫拒绝），再走全局刷新。
+    {
+        pwb::app::data_governance::Install gov_install;
+        gov_install.workspace = page->workspace();
+        gov_install.bus = bus;
+        gov_install.store = parts.store;
+        gov_install.dialog_parent = parts.shell != nullptr ||
+                                            parts.window != nullptr
+                                        ? static_cast<QWidget*>(page)
+                                        : nullptr;
+        gov_install.refresh_notify = [parts] {
+            if (auto* main_window =
+                    qobject_cast<pwb::app::MainWindow*>(parts.window)) {
+                auto& context = main_window->context();
+                if (auto stale = context.projectStore()) {
+                    const auto path = stale->project_file();
+                    if (auto fresh =
+                            pwb::application::PwbDataStore::open(path,
+                                                                 nullptr)) {
+                        context.setProjectStore(fresh);
+                    }
+                }
+            }
+            notify_project_store_changed();
+        };
+        if (parts.shell != nullptr) {
+            gov_install.status = [shell = parts.shell](const QString& text) {
+                emit shell->status_message(text);
+            };
+        }
+        pwb::app::data_governance::install_data_governance(gov_install);
+    }
+// END PWB-DATA-GOVERNANCE
 #endif
     notify_project_store_changed();
     return page;

@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 
 namespace pwb::closure_preview {
 namespace ingest = ::pwb::ingest::preview;
@@ -291,9 +292,12 @@ namespace {
 // 稿式「关联对象」列的解析：工程 JSON 的 entity_asset_links
 // (asset_id → entity_id) + 实体名表（wells/seismic_surveys/
 // geological_entities 的 id → name）。读不到 → 空表，列显 "—"。
+// 治理闭环扩展：携带首个/主链接的 role（表格「角色」过滤维度）。
 struct EntityLinkTables {
     std::map<std::string, std::string> entity_names;   // entity_id → name
     std::map<std::string, std::string> asset_entities; // asset_id → entity_id
+    std::map<std::string, std::string> asset_roles;    // asset_id → link role
+    std::set<std::string> asset_primary;               // 主链接的 asset_id
 };
 
 EntityLinkTables entity_link_tables(
@@ -334,8 +338,24 @@ EntityLinkTables entity_link_tables(
             const auto entity_it = node.find("entity_id");
             if (asset_it != node.end() && asset_it->is_string() &&
                 entity_it != node.end() && entity_it->is_string()) {
-                tables.asset_entities[asset_it->get<std::string>()] =
-                    entity_it->get<std::string>();
+                const std::string asset_id = asset_it->get<std::string>();
+                const auto role_it = node.find("role");
+                const std::string role =
+                    role_it != node.end() && role_it->is_string()
+                        ? role_it->get<std::string>()
+                        : "other";
+                const auto primary_it = node.find("is_primary");
+                const bool primary = primary_it != node.end() &&
+                                     primary_it->is_boolean() &&
+                                     primary_it->get<bool>();
+                // 「关联对象/角色」两列必须来自同一条链接（primary 优先，
+                // 否则首条占位）——多实体多角色时列间不自相矛盾。
+                if (primary || tables.asset_primary.count(asset_id) == 0) {
+                    tables.asset_entities[asset_id] =
+                        entity_it->get<std::string>();
+                    tables.asset_roles[asset_id] = role;
+                }
+                if (primary) tables.asset_primary.insert(asset_id);
             }
         }
     }
@@ -363,6 +383,21 @@ std::vector<ui_pages_data::AssetRow> asset_rows_from_snapshot(
         if (version.trashed) continue;
         current[version.id.str()] = &version;  // keyed by VERSION id
     }
+    // 治理闭环：asset 级标签（tag_id → display；asset_id → tag 显示名）。
+    std::map<std::string, std::string> tag_names;
+    for (const auto& tag : snapshot.catalog_tags) {
+        tag_names[tag.id] = tag.display_name.has_value() &&
+                                    !tag.display_name->empty()
+                                ? *tag.display_name
+                                : tag.name;
+    }
+    std::map<std::string, std::vector<std::string>> asset_tag_names;
+    for (const auto& [asset_id, tag_id] : snapshot.catalog_asset_tags) {
+        const auto it = tag_names.find(tag_id);
+        if (it != tag_names.end()) {
+            asset_tag_names[asset_id].push_back(it->second);
+        }
+    }
     const std::filesystem::path project_dir =
         snapshot.project_file.parent_path();
     const EntityLinkTables links =
@@ -380,13 +415,22 @@ std::vector<ui_pages_data::AssetRow> asset_rows_from_snapshot(
         row.view.status = "indexed";
         row.view.managed = true;
         row.view.is_trashed = false;
-        // 稿式「关联对象」列：entity_asset_links → 实体名。
+        // 稿式「关联对象」列：entity_asset_links → 实体名；治理闭环
+        // 补「角色」列（主链接 role，无链接留空 → 过滤维度诚实空值）。
         if (const auto link = links.asset_entities.find(row.view.id);
             link != links.asset_entities.end()) {
             const auto name = links.entity_names.find(link->second);
             row.view.linked_label =
                 name != links.entity_names.end() ? name->second
                                                  : link->second;
+        }
+        if (const auto role = links.asset_roles.find(row.view.id);
+            role != links.asset_roles.end()) {
+            row.view.role = role->second;
+        }
+        if (const auto tags = asset_tag_names.find(row.view.id);
+            tags != asset_tag_names.end()) {
+            row.view.tags = tags->second;
         }
         row.view.horizon_label = metadata_horizon(asset.metadata);
         row.view.description = asset.description;

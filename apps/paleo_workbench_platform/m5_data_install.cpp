@@ -70,14 +70,18 @@ void install(const Install& install) {
     QObject::connect(bottom_lineage, &DataLineagePanel::status_message,
                      shell, &AppShell::status_message);
     // 先取指针再 reparent —— QTabWidget 页索引随移除前移，按序取会
-    // 越界丢页。
+    // 越界丢页。（治理闭环后第三页「影响分析」同样提入底签。）
     auto* history_page = bottom_lineage->tabs()->widget(0);
     auto* relations_page = bottom_lineage->tabs()->widget(1);
+    auto* impact_page = bottom_lineage->tabs()->widget(2);
     if (auto* tabs =
             qobject_cast<QTabWidget*>(workspace->bottom_tabs());
         tabs != nullptr) {
         tabs->addTab(history_page, QStringLiteral("版本历史"));
         tabs->addTab(relations_page, QStringLiteral("关联关系"));
+        if (impact_page != nullptr) {
+            tabs->addTab(impact_page, QStringLiteral("影响分析"));
+        }
         tabs->show();
     }
     bottom_lineage->hide();  // 控制器壳隐藏，页面已提入页内底签

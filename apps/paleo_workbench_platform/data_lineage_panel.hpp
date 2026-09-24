@@ -20,6 +20,7 @@
 #include <QWidget>
 
 class QLabel;
+class QListWidget;
 class QTabWidget;
 class QTableWidget;
 
@@ -46,6 +47,7 @@ public:
     QTabWidget* tabs() const { return tabs_; }
     QTableWidget* history_table() const { return history_; }
     QTableWidget* lineage_table() const { return lineage_; }
+    QListWidget* impact_list() const { return impact_; }
     QLabel* header() const { return header_; }
 
 signals:
@@ -55,6 +57,7 @@ private:
     void refresh();
     void fill_table(QTableWidget* table, const QString& direction,
                     const QString& asset_label);
+    void fill_impact(const QString& asset_label);
 
     AppContext* context_ = nullptr;
     pwb::ui_pages_data::qt::AssetSelectionBus* bus_ = nullptr;
@@ -62,6 +65,7 @@ private:
     QTabWidget* tabs_ = nullptr;
     QTableWidget* history_ = nullptr;
     QTableWidget* lineage_ = nullptr;
+    QListWidget* impact_ = nullptr;  // tab 2: 删除/替换影响分析
 };
 
 }  // namespace pwb::app
