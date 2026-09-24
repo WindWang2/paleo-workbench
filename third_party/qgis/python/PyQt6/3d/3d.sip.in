@@ -1,0 +1,12 @@
+%Module(name=qgis._3d_p,
+        keyword_arguments="All")
+
+%DefaultDocstringSignature "prepended"
+
+%Import core/core.sip
+
+%Import QtCore/QtCoremod.sip
+%Import QtGui/QtGuimod.sip
+%Import QtXml/QtXmlmod.sip
+
+%Include ./3d_auto.sip

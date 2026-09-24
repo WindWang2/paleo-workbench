@@ -1,0 +1,15 @@
+# The following has been generated automatically from src/core/qgsmaplayerutils.h
+try:
+    QgsMapLayerUtils.combinedExtent = staticmethod(QgsMapLayerUtils.combinedExtent)
+    QgsMapLayerUtils.databaseConnection = staticmethod(QgsMapLayerUtils.databaseConnection)
+    QgsMapLayerUtils.layerSourceMatchesPath = staticmethod(QgsMapLayerUtils.layerSourceMatchesPath)
+    QgsMapLayerUtils.layerRefersToUri = staticmethod(QgsMapLayerUtils.layerRefersToUri)
+    QgsMapLayerUtils.updateLayerSourcePath = staticmethod(QgsMapLayerUtils.updateLayerSourcePath)
+    QgsMapLayerUtils.sortLayersByType = staticmethod(QgsMapLayerUtils.sortLayersByType)
+    QgsMapLayerUtils.launderLayerName = staticmethod(QgsMapLayerUtils.launderLayerName)
+    QgsMapLayerUtils.isOpenStreetMapLayer = staticmethod(QgsMapLayerUtils.isOpenStreetMapLayer)
+    QgsMapLayerUtils.isOpenStreetMapUri = staticmethod(QgsMapLayerUtils.isOpenStreetMapUri)
+    QgsMapLayerUtils.layerTypeToString = staticmethod(QgsMapLayerUtils.layerTypeToString)
+    QgsMapLayerUtils.layerToolTip = staticmethod(QgsMapLayerUtils.layerToolTip)
+except (NameError, AttributeError):
+    pass
