@@ -226,8 +226,11 @@ void notify_project_changed(QMainWindow* window) {
             pwb::closure_science::qt::PredictionWorkflowController*>();
         controller != nullptr) {
         // No cross-project spec leakage: the draft resets to whatever the
-        // new project recorded (or defaults).
+        // new project recorded (or defaults)...
         controller->restore_persisted_spec();
+        // ...and the well-seismic link re-anchors: the previous project's
+        // calibration table must never keep a live link converting.
+        controller->link()->refresh();
     }
 }
 

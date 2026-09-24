@@ -180,8 +180,9 @@ void compose_prediction_bottom(AppShell* shell) {
             make_pane(QStringLiteral("测井轨道（与地图联动）"), split);
         auto* well = new pwb::viz::WellLogHostWidget(well_frame);
         well->setObjectName(QStringLiteral("WorkspaceWellPane"));
-        // 稿窗格题头行：深度(m) 标注 + 联动 勾选。联动后端与 Ribbon
-        // predict.link 同一状态 —— 当前未接入，诚实禁用。
+        // 稿窗格题头行：深度(m) 标注 + 联动 勾选。井震联动的真实后端在
+        // ws1（Ribbon「联动」= WellSeismicLinkController，时深标定门控）；
+        // 稿视图自身没有标定/游标通道，诚实禁用并指路。
         if (auto* bar = well_frame->findChild<QHBoxLayout*>()) {
             auto* depth = new QLabel(QStringLiteral("深度(m)"),
                                      well_frame);
@@ -189,7 +190,8 @@ void compose_prediction_bottom(AppShell* shell) {
             link->setChecked(true);
             link->setEnabled(false);
             link->setToolTip(QStringLiteral(
-                "联动后端未接入 — 与 Ribbon「联动」命令同一状态"));
+                "井震联动在智能预测工作区（Ribbon「联动」命令，时深标定"
+                "门控）；稿视图未接入标定/游标通道"));
             bar->insertWidget(bar->count() - 1, depth);
             bar->insertWidget(bar->count() - 1, link);
         }

@@ -301,7 +301,8 @@ void WellLogPredictionPage::begin_external_run() {
     evidence_panel_->set_inferring(true);
 }
 
-bool WellLogPredictionPage::select_well_resource(    const std::string& resource_id) {
+bool WellLogPredictionPage::select_well_resource(
+    const std::string& resource_id) {
     if (project_ == nullptr) {
         return false;
     }

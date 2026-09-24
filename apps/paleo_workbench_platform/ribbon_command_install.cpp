@@ -499,7 +499,7 @@ void predict_commands(ui_shell::CommandRegistry& registry,
 #else
     register_disabled(registry, ids, "predict.select_well",
                       QStringLiteral("选择井数据"), QStringLiteral("选择参与预测的井"),
-                      QStringLiteral("井 well"), QStringLiteral("构建未含预测科学切片"));
+                      QStringLiteral("井 well"), QStringLiteral("构建未含预测科学/数据集成切片"));
 #endif
 #if defined(PWB_WITH_SEISMIC_VIEWER) && defined(PWB_WITH_DATA_INTEGRATION)
     register_real(registry, ids, "predict.select_seismic",
@@ -538,7 +538,7 @@ void predict_commands(ui_shell::CommandRegistry& registry,
 #else
     register_disabled(registry, ids, "predict.model_params",
                       QStringLiteral("相预测 v2"), QStringLiteral("预测模型/版本选择"),
-                      QStringLiteral("相预测 模型 model 版本"), QStringLiteral("构建未含预测科学切片"));
+                      QStringLiteral("相预测 模型 model 版本"), QStringLiteral("构建未含预测科学/数据集成切片"));
 #endif
 #if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
     // RunSpec path: preflight (model package + input contract + params)
@@ -555,7 +555,7 @@ void predict_commands(ui_shell::CommandRegistry& registry,
                 controller->run();
                 return;
             }
-            if (c.shell->well_log_page() != nullptr) {
+            if (c.shell != nullptr && c.shell->well_log_page() != nullptr) {
                 c.shell->well_log_page()->on_run();
             }
         },
@@ -639,7 +639,7 @@ void predict_commands(ui_shell::CommandRegistry& registry,
 #else
     register_disabled(registry, ids, "predict.params", QStringLiteral("参数"),
                       QStringLiteral("预测运行参数"), QStringLiteral("参数 params"),
-                      QStringLiteral("构建未含预测科学切片"));
+                      QStringLiteral("构建未含预测科学/数据集成切片"));
 #endif
     register_real(registry, ids, "predict.overlay_seismic",
                   QStringLiteral("地震叠加"), QStringLiteral("叠加地震相预测成果"),
@@ -685,7 +685,7 @@ void predict_commands(ui_shell::CommandRegistry& registry,
 #else
     register_disabled(registry, ids, "predict.link", QStringLiteral("联动"),
                       QStringLiteral("井震联动开关"), QStringLiteral("联动 link"),
-                      QStringLiteral("构建未含预测科学切片"));
+                      QStringLiteral("构建未含预测科学/数据集成切片"));
 #endif
     register_real(registry, ids, "predict.save", QStringLiteral("保存结果"),
                   QStringLiteral("保存当前阶段成果"), QStringLiteral("保存 save"),

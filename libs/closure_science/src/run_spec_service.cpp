@@ -5,8 +5,11 @@
 #include <pwb/prediction/onnx_session.hpp>
 
 #include <algorithm>
+#include <deque>
 #include <filesystem>
+#include <mutex>
 #include <set>
+#include <utility>
 
 namespace pwb::closure_science {
 
@@ -213,6 +216,41 @@ ModelPackageSummary inspect_model_package(
             manifest_path.parent_path() / "manifest.json";
         if (std::filesystem::exists(sibling, ec)) manifest_path = sibling;
     }
+    // The artifact digest dominates the cost (whole-file sha256). Selection
+    // and preflight both inspect; an UNCHANGED package (every file's size +
+    // mtime) within this process must not re-hash — the cache never
+    // bypasses identity: any file change changes the key.
+    struct CacheEntry {
+        std::string key;
+        ModelPackageSummary summary;
+    };
+    static std::mutex cache_mutex;
+    static std::deque<CacheEntry> cache;
+    const auto stat_of = [](const std::filesystem::path& path) {
+        std::error_code ec;
+        const auto time = std::filesystem::last_write_time(path, ec);
+        const auto size = std::filesystem::file_size(path, ec);
+        return std::to_string(time.time_since_epoch().count()) + ":" +
+               std::to_string(ec ? 0 : static_cast<long long>(size));
+    };
+    std::string dir_stats;
+    std::error_code iter_ec;
+    for (const auto& entry :
+         std::filesystem::directory_iterator(
+             manifest_path.parent_path(), iter_ec)) {
+        if (entry.is_regular_file(iter_ec)) {
+            dir_stats += "|" + entry.path().filename().string() + "=" +
+                         stat_of(entry.path());
+        }
+    }
+    const std::string key =
+        manifest_path.string() + dir_stats;
+    {
+        const std::lock_guard<std::mutex> lock(cache_mutex);
+        for (const auto& entry : cache) {
+            if (entry.key == key) return entry.summary;
+        }
+    }
     try {
         const pwb::prediction::LoadedModelPackage package =
             pwb::prediction::load_model_package(manifest_path.string());
@@ -228,6 +266,12 @@ ModelPackageSummary inspect_model_package(
     } catch (const std::exception& exc) {
         summary.ok = false;
         summary.error = exc.what();
+    }
+    {
+        const std::lock_guard<std::mutex> lock(cache_mutex);
+        constexpr std::size_t kCacheLimit = 32;
+        if (cache.size() >= kCacheLimit) cache.pop_front();
+        cache.push_back({key, summary});
     }
     return summary;
 }

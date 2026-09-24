@@ -30,6 +30,8 @@
 #include <string>
 #include <vector>
 
+class QTimer;
+
 namespace pwb::ui_wellseis::qt {
 class SeismicPredictionPage;
 class WellLogPredictionPage;
@@ -90,7 +92,8 @@ signals:
     void status_message(const QString& message);
 
 private:
-    void persist_spec();
+    void persist_spec();       // debounced section write
+    void write_spec_section();  // immediate write (run() flushes with it)
     void apply_seismic_selection(const std::string& resource_id);
 
     SciencePageBinding* binding_ = nullptr;
@@ -100,6 +103,10 @@ private:
     QWidget* dialog_parent_ = nullptr;
     pwb::prediction::PredictionRunSpec spec_;
     WellSeismicLinkController* link_ = nullptr;
+    // Section writes are debounced (combo-storm seismic selection must not
+    // save the whole project document per change); explicit edits and run
+    // starts flush immediately.
+    QTimer* persist_timer_ = nullptr;
 };
 
 // Installs the controller (findChild-able, objectName

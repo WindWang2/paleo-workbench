@@ -7,6 +7,7 @@
 #include <QMessageBox>
 #include <QObject>
 #include <QString>
+#include <QTimer>
 
 #include <map>
 #include <utility>
@@ -29,8 +30,14 @@ PredictionWorkflowController::PredictionWorkflowController(
       binding_(binding),
       well_page_(well_page),
       seismic_page_(seismic_page),
-      link_(new WellSeismicLinkController(this)) {
+      link_(new WellSeismicLinkController(this)),
+      persist_timer_(new QTimer(this)) {
     setObjectName(QStringLiteral("PredictionWorkflowController"));
+    persist_timer_->setSingleShot(true);
+    persist_timer_->setInterval(400);
+    connect(persist_timer_, &QTimer::timeout, this, [this] {
+        write_spec_section();
+    });
     if (well_page_ != nullptr && seismic_page_ != nullptr) {
         link_->attach(well_page_, seismic_page_);
     }
@@ -86,12 +93,21 @@ bool PredictionWorkflowController::restore_persisted_spec() {
         }
         emit status_message(
             QStringLiteral("已忽略无法解析的预测运行配置: %1").arg(joined));
+        emit spec_changed();  // the draft was still reset to defaults
         return false;
     }
     spec_ = *parsed;
     // Resolved identity never survives a reload — preflight re-resolves.
     spec_.resolved = domain::Json::object();
     emit spec_changed();
+    // Push the restored seismic selection to the page so the shown volume
+    // and the run input cannot silently diverge (the same-id guard in
+    // apply_seismic_selection prevents a re-entry loop; a page whose
+    // project lacks the resource keeps its own selection).
+    if (spec_.seismic_resource_id.has_value() &&
+        seismic_page_ != nullptr) {
+        seismic_page_->select_seismic_resource(*spec_.seismic_resource_id);
+    }
     return true;
 }
 
@@ -202,6 +218,8 @@ bool PredictionWorkflowController::run() {
                            "RunSpec）"));
         return false;
     }
+    // The stored section must match the spec this run records as provenance.
+    write_spec_section();
     const SciencePageBinding::SpecRunResult result =
         binding_->start_spec_run(spec_, seismic_page_);
     if (!result.started) {
@@ -239,6 +257,14 @@ bool PredictionWorkflowController::is_running() const {
 }
 
 void PredictionWorkflowController::persist_spec() {
+    // Debounced: combo-storm selection changes must not each save the
+    // whole project document; run() flushes before starting.
+    if (persist_timer_->isActive()) return;
+    persist_timer_->start();
+}
+
+void PredictionWorkflowController::write_spec_section() {
+    persist_timer_->stop();
     if (!seams_.write_run_spec) return;
     const domain::DataError error = seams_.write_run_spec(spec_.to_json());
     if (error.code != domain::ErrorCode::Ok) {

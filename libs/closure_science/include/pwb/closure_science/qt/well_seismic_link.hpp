@@ -20,6 +20,7 @@
 #include <pwb/viz/well_tie/calibration.hpp>
 
 #include <QObject>
+#include <QPointer>
 #include <QString>
 
 #include <functional>
@@ -75,6 +76,11 @@ public:
     bool set_enabled(bool on);
     [[nodiscard]] bool is_enabled() const;
 
+    // Re-resolves the focused well's calibration against the CURRENT
+    // provider backing (project switch / close: the old project's table
+    // must never keep a live link alive — see notify_project_changed).
+    void refresh();
+
     // "" when the link could run right now; otherwise the exact reason
     // (no pages attached / no well selected / no calibration for the well /
     // depth unit unusable on the canvas).
@@ -102,10 +108,15 @@ private:
     void on_seismic_cursor(double il, double xl, double twt_ms);
     void on_depth_cursor(double depth_m);
 
-    ui_wellseis::qt::WellLogPredictionPage* well_page_ = nullptr;
-    ui_wellseis::qt::SeismicPredictionPage* seismic_page_ = nullptr;
+    // QPointer: the pages die with the shell like this controller, but the
+    // guard makes that lifetime an enforced invariant instead of a lucky
+    // assembly fact (a destroyed page reads as null, never a dereference).
+    QPointer<ui_wellseis::qt::WellLogPredictionPage> well_page_;
+    QPointer<ui_wellseis::qt::SeismicPredictionPage> seismic_page_;
     CalibrationProvider calibration_provider_;
     std::optional<WellTimeDepthCalibration> active_calibration_;
+    // Built once per refresh — cursor events must not rebuild it.
+    std::optional<pwb::viz::well_tie::WellTieCalibration> active_conversion_;
     std::string focused_well_id_;
     bool enabled_ = false;
     std::optional<CursorPair> last_conversion_;
