@@ -170,11 +170,39 @@ public:
                 Qt::QueuedConnection);
         }
 
+        // Terminal deliveries (completed/failed/cancelled) clear the
+        // lane's busy flag INSIDE the delivered wrapper, before the page
+        // callback runs. marshal() is a non-blocking post: clearing busy
+        // on the worker thread after body() returns leaves a window where
+        // the GUI already ran the terminal callback (label updated) while
+        // busy() still reads true — an entry guard querying
+        // is_running() in that window pops a "still running" modal. The
+        // GUI-side clear restores the engineered happens-before:
+        // terminal callback observed ⇒ busy already false.
+        void marshal_terminal(std::function<void()> fn) const {
+            auto* pump = worker_delivery_pump();
+            if (pump == nullptr || QCoreApplication::instance() == nullptr) {
+                return;
+            }
+            auto guard = released_;
+            auto busy = busy_;
+            QMetaObject::invokeMethod(
+                pump,
+                [guard, busy, fn = std::move(fn)]() {
+                    busy->store(false, std::memory_order_release);
+                    if (guard->load()) return;  // run released: drop
+                    fn();
+                },
+                Qt::QueuedConnection);
+        }
+
     private:
         friend class WorkerLane;
-        explicit Client(std::shared_ptr<std::atomic<bool>> released)
-            : released_(std::move(released)) {}
+        Client(std::shared_ptr<std::atomic<bool>> released,
+               std::shared_ptr<std::atomic<bool>> busy)
+            : released_(std::move(released)), busy_(std::move(busy)) {}
         std::shared_ptr<std::atomic<bool>> released_;
+        std::shared_ptr<std::atomic<bool>> busy_;
     };
 
     // Cancel observation moved onto PaleoTaskBodyContext (the retired
@@ -212,23 +240,22 @@ public:
         released_ = released;
         // busy_ is the retired Control::busy flag, NOT owner_->is_running():
         // the task STATUS flips on the worker thread only after the
-        // blocking finished() handshake reached the GUI — a page that
-        // observed the marshalled terminal callback (queued BEFORE the
-        // body returned) could still see is_running() true and pop a
-        // "still running" modal. Clearing the flag on the body thread
-        // right after the terminal marshal restores the old
-        // happens-before: label visible ⇒ not busy.
+        // blocking finished() handshake reached the GUI. Terminal
+        // callbacks go through Client::marshal_terminal, which clears the
+        // flag inside the delivered wrapper BEFORE the page callback runs
+        // — happens-before: terminal callback observed ⇒ not busy.
         auto busy = busy_;
         busy->store(true, std::memory_order_release);
         owner_->start(
             std::move(kind), std::move(title),
             [body = std::move(body), released,
              busy](pwb::qgis_processing::PaleoTaskBodyContext& ctx) -> bool {
-                Client client(released);
+                Client client(released, busy);
                 body(client, ctx);
                 // Marshals exactly one terminal callback itself
                 // (completed/cancelled/failed); the task-level outcome is
-                // projection only.
+                // projection only. This store covers bodies that exit
+                // without a terminal marshal (exception escapes).
                 busy->store(false, std::memory_order_release);
                 return true;
             },
@@ -822,7 +849,8 @@ bool install(const Install& install) {
                     done.clean_count = result.clean_count;
                     done.executed_count = result.executed_count;
                     if (result.cancelled) {
-                        client.marshal([cancelled] { cancelled(); });
+                        client.marshal_terminal(
+                            [cancelled] { cancelled(); });
                     } else {
                         // The full DTO travels through the shared grid
                         // store keyed by task id; the view carries the
@@ -832,17 +860,17 @@ bool install(const Install& install) {
                             std::make_shared<pwb::ui_workers::
                                                  FactorPrepareBatchResult>(
                                 std::move(result));
-                        client.marshal(
+                        client.marshal_terminal(
                             [completed, done, payload, grids] {
                                 grids->stash_last_result(payload);
                                 completed(done);
                             });
                     }
                 } catch (const job::JobCancelled&) {
-                    client.marshal([cancelled] { cancelled(); });
+                    client.marshal_terminal([cancelled] { cancelled(); });
                 } catch (const std::exception& exc) {
                     const QString message = QString::fromUtf8(exc.what());
-                    client.marshal(
+                    client.marshal_terminal(
                         [failed, message] { failed(message); });
                 }
             });
@@ -904,7 +932,7 @@ bool install(const Install& install) {
             result.method = method;
             for (int i = 0; i < 1; ++i) {
                 if (ctx.cancel_requested()) {
-                    client.marshal([cancelled] { cancelled(); });
+                    client.marshal_terminal([cancelled] { cancelled(); });
                     return;
                 }
                 pwb::ui_workers::FactorPrepareTaskResult item;
@@ -917,7 +945,7 @@ bool install(const Install& install) {
             done.generation = gen;
             done.clean_count = result.clean_count;
             done.executed_count = result.executed_count;
-            client.marshal([completed, done] { completed(done); });
+            client.marshal_terminal([completed, done] { completed(done); });
         });
         });
     preparation->set_commit_prepare_fn(
@@ -1167,12 +1195,13 @@ bool install(const Install& install) {
                         payload->push_back(draft_to_json(draft));
                     }
                 }
-                client.marshal([completed, payload] {
+                client.marshal_terminal([completed, payload] {
                     completed(payload.get());
                 });
             } catch (const std::exception& exc) {
                 const QString message = QString::fromUtf8(exc.what());
-                client.marshal([failed, message] { failed(message); });
+                client.marshal_terminal(
+                    [failed, message] { failed(message); });
             }
         });
         });

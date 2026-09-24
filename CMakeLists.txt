@@ -1363,6 +1363,10 @@ if(TARGET pwb-platform
    AND TARGET Pwb::UiRibbonQt)
     target_sources(pwb-platform PRIVATE
         apps/paleo_workbench_platform/app_shell.cpp
+        apps/paleo_workbench_platform/data_management_page.cpp
+        apps/paleo_workbench_platform/data_management_page.hpp
+        apps/paleo_workbench_platform/qgis_authoring_page.cpp
+        apps/paleo_workbench_platform/qgis_authoring_page.hpp
         apps/paleo_workbench_platform/validation_workspace_page.cpp
         apps/paleo_workbench_platform/factor_reference_strip.cpp
         apps/paleo_workbench_platform/workspace_compose.cpp
@@ -1410,6 +1414,10 @@ if(TARGET pwb-platform
             apps/paleo_workbench_platform/app_context.cpp
             apps/paleo_workbench_platform/diagnostics.cpp
             apps/paleo_workbench_platform/app_shell.cpp
+        apps/paleo_workbench_platform/data_management_page.cpp
+        apps/paleo_workbench_platform/data_management_page.hpp
+        apps/paleo_workbench_platform/qgis_authoring_page.cpp
+        apps/paleo_workbench_platform/qgis_authoring_page.hpp
             apps/paleo_workbench_platform/validation_workspace_page.cpp
             apps/paleo_workbench_platform/factor_reference_strip.cpp
             apps/paleo_workbench_platform/workspace_compose.cpp
@@ -1472,6 +1480,10 @@ if(TARGET pwb-platform
                 apps/paleo_workbench_platform/app_context.cpp
                 apps/paleo_workbench_platform/diagnostics.cpp
                 apps/paleo_workbench_platform/app_shell.cpp
+        apps/paleo_workbench_platform/data_management_page.cpp
+        apps/paleo_workbench_platform/data_management_page.hpp
+        apps/paleo_workbench_platform/qgis_authoring_page.cpp
+        apps/paleo_workbench_platform/qgis_authoring_page.hpp
                 apps/paleo_workbench_platform/stage_flow_install.cpp
                 apps/paleo_workbench_platform/validation_workspace_page.cpp
                 apps/paleo_workbench_platform/factor_reference_strip.cpp
@@ -1537,6 +1549,10 @@ if(TARGET pwb-platform
             apps/paleo_workbench_platform/app_context.cpp
             apps/paleo_workbench_platform/diagnostics.cpp
             apps/paleo_workbench_platform/app_shell.cpp
+        apps/paleo_workbench_platform/data_management_page.cpp
+        apps/paleo_workbench_platform/data_management_page.hpp
+        apps/paleo_workbench_platform/qgis_authoring_page.cpp
+        apps/paleo_workbench_platform/qgis_authoring_page.hpp
             apps/paleo_workbench_platform/stage_flow_install.cpp
             apps/paleo_workbench_platform/constraint_authoring.cpp
             apps/paleo_workbench_platform/validation_workspace_page.cpp
@@ -1615,6 +1631,10 @@ if(TARGET pwb-platform
                 apps/paleo_workbench_platform/app_context.cpp
                 apps/paleo_workbench_platform/diagnostics.cpp
                 apps/paleo_workbench_platform/app_shell.cpp
+        apps/paleo_workbench_platform/data_management_page.cpp
+        apps/paleo_workbench_platform/data_management_page.hpp
+        apps/paleo_workbench_platform/qgis_authoring_page.cpp
+        apps/paleo_workbench_platform/qgis_authoring_page.hpp
                 apps/paleo_workbench_platform/shell_project_actions.cpp
                 apps/paleo_workbench_platform/closure_review_install.cpp
                 apps/paleo_workbench_platform/validation_workspace_page.cpp
@@ -2114,6 +2134,10 @@ if(TARGET pwb-platform
     # 09-verification-report.md).
     add_executable(platform_closure_mapping tests/cpp/platform/test_closure_mapping.cpp
         apps/paleo_workbench_platform/app_shell.cpp
+        apps/paleo_workbench_platform/data_management_page.cpp
+        apps/paleo_workbench_platform/data_management_page.hpp
+        apps/paleo_workbench_platform/qgis_authoring_page.cpp
+        apps/paleo_workbench_platform/qgis_authoring_page.hpp
         apps/paleo_workbench_platform/main_window.cpp
         apps/paleo_workbench_platform/app_context.cpp
         apps/paleo_workbench_platform/diagnostics.cpp
@@ -2178,6 +2202,10 @@ if(TARGET pwb-platform
     add_executable(platform_ribbon_visual
         tests/cpp/platform/test_ribbon_visual.cpp
         apps/paleo_workbench_platform/app_shell.cpp
+        apps/paleo_workbench_platform/data_management_page.cpp
+        apps/paleo_workbench_platform/data_management_page.hpp
+        apps/paleo_workbench_platform/qgis_authoring_page.cpp
+        apps/paleo_workbench_platform/qgis_authoring_page.hpp
         apps/paleo_workbench_platform/main_window.cpp
         apps/paleo_workbench_platform/app_context.cpp
         apps/paleo_workbench_platform/diagnostics.cpp
@@ -2295,6 +2323,10 @@ if(PWB_BUILD_PLATFORM AND TARGET Pwb::VizChartsQt
                 apps/paleo_workbench_platform/app_context.cpp
                 apps/paleo_workbench_platform/diagnostics.cpp
                 apps/paleo_workbench_platform/app_shell.cpp
+        apps/paleo_workbench_platform/data_management_page.cpp
+        apps/paleo_workbench_platform/data_management_page.hpp
+        apps/paleo_workbench_platform/qgis_authoring_page.cpp
+        apps/paleo_workbench_platform/qgis_authoring_page.hpp
                 apps/paleo_workbench_platform/job_center.cpp
                 apps/paleo_workbench_platform/viz_e_dat_preview.cpp
                 apps/paleo_workbench_platform/viz_e_factor_preview.cpp

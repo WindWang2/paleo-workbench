@@ -239,31 +239,31 @@ void install(const Install& install) {
                      [scene](bool on) { scene->set_snap_enabled(on); });
     ribbon->set_command_action(QStringLiteral("factor.snap"), snap_action);
 
-    // 选中驱动：line → 约束线组（ws2+ws3）；label → 标注组（ws3）；
-    // 其它/空 → 清除。facies/well 无新增上下文组：ws3 静态带已有
-    // 相界编辑/参考图组覆盖（诚实说明，见报告）。
+    // 选中驱动（两页壳层）：line → 约束线组；label → 标注组；其它/空 →
+    // 清除。全部注入编图带（ws1）——原 ws2/ws3 已并入该页的模式带。
+    // facies/well 无新增上下文组：综合编图模式组已有相界编辑/参考图组
+    // 覆盖（诚实说明，见报告）。
+    // ws1 = ui_ribbon::Workspace::Authoring (编图带)。
+    constexpr int kAuthoring = 1;
     QObject::connect(scene, &ui_pages_mapedit::MapEditScene::selection_ids_changed,
-                     ribbon, [scene, ribbon](const QStringList& ids) {
+                     ribbon,
+                     [scene, ribbon](const QStringList& ids) {
                          const QString kind = selected_kind(scene, ids);
-                         const bool line = kind == QStringLiteral("line");
-                         const bool label = kind == QStringLiteral("label");
-                         for (const int workspace : {2, 3}) {
-                             if (line) {
-                                 ribbon->set_context_group(
-                                     workspace, QStringLiteral("constraint"),
-                                     constraint_group_spec());
-                             } else {
-                                 ribbon->clear_context_group(
-                                     workspace, QStringLiteral("constraint"));
-                             }
-                         }
-                         if (label) {
+                         if (kind == QStringLiteral("line")) {
                              ribbon->set_context_group(
-                                 3, QStringLiteral("annotation"),
+                                 kAuthoring, QStringLiteral("constraint"),
+                                 constraint_group_spec());
+                         } else {
+                             ribbon->clear_context_group(
+                                 kAuthoring, QStringLiteral("constraint"));
+                         }
+                         if (kind == QStringLiteral("label")) {
+                             ribbon->set_context_group(
+                                 kAuthoring, QStringLiteral("annotation"),
                                  annotation_group_spec());
                          } else {
                              ribbon->clear_context_group(
-                                 3, QStringLiteral("annotation"));
+                                 kAuthoring, QStringLiteral("annotation"));
                          }
                      });
 }

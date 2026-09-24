@@ -1,24 +1,19 @@
 #pragma once
 
-// UI-18 — Ribbon 五工作区 chrome, Qt-free core: workspace registry +
+// UI-18 — Ribbon 两页 chrome, Qt-free core: workspace registry +
 // data-driven command group table.
 //
-// M1 of docs/development/ribbon-five-workspaces/00-plan.md (D3): this
-// library is pure data + derivation — no Qt, no CommandRegistry link, no
-// domain authority. The design contract lives in
-// docs/ui-redesign/qt-ribbon-workspaces-2026-09-21/README.md:
-//   * five workspaces in FIXED order (R:19/F:24): 数据管理 / 1 智能预测 /
-//     2 约束与单因素 / 3 综合编图 / 验证;
-//   * the middle three ARE stage views — they map onto the tool_policy
-//     stage vocabulary (facies_calibration / constraint_factor /
-//     integrated_compilation); 数据管理 and 验证 have no stage, so
-//     entering them never rewrites ProjectSession::mapping_stage (D1);
-//   * command ids are SEMANTIC PLACEHOLDERS ("data.import", ...) — M4
-//     rebinds them to the real CommandRegistry ids. The table SHAPE
-//     (icon name, text, primary/toggle/overflow flags) is what M1
-//     freezes; the group structure mirrors the prototype's five pages
-//     (prototypes/qt_ribbon_native/main.cpp:200-205) — structure only,
-//     never its synthetic data, inline QSS or icon heuristics.
+// Two-page shell (docs/ui-redesign/two-page-shell-2026-09-24/README.md —
+// supersedes the five-workspace table):
+//   * TWO workspaces in FIXED order: 数据管理 / 编图;
+//   * the former three stage workspaces (智能预测 / 约束与单因素 /
+//     综合编图) are now MODES inside 编图 — they still map onto the
+//     tool_policy stage vocabulary (facies_calibration /
+//     constraint_factor / integrated_compilation) but the stage is
+//     written by the 编图模式 toggle commands (mode.*), never by page
+//     entry (D1: workspace_stage() returns nullopt for both pages);
+//   * command ids are SEMANTIC PLACEHOLDERS ("data.import", "mode.predict",
+//     ...) — the host rebinds them to the real CommandRegistry ids.
 
 #include <array>
 #include <optional>
@@ -35,33 +30,28 @@ namespace pwb::ui_ribbon {
 
 enum class Workspace {
     DataManagement,
-    IntelligentPrediction,
-    ConstraintFactor,
-    IntegratedCompilation,
-    Validation,
+    Authoring,
 };
 
-// The Ribbon tab order (R:19). Never reorder — navigation indices are
-// load-bearing once the host wires shortcuts 1..5 (M2).
-inline constexpr std::array<Workspace, 5> kWorkspaceOrder = {
+// The Ribbon tab order. Never reorder — navigation indices are
+// load-bearing once the host wires shortcuts 1..2.
+inline constexpr std::array<Workspace, 2> kWorkspaceOrder = {
     Workspace::DataManagement,
-    Workspace::IntelligentPrediction,
-    Workspace::ConstraintFactor,
-    Workspace::IntegratedCompilation,
-    Workspace::Validation,
+    Workspace::Authoring,
 };
-inline constexpr int kWorkspaceCount = 5;
+inline constexpr int kWorkspaceCount = 2;
 
-// Stable ids ("data_management", "intelligent_prediction", ...) and the
-// Chinese display labels ("数据管理", "1 智能预测", ...). Unknown input
-// never fabricates: lookups return nullopt.
+// Stable ids ("data_management", "authoring") and the Chinese display
+// labels ("数据管理", "编图"). Unknown input never fabricates: lookups
+// return nullopt.
 const char* workspace_id(Workspace workspace);
 const char* workspace_label(Workspace workspace);
 std::optional<Workspace> workspace_from_id(const std::string& id);
 std::optional<Workspace> workspace_from_label(const std::string& label);
 
-// Stage mapping (D1): the middle three workspaces are stage views;
-// 数据管理/验证 return nullopt (entering them must not rewrite the stage).
+// Stage mapping (D1): page entry never rewrites the stage — both
+// workspaces return nullopt; the three MappingStages all live INSIDE
+// 编图 as modes (workspace_for_stage -> Authoring for every stage).
 std::optional<tool_policy::MappingStage> workspace_stage(
     Workspace workspace);
 std::optional<Workspace> workspace_for_stage(
@@ -107,8 +97,27 @@ struct RibbonWorkspaceSpec {
     std::vector<RibbonGroup> groups;
 };
 
-// The five workspace specs in kWorkspaceOrder.
+// The two workspace specs in kWorkspaceOrder.
 const std::vector<RibbonWorkspaceSpec>& workspace_specs();
+
+// ---------------------------------------------------------------------------
+// 编图 modes (in-page) — the three stage projections.
+// ---------------------------------------------------------------------------
+
+// The 编图模式 toggle command ids in the static band group
+// ("mode.predict" / "mode.factor" / "mode.author"); the host binds them
+// to an exclusive checkable QActionGroup that writes the stage
+// authority. Unknown input -> nullptr / nullopt.
+const char* authoring_mode_command_id(tool_policy::MappingStage stage);
+std::optional<tool_policy::MappingStage> authoring_mode_for_command(
+    const std::string& command_id);
+
+// Per-mode command groups the host injects into the 编图 band as
+// context groups (RibbonBar::set_context_group) when the mode changes.
+// They carry the retired stage-workspace command vocabulary verbatim —
+// command ids are unchanged so the M4 registry bindings still resolve.
+std::vector<RibbonGroup> authoring_mode_groups(
+    tool_policy::MappingStage stage);
 
 const RibbonWorkspaceSpec& workspace_spec(Workspace workspace);
 const RibbonWorkspaceSpec* find_workspace_spec(const std::string& id);
