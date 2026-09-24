@@ -141,10 +141,11 @@
 #ifdef PWB_WITH_DATA_INTEGRATION
 #include <pwb/application/adapters/data_store.hpp>
 #endif
-#include <pwb/qgis/layout_service.hpp>
-#ifdef PWB_WITH_CONV_29
-#include <pwb/qgis/composition_layout_service.hpp>
-#endif
+// BEGIN qgis-native-layout-convergence
+#include <pwb/qgis/layout_authority.hpp>
+#include <qgsprintlayout.h>
+#include <pwb/qgis/layout_export_service.hpp>
+// END qgis-native-layout-convergence
 #include <pwb/qgis/layer_adapter.hpp>
 #include <pwb/qgis/layer_factory.hpp>
 #include <pwb/qgis/map_project_store.hpp>
@@ -828,24 +829,8 @@ void MainWindow::buildUi() {
             -> std::shared_ptr<pwb::application::PwbDataStore> {
             return context_.projectStore();
         };
-#ifdef PWB_WITH_CONV_29
-        closure_install.layout_export = [this](const std::string& composition,
-                const std::string& path, const std::string& format, double dpi) {
-            auto& map = context_.session().map();
-            const auto state = pwb::domain::Json::parse(map.canvas_state_json());
-            pwb::qgis::CompositionExportRequest request;
-            request.format = format;
-            request.dpi = dpi;
-            request.force_vector = format == "svg" || format == "pdf";
-            request.crs = state.value("crs", std::string());
-            if (state.contains("extent") && state["extent"].is_array() && state["extent"].size() == 4) {
-                request.has_extent = true;
-                for (int i = 0; i < 4; ++i) request.extent[i] = state["extent"][i].get<double>();
-            }
-            pwb::qgis::CompositionLayoutService service(map);
-            return service.export_layout(composition, std::filesystem::u8path(path), request);
-        };
-#endif
+        closure_install.export_layout_dialog =
+            [this](QgsPrintLayout* layout) { export_layout_dialog(layout); };
         pwb::app::closure_mapping::install(closure_install);
     }
 #endif
@@ -1843,6 +1828,12 @@ QString MainWindow::openProject(const QString& project_file) {
 
     context_.session().set_store(store);
     context_.setProjectStore(store);
+    // BEGIN qgis-native-layout-convergence
+    // Layouts follow the open project — unconditionally (the save hook
+    // writes them unconditionally too): drop the previous project's
+    // QgsPrintLayouts and rebuild this project's from root["layouts"].
+    restoreLayoutsFromDocument();
+    // END qgis-native-layout-convergence
 // BEGIN CLOSURE-MAPPING — rebind the preparation page + mapping document
 // bank to the freshly opened project.
 #ifdef PWB_WITH_CLOSURE_MAPPING
@@ -2322,6 +2313,10 @@ QString MainWindow::closeProject() {
     if (QgsProject* project = context_.session().map().project()) {
         project->removeAllMapLayers();
     }
+    // BEGIN qgis-native-layout-convergence
+    // The closing project's layouts must not leak into the next one.
+    context_.session().layout().clear();
+    // END qgis-native-layout-convergence
     context_.session().set_store(nullptr);
     context_.setProjectStore(nullptr);
     facts_.clear();
@@ -2454,151 +2449,159 @@ void MainWindow::redoEdition() {
     refreshActionStates();
 }
 
-#ifdef PWB_WITH_CONV_29
-namespace {
-// CONV-29: the platform's built-in export composition — an A4-landscape
-// product page assembled from the live session state (map extent/CRS from
-// the canvas, layers from the tree). It travels through the real native
-// chain: composition JSON → layout_export kernel spec → shared spec
-// executor → QgsLayout file + report.
-std::string build_platform_composition() {
-    pwb::domain::Json composition = pwb::domain::Json::object();
-    composition["id"] = "comp_platform_export";
-    composition["title"] = "平台导出构图";
-    composition["paper_size"] = "A4";
-    composition["orientation"] = "landscape";
-    composition["width_mm"] = 297.0;
-    composition["height_mm"] = 210.0;
-    composition["dpi"] = 300.0;
-    pwb::domain::Json elements = pwb::domain::Json::array();
-    auto add_element = [&elements](const char* id, const char* type,
-                                   double x, double y, double w, double h,
-                                   long long z, pwb::domain::Json props) {
-        pwb::domain::Json element = pwb::domain::Json::object();
-        element["id"] = id;
-        element["element_type"] = type;
-        element["x_mm"] = x;
-        element["y_mm"] = y;
-        element["width_mm"] = w;
-        element["height_mm"] = h;
-        element["z_index"] = z;
-        element["visible"] = true;
-        element["locked"] = false;
-        element["properties"] = std::move(props);
-        elements.push_back(std::move(element));
-    };
-    add_element("el_neatline", "neatline", 2.0, 2.0, 293.0, 206.0, 0,
-                pwb::domain::Json::object());
-    add_element("el_map", "main_map", 8.0, 16.0, 204.0, 164.0, 1,
-                pwb::domain::Json::object());
-    add_element("el_title", "title", 8.0, 3.0, 281.0, 10.0, 2,
-                pwb::domain::Json::object(
-                    {{"text", "古地理图"}, {"font_size", 14.0},
-                     {"align", "center"}, {"color", "#000000"}}));
-    add_element("el_legend", "legend", 218.0, 16.0, 71.0, 100.0, 3,
-                pwb::domain::Json::object({{"items",
-                                            pwb::domain::Json::array()}}));
-    add_element("el_scale", "scale_bar", 8.0, 186.0, 44.0, 8.0, 4,
-                pwb::domain::Json::object({{"units", ""}}));
-    add_element("el_arrow", "north_arrow", 270.0, 186.0, 10.0, 15.0, 5,
-                pwb::domain::Json::object());
-    composition["elements"] = elements;
-    composition["metadata"] = pwb::domain::Json::object();
-    return composition.dump();
-}
-}  // namespace
+// BEGIN qgis-native-layout-convergence
+void MainWindow::syncLayoutsOnSave() {
+    // One save flow: layouts serialize into the SAME project document the
+    // ProjectManager write carries (no "composition save" + "project save"
+    // double-write). Only the serialization happens here — the dirty
+    // flags are cleared by markLayoutsSaved() after commit_save succeeds
+    // (a failed save must leave the layouts dirty, never fake-clean).
+    auto& authority = context_.session().layout();
+#ifdef PWB_WITH_DATA_INTEGRATION
+    if (auto store = context_.projectStore()) {
+        pwb::domain::Json& root = store->document().root();
+        if (root.is_object()) {
+            root["layouts"] = authority.serialize_state();
+        }
+    }
 #endif
+}
+
+void MainWindow::markLayoutsSaved() {
+    context_.session().layout().mark_saved();
+}
+
+void MainWindow::restoreLayoutsFromDocument() {
+    // Project open/switch: drop the previous project's layouts, rebuild
+    // this project's QgsPrintLayouts from the document section.
+    auto& authority = context_.session().layout();
+    authority.clear();
+#ifdef PWB_WITH_DATA_INTEGRATION
+    const auto store = context_.projectStore();
+    if (store == nullptr) return;
+    const pwb::domain::Json& root = store->document().root();
+    if (!root.is_object() || !root.contains("layouts")) return;
+    const pwb::domain::Json& section = root["layouts"];
+    if (!section.is_object()) return;
+    const auto restored = authority.restore_state(section);
+    for (const std::string& error : restored.errors) {
+        diagnostics::warning(diagnostics::LogArea::Project,
+                             QStringLiteral("layout restore: %1")
+                                 .arg(QString::fromStdString(error)));
+    }
+    if (restored.restored > 0) {
+        statusBar()->showMessage(
+            tr("已恢复 %1 个版式布局").arg(restored.restored), 6000);
+    }
+#endif
+}
+// END qgis-native-layout-convergence
 
 void MainWindow::exportLayoutDialog() {
+    export_layout_dialog(nullptr);
+}
+
+void MainWindow::export_layout_dialog(QgsPrintLayout* preferred) {
     const QString path = QFileDialog::getSaveFileName(
         this, tr("导出布局"), QString(),
         tr("PNG 图像 (*.png);;PDF 文档 (*.pdf);;SVG 矢量 (*.svg)"));
     if (path.isEmpty()) return;
     const QString suffix = QFileInfo(path).suffix().toLower();
-#ifdef PWB_WITH_CONV_29
-    // CONV-29: full native chain with pre-flight validation and screen/
-    // export parity — no second layout authority, no Python.
+
+    // qgis-native-layout-convergence: the export target is the persistent
+    // QgsPrintLayout the caller points at (the editor's active layout, or
+    // the first document for the governed action) — never a rebuilt
+    // composition and never a transient layout. When the project has no
+    // layout yet the default geological template materializes one (same
+    // default the old composition panel opened on).
+    auto& authority = context_.session().layout();
+    QgsPrintLayout* layout = preferred;
+    if (layout == nullptr) {
+        const std::vector<pwb::qgis::LayoutInfo> infos = authority.layouts();
+        if (infos.empty()) {
+            const auto created = authority.instantiate_template("single_factor");
+            layout = created.layout;
+            if (layout == nullptr) {
+                QMessageBox::warning(
+                    this, tr("导出布局"),
+                    tr("无法创建默认版式布局（%1）")
+                        .arg(created.warnings.empty()
+                                 ? tr("未知错误")
+                                 : QString::fromStdString(created.warnings.front())));
+                return;
+            }
+            statusBar()->showMessage(tr("已从默认模板创建版式布局"), 4000);
+        } else {
+            layout = authority.layout_by_name(infos.front().name);
+        }
+    }
+    if (layout == nullptr) {
+        QMessageBox::warning(this, tr("导出布局"), tr("没有可导出的版式布局"));
+        return;
+    }
+
     bool accepted = false;
     const double dpi = QInputDialog::getDouble(
         this, tr("导出布局"), tr("输出 DPI"), 300.0, 36.0, 1200.0, 0,
         &accepted);
     if (!accepted) return;
 
-    const pwb::domain::Json canvas_state =
-        pwb::domain::Json::parse(context_.session().map().canvas_state_json());
-    const std::string composition = build_platform_composition();
+    // Phase 8 parity by construction: the map items re-sync to the live
+    // canvas layers/extent right before export — layout and screen consume
+    // the same layer/renderer authority.
+    authority.sync_map_state(layout);
 
-    pwb::qgis::CompositionExportRequest request;
+    pwb::qgis::LayoutExportRequest request;
+    request.output_path = std::filesystem::path(path.toStdWString()).string();
     request.format = suffix.toStdString();
     request.dpi = dpi;
-    if (canvas_state.contains("extent")
-        && canvas_state["extent"].is_array()
-        && canvas_state["extent"].size() == 4) {
-        request.has_extent = true;
-        for (int i = 0; i < 4; ++i) {
-            request.extent[i] = canvas_state["extent"][i].get<double>();
-        }
-    }
-    request.crs = canvas_state.value("crs", std::string());
-
-    pwb::qgis::CompositionLayoutService composition_layouts(context_.session().map());
-
-    // Fail-closed pre-flight: hybrid/unmapped elements surface here,
-    // itemized, before any page is written.
-    const pwb::domain::Json validation =
-        composition_layouts.validate_layout(composition, request);
-    if (!validation.value("ok", false)) {
-        QMessageBox::warning(
-            this, tr("导出布局"),
-            QString::fromStdString(validation.value(
-                "failure", std::string("composition validation failed"))));
+    const pwb::qgis::LayoutExportReport report =
+        pwb::qgis::export_layout(*layout, request);
+    if (!report.ok) {
+        QMessageBox::warning(this, tr("导出布局"),
+                             QString::fromStdString(report.error));
         return;
     }
-
-    // Screen/export parity check (extent/CRS/layers/grid/legend).
-    const pwb::domain::Json parity = composition_layouts.parity_report(
-        context_.session().map().canvas_state_json(), composition, request);
-
-    const pwb::domain::Json report = composition_layouts.export_layout(
-        composition, std::filesystem::path(path.toStdWString()), request);
-    if (!report.value("ok", false)) {
-        QMessageBox::warning(
-            this, tr("导出布局"),
-            QString::fromStdString(
-                report.value("failure", std::string("export failed"))));
-        return;
-    }
-    QString status = tr("已导出: %1 (items=%2)")
+    QString status = tr("已导出: %1 (engine=%2)")
                          .arg(path)
-                         .arg(static_cast<qulonglong>(
-                             report.value("items", static_cast<long long>(0))));
-    const long long width_px =
-        report.value("width_px", static_cast<long long>(0));
-    if (width_px > 0) {
+                         .arg(QString::fromStdString(report.engine));
+    if (report.width_px > 0) {
         status += tr(" %1×%2 px")
-                      .arg(static_cast<qulonglong>(width_px))
-                      .arg(static_cast<qulonglong>(report.value(
-                          "height_px", static_cast<long long>(0))));
-    }
-    const pwb::domain::Json warnings = report.value(
-        "warnings", pwb::domain::Json::array());
-    if (warnings.is_array() && !warnings.empty()) {
-        status += tr(" · 警告 %1 条").arg(static_cast<qulonglong>(warnings.size()));
-    }
-    if (!parity.value("equal", true)) {
-        status += tr(" · 画布/导出存在差异");
+                      .arg(static_cast<qulonglong>(report.width_px))
+                      .arg(static_cast<qulonglong>(report.height_px));
     }
     statusBar()->showMessage(status, 8000);
-#else
-    pwb::qgis::LayoutService layouts(context_.session().map());
-    pwb::qgis::LayoutSpec spec;
-    const std::string error = layouts.export_layout(
-        spec, std::filesystem::path(path.toStdWString()),
-        suffix.toStdString(), 96.0);
-    if (!error.empty()) {
-        QMessageBox::warning(this, tr("导出布局"), QString::fromStdString(error));
-    } else {
-        statusBar()->showMessage(tr("已导出: %1").arg(path), 8000);
+
+    // Export provenance ledger (same artifact shape the composition panel
+    // path wrote; the layout name pins the linked document).
+#ifdef PWB_WITH_DATA_INTEGRATION
+    if (auto store = context_.projectStore()) {
+        pwb::domain::Json& root = store->document().root();
+        if (root.is_object()) {
+            if (!root.contains("export_artifacts") ||
+                !root["export_artifacts"].is_array()) {
+                root["export_artifacts"] = pwb::domain::Json::array();
+            }
+            std::string format = report.format;
+            const std::filesystem::path target(request.output_path);
+            if (target.has_extension()) {
+                format = target.extension().string();
+                if (!format.empty() && format.front() == '.') format.erase(0, 1);
+            }
+            pwb::domain::Json artifact = pwb::domain::Json::object();
+            artifact["id"] = "artifact_" + std::to_string(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count());
+            artifact["linked_id"] = layout->name().toStdString();
+            artifact["format"] = format;
+            artifact["output_path"] = request.output_path;
+            artifact["options"] = pwb::domain::Json::object();
+            artifact["included_map_elements"] = pwb::domain::Json::array();
+            artifact["generated_at"] = pwb::domain::now_iso8601();
+            artifact["source_task_ids"] = pwb::domain::Json::array();
+            artifact["catalog_version_id"] = pwb::domain::Json(nullptr);
+            root["export_artifacts"].push_back(std::move(artifact));
+        }
     }
 #endif
 }
@@ -3007,6 +3010,10 @@ bool MainWindow::anyDirtyEditSession() const {
          context_.session().edit().editing_layer_ids()) {
         if (context_.session().edit().dirty(layer_id)) return true;
     }
+    // Layout edits ride the same dirty contract (qgis-native-layout):
+    // an unsaved QgsPrintLayout edit must trigger the same three-way
+    // close decision, never a silent discard.
+    if (context_.session().layout().is_dirty()) return true;
     return false;
 }
 

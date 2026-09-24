@@ -14,6 +14,7 @@
 #include <functional>
 
 #include <QAction>
+#include <QImage>
 #include <QMap>
 #include <QWidget>
 
@@ -38,6 +39,16 @@ public:
         std::function<void(const pwb::domain::Json&)> writer);
     // The governed export action (the SAME QAction the menus carry).
     void set_export_action(QAction* action);
+    // BEGIN qgis-native-layout-convergence
+    // Real-layout seams: template selection materializes a persistent
+    // QgsPrintLayout through the session authority; the preview renders
+    // that layout through the same QgsLayoutExporter the export path
+    // uses (no self-painted second visual scene). Unbound seams keep the
+    // honest placeholder text.
+    void set_layout_instantiate_fn(
+        std::function<bool(const std::string&)> fn);
+    void set_layout_preview_fn(std::function<QImage()> fn);
+    // END qgis-native-layout-convergence
     // Re-read the chrome state from the document (project open/switch).
     void refresh_chrome();
 
@@ -61,6 +72,7 @@ private:
     void sync_chrome_checks();
     void emit_chrome();
     void update_preview();
+    void instantiate_selected_template();
 
     std::function<pwb::domain::Json()> chrome_reader_;
     std::function<void(const pwb::domain::Json&)> chrome_writer_;
@@ -71,6 +83,10 @@ private:
     QWidget* preview_ = nullptr;
     QLabel* hint_ = nullptr;
     QAction* export_action_ = nullptr;
+    // qgis-native-layout-convergence seams (see setters).
+    std::function<bool(const std::string&)> layout_instantiate_fn_;
+    std::function<QImage()> layout_preview_fn_;
+    QLabel* preview_label_ = nullptr;
     bool syncing_ = false;
 };
 

@@ -16,6 +16,7 @@ ProjectSession::ProjectSession() {
         throw std::logic_error("ProjectSession requires QgisRuntime::acquire() first");
     }
     map_ = std::make_unique<pwb::qgis::MapSession>();
+    layout_ = std::make_unique<pwb::qgis::LayoutAuthority>(*map_);
     edit_ = std::make_unique<pwb::qgis::EditController>(*map_);
 }
 

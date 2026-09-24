@@ -249,7 +249,8 @@ endif()
 
 # BEGIN CONV-29
 # Composition/Layout/Export C++ closure: the export dialog routes through
-# CompositionLayoutService (kernel spec + shared executor + parity).
+# (retired) CompositionLayoutService — the persistent-layout authority
+# (Pwb::Qgis layout_*) superseded the kernel-spec chain.
 # Service and kernel join the link closure via Pwb::Qgis (CONV-29 gated in
 # libs/qgis).
 if(PWB_BUILD_CONV_29)
