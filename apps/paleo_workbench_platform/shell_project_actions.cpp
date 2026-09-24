@@ -115,6 +115,15 @@ QString save_open_project(MainWindow& window, QString* saved_to) {
 
     // BEGIN V14-QGIS-CONTROL
 #ifdef PWB_WITH_CONV_27
+    // QGIS-native persistence handoff FIRST: write the live QgsProject to
+    // the sibling .qgs file and record the pointer in the workspace
+    // state, so the layer-control persistence below runs with the tree
+    // de-duplication active (the GIS tree lives in the .qgs only). A
+    // failed .qgs write aborts the save — no half-success.
+    const QString qgs_error = window.persistQgisProjectOnSave();
+    if (!qgs_error.isEmpty()) {
+        return QObject::tr("QGIS 工程保存失败，工程未保存：%1").arg(qgs_error);
+    }
     // Persist the live layer-control workspace state (desired tree,
     // memberships, stage view states) into the document before the save
     // pipeline serializes it.

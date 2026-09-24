@@ -145,10 +145,17 @@
 #include <pwb/qgis/composition_layout_service.hpp>
 #endif
 #include <pwb/qgis/layer_adapter.hpp>
+#include <pwb/qgis/layer_factory.hpp>
+#include <pwb/qgis/map_project_store.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
+#include <pwb/project/paths.hpp>
+#include <pwb/workspace/state_ops.hpp>
 
 #include "app_context.hpp"
 #include "diagnostics.hpp"
+#ifdef PWB_WITH_QGIS_BROWSER
+#include "qgis_data_workspace_install.hpp"
+#endif
 #ifdef PWB_WITH_APP_SHELL
 #include "app_shell.hpp"
 #include "workspace_compose.hpp"
@@ -591,6 +598,12 @@ void MainWindow::buildUi() {
                         layer_id.toString().toStdString());
                 }
             });
+#endif
+#ifdef PWB_WITH_QGIS_BROWSER
+    // QGIS-native generic data browser (data-management convergence seam;
+    // the domain data page stays a well/lineage view — see
+    // qgis_data_workspace_install.hpp).
+    pwb::app::qgis_data_workspace::install_data_browser(*this);
 #endif
 
     status_label_ = new QLabel(QStringLiteral("ready"), this);
@@ -1483,12 +1496,85 @@ QString MainWindow::openRasterLayer(const QString& path) {
     return QString();
 }
 
+QString MainWindow::openDataFile(const QString& path) {
+    // Provider-driven admission: the registry names every sublayer inside
+    // the URI (GeoPackage tables, sub-datasets, …) with the provider's
+    // own key; failures come back from the provider, never fabricated.
+    std::string query_error;
+    const std::vector<pwb::qgis::layer_factory::ProposedSublayer> sublayers =
+        pwb::qgis::layer_factory::query_sublayers(path.toStdString(),
+                                                  &query_error);
+    if (sublayers.empty()) {
+        return QString::fromStdString(query_error);
+    }
+    const QString base = QFileInfo(path).completeBaseName();
+    int added = 0;
+    std::string first_error;
+    for (const pwb::qgis::layer_factory::ProposedSublayer& sublayer :
+         sublayers) {
+        const QString name = sublayers.size() == 1
+                                 ? base
+                                 : base + QLatin1String(" · ")
+                                       + QString::fromStdString(
+                                           sublayer.name);
+        pwb::qgis::LayerBinding binding{name.toStdString(), "", "",
+                                        sublayer.kind};
+        std::string add_error;
+        QgsMapLayer* layer = pwb::qgis::layer_factory::add_sublayer(
+            context_.session().map(), sublayer, binding, &add_error);
+        if (layer == nullptr) {
+            if (first_error.empty()) first_error = add_error;
+            continue;
+        }
+        if (auto* vector = qobject_cast<QgsVectorLayer*>(layer)) {
+#ifdef PWB_WITH_CONV_27
+            pwb::ui::layer_style::apply_style_sidecar(vector,
+                                                      vector->source());
+#endif
+            // Module-only authority until a store binding exists (same
+            // grant rule as openVectorLayer).
+            pwb::application::DomainLayerFacts facts;
+            facts.layer_id = name.toStdString();
+            facts.role = "facies_boundary";
+            facts.role_label = name.toStdString();
+            facts.artifact_maturity = "draft";
+            facts.write_granted = true;
+            facts_[facts.layer_id] = facts;
+            if (!context_.session().active_layer().has_value()) {
+                context_.session().set_active_layer(facts);
+                canvas_->setExtent(vector->extent());
+            }
+        } else if (!context_.session().active_layer().has_value()) {
+            canvas_->setExtent(layer->extent());
+        }
+        ++added;
+    }
+    if (added == 0) {
+        return QString::fromStdString(
+            first_error.empty() ? "no layers could be added from " +
+                                       path.toStdString()
+                                : first_error);
+    }
+    if (!first_error.empty()) {
+        // Partial success: surface what did not come in (same honesty
+        // rule as openProject's per-layer failures), don't fail the whole
+        // open over the layers that DID load.
+        statusBar()->showMessage(
+            tr("已加载 %1 层，但部分子层失败：%2")
+                .arg(added)
+                .arg(QString::fromStdString(first_error)),
+            12000);
+    }
+    refreshActionStates();
+    return QString();
+}
+
 void MainWindow::openVectorDialog() {
     const QString path = QFileDialog::getOpenFileName(
         this, tr("打开矢量图层"), QString(),
-        tr("矢量数据 (*.gpkg *.geojson *.shp);;所有文件 (*)"));
+        QString::fromStdString(pwb::qgis::layer_factory::vector_file_filter()));
     if (path.isEmpty()) return;
-    const QString error = openVectorLayer(path);
+    const QString error = openDataFile(path);
     if (!error.isEmpty()) {
         QMessageBox::warning(this, tr("打开矢量图层"), error);
     }
@@ -1497,9 +1583,9 @@ void MainWindow::openVectorDialog() {
 void MainWindow::openRasterDialog() {
     const QString path = QFileDialog::getOpenFileName(
         this, tr("打开栅格底图"), QString(),
-        tr("栅格数据 (*.tif *.tiff *.asc);;所有文件 (*)"));
+        QString::fromStdString(pwb::qgis::layer_factory::raster_file_filter()));
     if (path.isEmpty()) return;
-    const QString error = openRasterLayer(path);
+    const QString error = openDataFile(path);
     if (!error.isEmpty()) {
         QMessageBox::warning(this, tr("打开栅格底图"), error);
     }
@@ -1800,76 +1886,236 @@ QString MainWindow::openProject(const QString& project_file) {
     int opened = 0;
     int skipped = 0;
     std::string first_error;
-    for (const pwb::workspace::LayerBinding& binding :
-         snapshot.value().layer_bindings) {
-        const auto it = versions.find(binding.source_version_id);
-        // Vector payloads this shell can edit as working copies (staged
-        // export is GeoJSON either way).
-        if (it == versions.end() || it->second == nullptr || it->second->trashed
-            || (it->second->format != "GeoJSON"
-                && it->second->format != "GPKG")) {
-            continue;
-        }
-        const std::filesystem::path payload =
-            project_dir / it->second->path;
-        std::error_code ec;
-        if (!std::filesystem::exists(payload, ec)) {
-            ++skipped;
-            continue;
-        }
-        std::filesystem::create_directories(working_dir, ec);
-        const std::filesystem::path working = working_dir
-            / (binding.layer_id + payload.extension().string());
-        std::filesystem::copy_file(
-            payload, working, std::filesystem::copy_options::overwrite_existing,
-            ec);
-        if (ec) {
-            if (first_error.empty()) {
-                first_error = "working copy create failed for "
-                    + binding.layer_id + ": " + ec.message();
+
+    // One binding → one staged working copy: the legacy open path, and the
+    // fallback for layers a .qgs restore could not bring back valid.
+    // (The catalog payload file itself is read-only for the shell.)
+    const auto stage_working_copy =
+        [&](const pwb::workspace::LayerBinding& binding,
+            std::filesystem::path* working_out) {
+            const auto it = versions.find(binding.source_version_id);
+            // Vector payloads this shell can edit as working copies
+            // (staged export is GeoJSON either way).
+            if (it == versions.end() || it->second == nullptr
+                || it->second->trashed
+                || (it->second->format != "GeoJSON"
+                    && it->second->format != "GPKG")) {
+                return false;
             }
-            ++skipped;
-            continue;
-        }
-        pwb::qgis::LayerBinding qbinding{binding.layer_id,
-                                         binding.source_asset_id,
-                                         binding.source_version_id,
-                                         "vector"};
-        std::string add_error;
-        QgsVectorLayer* layer = context_.session().map().addVectorLayer(
-            working.string(), binding.layer_id, qbinding, &add_error);
+            const std::filesystem::path payload =
+                project_dir / it->second->path;
+            std::error_code ec;
+            if (!std::filesystem::exists(payload, ec)) {
+                return false;
+            }
+            std::filesystem::create_directories(working_dir, ec);
+            const std::filesystem::path working = working_dir
+                / (binding.layer_id + payload.extension().string());
+            std::filesystem::copy_file(
+                payload, working,
+                std::filesystem::copy_options::overwrite_existing, ec);
+            if (ec) {
+                if (first_error.empty()) {
+                    first_error = "working copy create failed for "
+                        + binding.layer_id + ": " + ec.message();
+                }
+                return false;
+            }
+            if (working_out != nullptr) *working_out = working;
+            return true;
+        };
+    const auto materialize_binding =
+        [&](const pwb::workspace::LayerBinding& binding) {
+            std::filesystem::path working;
+            if (!stage_working_copy(binding, &working)) return false;
+            pwb::qgis::LayerBinding qbinding{binding.layer_id,
+                                             binding.source_asset_id,
+                                             binding.source_version_id,
+                                             "vector"};
+            std::string add_error;
+            QgsVectorLayer* layer = context_.session().map().addVectorLayer(
+                working.string(), binding.layer_id, qbinding, &add_error);
 #ifdef PWB_WITH_CONV_27
-        if (layer != nullptr) {
-            pwb::ui::layer_style::apply_style_sidecar(
-                layer, layer->source());
-        }
+            if (layer != nullptr) {
+                pwb::ui::layer_style::apply_style_sidecar(
+                    layer, layer->source());
+            }
 #endif
-        if (layer == nullptr) {
-            if (first_error.empty()) first_error = add_error;
-            ++skipped;
-            continue;
+            if (layer == nullptr) {
+                if (first_error.empty()) first_error = add_error;
+                return false;
+            }
+            return true;
+        };
+
+    // QGIS-native open (data-management convergence): when the document
+    // hands GIS state to the sibling .qgs file, QgsProject::read restores
+    // layers/tree/CRS/style/view in one step — including the pwb/* join
+    // keys, which ride along as layer custom properties. The Paleo
+    // document only keeps the pointer plus the domain semantics.
+    bool restored_from_qgs = false;
+    pwb::domain::DiagnosticList workspace_diagnostics;
+    const pwb::project::ProjectDocument& open_document = store->document();
+    const pwb::workspace::MappingWorkspaceState workspace_state =
+        pwb::workspace::MappingWorkspaceState::from_json(
+            open_document.mapping_workspace(), workspace_diagnostics);
+    if (!workspace_state.qgis_project_file.empty()) {
+        const auto resolved = pwb::project::resolve_project_path(
+            workspace_state.qgis_project_file, store->project_file());
+        std::error_code exists_ec;
+        if (resolved.is_ok()
+            && std::filesystem::exists(
+                   std::filesystem::path(resolved.value()), exists_ec)) {
+            const pwb::qgis::map_project_store::RestoreReport restore =
+                pwb::qgis::map_project_store::load(
+                    context_.session().map(), resolved.value());
+            if (restore.ok) {
+                restored_from_qgs = true;
+                for (const std::string& warning : restore.warnings) {
+                    if (first_error.empty()) first_error = warning;
+                }
+            } else {
+                // Honest degradation: fall back to binding materialization
+                // below, but surface why the native restore was refused.
+                if (first_error.empty()) first_error = restore.error;
+            }
         }
-        pwb::application::DomainLayerFacts facts;
-        facts.layer_id = binding.layer_id;
-        facts.role = binding.role.empty() ? "facies_boundary" : binding.role;
-        facts.role_label = binding.layer_id;
-        facts.artifact_maturity = "draft";
-        // Working-copy grant: the bound catalog version authorizes edits on
-        // the copy; the payload stays immutable.
-        facts.write_granted = true;
-        facts_[facts.layer_id] = facts;
+        // A missing .qgs file likewise falls through to the legacy path —
+        // the catalog bindings still describe every layer.
+    }
+
+    if (restored_from_qgs) {
+        // Domain facts follow the BOUND restored layers only (join keys
+        // persisted in the project XML; roles/maturity from the
+        // memberships) — the same population rule as the legacy path.
+        // Unbound layers (browser-opened rasters, science product
+        // mirrors) stay out of the facts table exactly as before the
+        // convergence; restored memory-provider shells carry no features
+        // and are honestly reported below (QGIS persists their schema
+        // only).
+        for (const std::string& layer_id :
+             context_.session().map().layerIdsTopFirst()) {
+            QgsMapLayer* layer =
+                context_.session().map().layerById(layer_id);
+            if (layer == nullptr) continue;
+            const pwb::workspace::LayerBinding* binding =
+                pwb::workspace::membership(workspace_state, layer_id);
+            if (binding == nullptr) {
+                if (layer->providerType() == QLatin1String("memory")) {
+                    if (first_error.empty()) {
+                        first_error =
+                            "memory layer '" + layer_id
+                            + "' restored schema-only (features are not "
+                              "persisted by the QGIS project format)";
+                    }
+                }
+                continue;
+            }
+            pwb::application::DomainLayerFacts facts;
+            facts.layer_id = layer_id;
+            facts.role = !binding->role.empty() ? binding->role
+                                                : "facies_boundary";
+            facts.role_label = layer->name().toStdString();
+            const auto maturity =
+                workspace_state.artifact_maturity.find(layer_id);
+            facts.artifact_maturity =
+                maturity != workspace_state.artifact_maturity.end()
+                    ? maturity->second
+                    : "draft";
+            // Same grant rule as both existing paths: the shell grants
+            // writes on the layers it hosts (bound copies honor the
+            // catalog's optimistic lock at commit time).
+            facts.write_granted = true;
+            facts_[layer_id] = facts;
+            if (layer->isValid()) ++opened;
+        }
+        // Bindings whose layer did not come back (or came back invalid —
+        // e.g. a deleted working copy) re-materialize from the catalog.
+        // A restored-but-invalid shell keeps its tree node: the fresh
+        // working copy is adopted as its new source (position/style
+        // survive); an absent shell is added as a plain new layer.
+        for (const pwb::workspace::LayerBinding& binding :
+             snapshot.value().layer_bindings) {
+            QgsMapLayer* layer =
+                context_.session().map().layerById(binding.layer_id);
+            if (layer != nullptr && layer->isValid()) continue;
+            std::filesystem::path working;
+            if (!stage_working_copy(binding, &working)) {
+                ++skipped;  // absent shell or unrestorable payload
+                continue;  // invalid shells stay + get surfaced (below)
+            }
+            if (layer != nullptr) {
+                layer->setDataSource(
+                    QString::fromStdString(working.string()),
+                    QString::fromStdString(binding.layer_id), "ogr");
+                if (layer->isValid()) {
+                    pwb::qgis::LayerBinding qbinding{
+                        binding.layer_id, binding.source_asset_id,
+                        binding.source_version_id, "vector"};
+                    pwb::qgis::layer_adapter::apply(layer, qbinding);
+#ifdef PWB_WITH_CONV_27
+                    pwb::ui::layer_style::apply_style_sidecar(
+                        qobject_cast<QgsVectorLayer*>(layer),
+                        layer->source());
+#endif
+                    ++opened;
+                } else {
+                    // Still broken after the re-point: honest skip, the
+                    // provider error reaches the status surface.
+                    ++skipped;
+                }
+            } else if (materialize_binding(binding)) {
+                ++opened;
+            } else {
+                ++skipped;
+            }
+        }
         if (!context_.session().active_layer().has_value()) {
-            context_.session().set_active_layer(facts);
-            canvas_->setExtent(layer->extent());
+            // Tree-order first bound live layer (same shape as the legacy
+            // path's first-materialized-layer default).
+            for (const std::string& layer_id :
+                 context_.session().map().layerIdsTopFirst()) {
+                const auto it = facts_.find(layer_id);
+                if (it != facts_.end()
+                    && context_.session().map().layerById(layer_id) != nullptr) {
+                    context_.session().set_active_layer(it->second);
+                    break;
+                }
+            }
         }
-        ++opened;
+    } else {
+        for (const pwb::workspace::LayerBinding& binding :
+             snapshot.value().layer_bindings) {
+            if (!materialize_binding(binding)) {
+                ++skipped;
+                continue;
+            }
+            pwb::application::DomainLayerFacts facts;
+            facts.layer_id = binding.layer_id;
+            facts.role = binding.role.empty() ? "facies_boundary"
+                                              : binding.role;
+            facts.role_label = binding.layer_id;
+            facts.artifact_maturity = "draft";
+            // Working-copy grant: the bound catalog version authorizes
+            // edits on the copy; the payload stays immutable.
+            facts.write_granted = true;
+            facts_[facts.layer_id] = facts;
+            QgsMapLayer* layer =
+                context_.session().map().layerById(binding.layer_id);
+            if (!context_.session().active_layer().has_value()
+                && layer != nullptr) {
+                context_.session().set_active_layer(facts);
+                canvas_->setExtent(layer->extent());
+            }
+            ++opened;
+        }
     }
 // BEGIN V14-QGIS-CONTROL
 #ifdef PWB_WITH_CONV_27
     // Desired-tree reconcile + stage-view restore over the opened
     // project's live workspace state (QGIS stays the runtime authority;
     // the domain state is the persistence/semantics authority).
-    applyLayerControlForOpen();
+    applyLayerControlForOpen(restored_from_qgs);
 #endif
 // END V14-QGIS-CONTROL
     refreshActionStates();
@@ -3176,6 +3422,25 @@ QString MainWindow::commitAllDirtyLayers(
             // caller must not save or close on this message.
             return QString::fromStdString(error);
         }
+        // The commit rebinds the DOCUMENT membership to the new catalog
+        // version; the live layer's join key must follow, or the next
+        // .qgs save would pin a stale version id onto the layer.
+        if (pwb::application::PwbDataStore* store =
+                context_.projectStore().get()) {
+            const pwb::workspace::LayerBinding* binding =
+                store->binding_for(layer_id);
+            QgsMapLayer* layer =
+                context_.session().map().layerById(layer_id);
+            if (binding != nullptr && layer != nullptr
+                && !binding->source_version_id.empty()) {
+                pwb::qgis::layer_adapter::apply(
+                    layer,
+                    pwb::qgis::LayerBinding{binding->layer_id,
+                                            binding->source_asset_id,
+                                            binding->source_version_id,
+                                            "vector"});
+            }
+        }
     }
     return QString();
 }
@@ -4341,7 +4606,7 @@ void MainWindow::resetLayoutState() {
 // is the single domain authority (loaded from the project document's
 // mapping_workspace section, written back on save); QGIS stays the
 // runtime tree authority through QgsLayerTreeStack.
-void MainWindow::applyLayerControlForOpen() {
+void MainWindow::applyLayerControlForOpen(bool restored_from_qgis) {
     pwb::application::PwbDataStore* store = context_.projectStore().get();
     if (store == nullptr) {
         // Closed/no project: the workspace pointers from the previous
@@ -4431,9 +4696,18 @@ void MainWindow::applyLayerControlForOpen() {
     // deletion (destructive-purge guard; contracts 03 §7).
     layer_groups_->ensure_memberships(snapshots, /*full_composition=*/false);
     try {
-        // Host guard (02-architecture §5): an applier throw must not
-        // escape openProject — the plane degrades, the open proceeds.
-        layer_groups_->reconcile(snapshots);
+        if (restored_from_qgis) {
+            // .qgs-restored tree: ADOPT the runtime structure (same
+            // observation the save path uses for user edits) — placements
+            // and order keys follow the QGIS authority instead of a
+            // persisted desired tree, which the document no longer keeps.
+            layer_groups_->observe_tree_nodes(
+                layer_tree_stack_->tree_snapshot_nodes());
+        } else {
+            // Host guard (02-architecture §5): an applier throw must not
+            // escape openProject — the plane degrades, the open proceeds.
+            layer_groups_->reconcile(snapshots);
+        }
     } catch (const std::exception& exc) {
         // Degrade, but TELL the user (N8: the comment promised a status
         // surface note that was never emitted — silent degradation).
@@ -4467,6 +4741,44 @@ void MainWindow::applyLayerControlForOpen() {
             pwb::ui_composite::layer_row_summary(inputs);
     }
     if (layer_panel_ != nullptr) layer_panel_->refresh_indicators();
+}
+
+QString MainWindow::persistQgisProjectOnSave() {
+#ifdef PWB_WITH_DATA_INTEGRATION
+    pwb::application::PwbDataStore* store = context_.projectStore().get();
+    if (store == nullptr) return QString();  // no project: nothing to hand off
+    const std::filesystem::path qgs = std::filesystem::path(
+        pwb::qgis::map_project_store::default_qgs_path(
+            store->project_file().string()));
+    // QGIS state first: a failed QgsProject::write aborts the whole save
+    // (the caller surfaces the error) — never a half-success where the
+    // document points at a QGIS project that was not written.
+    std::string error;
+    if (!pwb::qgis::map_project_store::save(context_.session().map(),
+                                            qgs.string(), &error)) {
+        return QString::fromStdString(error);
+    }
+    // Record the handoff pointer (portable relative form, the convention
+    // every other project-internal path uses). From this save on, the
+    // workspace codec stops duplicating the GIS tree into the document.
+    const std::string stored =
+        pwb::project::relativize_path(qgs, store->project_file()).stored;
+#ifdef PWB_WITH_CONV_27
+    if (layer_workspace_ != nullptr) {
+        layer_workspace_->qgis_project_file = stored;
+    } else
+#endif
+    {
+        pwb::domain::DiagnosticList diagnostics;
+        pwb::workspace::MappingWorkspaceState state =
+            pwb::workspace::MappingWorkspaceState::from_json(
+                store->document().mapping_workspace(), diagnostics);
+        state.qgis_project_file = stored;
+        pwb::workspace::write_mapping_workspace(store->document().root(),
+                                                state);
+    }
+#endif  // PWB_WITH_DATA_INTEGRATION
+    return QString();
 }
 
 void MainWindow::syncLayerControlOnSave() {

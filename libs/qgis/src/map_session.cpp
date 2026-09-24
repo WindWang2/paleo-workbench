@@ -37,7 +37,9 @@ QgsMapCanvas* MapSession::createCanvas(QWidget* parent) {
     canvas->enableAntiAliasing(true);
     canvas->setProject(project_.get());
     // Tree-driven canvas layer set: the bridge keeps canvas == tree == legend
-    // order in sync (V11 authority decision). Bridge dies with the canvas.
+    // order in sync (V11 authority decision). Bridge dies with the canvas;
+    // the session tracks it for the project-read window (see
+    // attach/detach_canvas_bridges).
 // R2-14: a closed session must refuse, not deref a null project_.
     if (project_ == nullptr) {
     throw std::runtime_error("MapSession::createCanvas after close()");
@@ -45,8 +47,27 @@ QgsMapCanvas* MapSession::createCanvas(QWidget* parent) {
     auto* bridge = new QgsLayerTreeMapCanvasBridge(project_->layerTreeRoot(),
                                                    canvas, canvas);
     bridge->setCanvasLayers();
+    bridges_.push_back(QPointer<QgsLayerTreeMapCanvasBridge>(bridge));
     canvases_.push_back(QPointer<QgsMapCanvas>(canvas));
     return canvas;
+}
+
+void MapSession::detach_canvas_bridges() {
+    for (const QPointer<QgsLayerTreeMapCanvasBridge>& bridge : bridges_) {
+        delete bridge.data();  // synchronous: no deferred callback survives
+    }
+    bridges_.clear();
+}
+
+void MapSession::attach_canvas_bridges() {
+    if (project_ == nullptr) return;
+    for (const QPointer<QgsMapCanvas>& canvas : canvases_) {
+        if (canvas == nullptr) continue;
+        auto* bridge = new QgsLayerTreeMapCanvasBridge(project_->layerTreeRoot(),
+                                                       canvas, canvas);
+        bridge->setCanvasLayers();
+        bridges_.push_back(QPointer<QgsLayerTreeMapCanvasBridge>(bridge));
+    }
 }
 
 QgsLayerTreeView* MapSession::createLayerTree(QWidget* parent) {
@@ -67,29 +88,40 @@ QgsLayerTreeView* MapSession::createLayerTree(QWidget* parent) {
     return view;
 }
 
+QgsMapLayer* MapSession::adopt_layer(QgsMapLayer* layer,
+                                     const LayerBinding& binding,
+                                     std::string* error) {
+    std::unique_ptr<QgsMapLayer> owned(layer);
+    if (owned == nullptr) {
+        if (error != nullptr) *error = "null layer passed to adopt_layer";
+        return nullptr;
+    }
+    if (project_ == nullptr) {
+        throw std::runtime_error("MapSession::adopt_layer after close()");
+    }
+    if (!owned->isValid()) {
+        const QString detail =
+            owned->error().message(QgsErrorMessage::Text);
+        if (error != nullptr) {
+            *error = "provider failed for '" + owned->source().toStdString()
+                + "': " + detail.toStdString();
+        }
+        return nullptr;  // unique_ptr deletes the invalid layer
+    }
+    layer_adapter::apply(owned.get(), binding);
+    QgsMapLayer* admitted = owned.release();
+    project_->addMapLayer(admitted);
+    syncCanvasLayers();
+    return admitted;
+}
+
 QgsVectorLayer* MapSession::addVectorLayer(const std::string& uri,
                                            const std::string& name,
                                            const LayerBinding& binding,
                                            std::string* error) {
     auto* layer = new QgsVectorLayer(QString::fromStdString(uri),
                                      QString::fromStdString(name), "ogr");
-    if (!layer->isValid()) {
-        const QString detail = layer->error().message(QgsErrorMessage::Text);
-        delete layer;
-        if (error != nullptr) {
-            *error = "vector provider failed for '" + uri + "': "
-                + detail.toStdString();
-        }
-        return nullptr;
-    }
-    layer_adapter::apply(layer, binding);
-// R2-14: a closed session must refuse, not deref a null project_.
-    if (project_ == nullptr) {
-    throw std::runtime_error("MapSession::addVectorLayer after close()");
-}
-    project_->addMapLayer(layer);
-    syncCanvasLayers();
-    return layer;
+    return qobject_cast<QgsVectorLayer*>(adopt_layer(layer, binding, error));
 }
 
 QgsRasterLayer* MapSession::addRasterLayer(const std::string& uri,
@@ -98,23 +130,7 @@ QgsRasterLayer* MapSession::addRasterLayer(const std::string& uri,
                                            std::string* error) {
     auto* layer = new QgsRasterLayer(QString::fromStdString(uri),
                                      QString::fromStdString(name));
-    if (!layer->isValid()) {
-        const QString detail = layer->error().message(QgsErrorMessage::Text);
-        delete layer;
-        if (error != nullptr) {
-            *error = "raster provider failed for '" + uri + "': "
-                + detail.toStdString();
-        }
-        return nullptr;
-    }
-    layer_adapter::apply(layer, binding);
-// R2-14: a closed session must refuse, not deref a null project_.
-    if (project_ == nullptr) {
-    throw std::runtime_error("MapSession::addRasterLayer after close()");
-}
-    project_->addMapLayer(layer);
-    syncCanvasLayers();
-    return layer;
+    return qobject_cast<QgsRasterLayer*>(adopt_layer(layer, binding, error));
 }
 
 QgsMapLayer* MapSession::layerById(const std::string& layer_id) const {
@@ -274,6 +290,7 @@ void MapSession::close() {
     closed_ = true;
     // Contract order: unset tools, detach canvases, drop layers, then the
     // project. Widgets themselves belong to their Qt parents.
+    detach_canvas_bridges();
     for (const QPointer<QgsMapCanvas>& canvas : canvases_) {
         if (canvas == nullptr) continue;
         if (QgsMapTool* tool = canvas->mapTool()) canvas->unsetMapTool(tool);
