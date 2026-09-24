@@ -1378,7 +1378,10 @@ if(TARGET pwb-platform
         apps/paleo_workbench_platform/layout_compose_panel.hpp
         apps/paleo_workbench_platform/m5_compose_install.cpp
         apps/paleo_workbench_platform/data_lineage_panel.cpp
-        apps/paleo_workbench_platform/m5_data_install.cpp)
+        apps/paleo_workbench_platform/m5_data_install.cpp
+        apps/paleo_workbench_platform/factor_method_config.cpp
+        apps/paleo_workbench_platform/factor_method_dialogs.cpp
+        apps/paleo_workbench_platform/factor_method_dialogs.hpp)
     target_link_libraries(pwb-platform PRIVATE
         Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
         Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::QgisPlot Pwb::UiReviewQt Pwb::UiSeqvizQt
@@ -1438,6 +1441,7 @@ if(TARGET pwb-platform
             apps/paleo_workbench_platform
             ${CMAKE_BINARY_DIR}/generated)
         target_link_libraries(platform_app_shell PRIVATE
+    Pwb::QgisProcessing
             Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
             Pwb::PlatformServices
             Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
@@ -1508,6 +1512,7 @@ if(TARGET pwb-platform
                 apps/paleo_workbench_platform
                 ${CMAKE_BINARY_DIR}/generated)
             target_link_libraries(platform_three_stage_flow PRIVATE
+    Pwb::QgisProcessing
                 Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
                 Pwb::PlatformServices Pwb::UiStageflowQt
                 Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
@@ -1579,6 +1584,7 @@ if(TARGET pwb-platform
             apps/paleo_workbench_platform
             ${CMAKE_BINARY_DIR}/generated)
         target_link_libraries(platform_constraint_authoring PRIVATE
+    Pwb::QgisProcessing
             Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
             Pwb::PlatformServices Pwb::UiStageflowQt
             Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
@@ -1611,6 +1617,7 @@ if(TARGET pwb-platform
             ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
             TIMEOUT 300)
+
             set_tests_properties(platform.three_stage_flow PROPERTIES
                 ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
                 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
@@ -1649,7 +1656,11 @@ if(TARGET pwb-platform
                 apps/paleo_workbench_platform/review_disposition_panel.cpp
                 apps/paleo_workbench_platform/m5_validation_install.cpp
                 apps/paleo_workbench_platform/data_lineage_panel.cpp
-                apps/paleo_workbench_platform/m5_data_install.cpp)
+                apps/paleo_workbench_platform/m5_data_install.cpp
+                apps/paleo_workbench_platform/factor_method_config.cpp
+                apps/paleo_workbench_platform/factor_method_dialogs.cpp
+                apps/paleo_workbench_platform/factor_method_dialogs.hpp
+                apps/paleo_workbench_platform/job_center.cpp)
             # END V14-COMPILATION-PUBLISH
             if(COMMAND pwb_link_job_runtime)
                 pwb_link_job_runtime(platform_closure_review_install)
@@ -1665,6 +1676,7 @@ if(TARGET pwb-platform
             target_link_libraries(platform_closure_review_install PRIVATE
                 Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
                 Pwb::PlatformServices Pwb::Data Pwb::ClosureReview
+                Pwb::QgisProcessing
                 Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
                 Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::QgisPlot Pwb::UiReviewQt
                 Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt
@@ -2160,7 +2172,10 @@ if(TARGET pwb-platform
         apps/paleo_workbench_platform/m5_data_install.cpp
         apps/paleo_workbench_platform/layout_compose_panel.cpp
         apps/paleo_workbench_platform/layout_compose_panel.hpp
-        apps/paleo_workbench_platform/m5_compose_install.cpp)
+        apps/paleo_workbench_platform/m5_compose_install.cpp
+        apps/paleo_workbench_platform/factor_method_config.cpp
+        apps/paleo_workbench_platform/factor_method_dialogs.cpp
+        apps/paleo_workbench_platform/factor_method_dialogs.hpp)
     # END V14-COMPILATION-PUBLISH
     pwb_link_job_runtime(platform_closure_mapping)
     set_target_properties(platform_closure_mapping PROPERTIES AUTOMOC ON)
@@ -2229,7 +2244,10 @@ if(TARGET pwb-platform
         apps/paleo_workbench_platform/m5_data_install.cpp
         apps/paleo_workbench_platform/layout_compose_panel.cpp
         apps/paleo_workbench_platform/layout_compose_panel.hpp
-        apps/paleo_workbench_platform/m5_compose_install.cpp)
+        apps/paleo_workbench_platform/m5_compose_install.cpp
+        apps/paleo_workbench_platform/factor_method_config.cpp
+        apps/paleo_workbench_platform/factor_method_dialogs.cpp
+        apps/paleo_workbench_platform/factor_method_dialogs.hpp)
     pwb_link_job_runtime(platform_ribbon_visual)
     set_target_properties(platform_ribbon_visual PROPERTIES AUTOMOC ON)
     target_compile_features(platform_ribbon_visual PRIVATE cxx_std_20)
@@ -2386,6 +2404,7 @@ if(PWB_BUILD_PLATFORM AND TARGET Pwb::VizChartsQt
                 apps/paleo_workbench_platform
                 ${CMAKE_BINARY_DIR}/generated)
             target_link_libraries(platform_closure_preview PRIVATE
+                Pwb::QgisProcessing
                 Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
                 Pwb::PlatformServices
                 Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt

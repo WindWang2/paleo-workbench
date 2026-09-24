@@ -196,6 +196,12 @@ struct ConstraintSet {
     // Per consumed group: {group_id, group_name, content_hash, line_count,
     // version_id?} — Python constraint_pins_for_task.
     Json pins = Json::array();
+    // 约束点 (value-anchored control points): records
+    // {x, y, value, group_id, name} — merged into the interpolation sample
+    // set (all backends consume samples; the constrained engine counts
+    // them as anchor wells). A pin without a finite value is skipped here
+    // (an anchor without a value would fabricate data).
+    Json point_samples = Json::array();
     // Non-empty → the consumed groups declare mutually incompatible CRSes
     // (or one disagrees with the project CRS): interpolation must refuse.
     std::string crs_conflict;
@@ -395,11 +401,59 @@ struct ConstraintSet {
                 }
             }
         }
-        if (consumed > 0) {
+        // 约束点 (group["points"]): value-anchored control points. Active
+        // entries with a finite position AND a finite value join the
+        // sample merge; the layer CRS discipline applies to them exactly
+        // as it does to lines (the declared_crs list is shared below).
+        int points_consumed = 0;
+        if (const Json* point_entries = find_field(*layer, "points");
+            point_entries != nullptr && point_entries->is_array()) {
+            for (const auto& point : *point_entries) {
+                if (!point.is_object()) continue;
+                const bool point_active = [&] {
+                    const Json* flag = find_field(point, "active");
+                    return flag == nullptr || !flag->is_boolean()
+                               ? true
+                               : flag->get<bool>();
+                }();
+                if (!point_active) continue;
+                const Json* coords = find_field(point, "coordinates");
+                if (coords == nullptr || !coords->is_array()
+                    || coords->size() < 2 || !(*coords)[0].is_number()
+                    || !(*coords)[1].is_number()) {
+                    continue;
+                }
+                const double x = (*coords)[0].get<double>();
+                const double y = (*coords)[1].get<double>();
+                if (!std::isfinite(x) || !std::isfinite(y)) continue;
+                const Json* value =
+                    find_field(find_field(point, "properties")
+                                   != nullptr
+                                   ? point.at("properties")
+                                   : Json::object(),
+                               "value");
+                if (value == nullptr || !value->is_number()) continue;
+                const double v = value->get<double>();
+                if (!std::isfinite(v)) continue;
+                Json record = Json::object();
+                record["x"] = x;
+                record["y"] = y;
+                record["value"] = v;
+                record["source"] = "constraint_point";
+                record["group_id"] = group_id;
+                record["name"] = field_str(point, "name", "约束点");
+                out.point_samples.push_back(std::move(record));
+                ++points_consumed;
+            }
+        }
+        if (consumed > 0 || points_consumed > 0) {
             Json pin = Json::object();
             pin["group_id"] = group_id;
             pin["group_name"] = group_name;
             pin["line_count"] = consumed;
+            if (points_consumed > 0) {
+                pin["point_count"] = points_consumed;
+            }
             const Json* version_id = find_field(*layer, "version_id");
             if (version_id != nullptr && version_id->is_string()) {
                 pin["version_id"] = version_id->get<std::string>();
@@ -538,7 +592,7 @@ struct ResolvedFingerprints {
     // invalidate results computed with a different power).
     const double power = ctx.power;
 
-    const Json sample_points = sample_points_to_json(
+    Json sample_points = sample_points_to_json(
         [&] {
             const auto it = task.parameters.find("sample_points");
             return it != task.parameters.end() ? it->second : std::any{};
@@ -549,12 +603,17 @@ struct ResolvedFingerprints {
     const bool uses_directions =
         pwb::factor_host::backend_uses_directions(out.backend);
 
-    ConstraintSet constraints;
-    if (uses_breaks || uses_directions
-        || out.backend == pwb::factor_host::kConstrainedIdwLabel) {
-        constraints = resolve_constraints(ctx.constraint_layers,
-                                          ctx.target_horizon,
-                                          ctx.project_crs.value_or(""));
+    // Always resolve: 约束点 join the sample set on EVERY backend (they
+    // are data, not geometric modifiers) — a kriging run whose pins
+    // changed must re-dirty through the sample digest too.
+    ConstraintSet constraints = resolve_constraints(
+        ctx.constraint_layers, ctx.target_horizon,
+        ctx.project_crs.value_or(""));
+    if (sample_points.is_array()
+        && constraints.point_samples.is_array()) {
+        for (const auto& pin : constraints.point_samples) {
+            sample_points.push_back(pin);
+        }
     }
     if (uses_breaks) {
         out.break_polylines =
@@ -1048,7 +1107,7 @@ struct AttachedResult {
             constraints.boundary_rings;
         if (samples.points.size() < 3) {
             throw std::invalid_argument(
-                "约束IDW至少需要 3 口有效井（当前 "
+                "约束IDW至少需要 3 个有效控制点（井+约束点，当前 "
                 + std::to_string(samples.points.size()) + "）");
         }
         // Duplicate wells: first-wins (Python adapter).
@@ -1072,7 +1131,7 @@ struct AttachedResult {
         }
         if (wells.size() < 3) {
             throw std::invalid_argument(
-                "约束IDW去重后有效井不足 3 口（丢弃 "
+                "约束IDW去重后有效控制点不足 3 个（井+约束点，丢弃 "
                 + std::to_string(duplicates_dropped) + "）");
         }
         if (constraints.boundary_rings.empty()) {
@@ -1261,6 +1320,40 @@ void attach_result_to_task(Json& task_json, const Json& raw_points,
         params["constraint_pins"] = constraints.pins;
     } else {
         params.erase("constraint_pins");
+    }
+
+    // 约束点 provenance: how many value-anchored control points joined
+    // the sample merge and from which constraint groups (the wells-only
+    // sample_points view above stays honest about well samples).
+    {
+        int pin_count = 0;
+        Json pin_groups = Json::array();
+        if (constraints.point_samples.is_array()) {
+            for (const auto& record : constraints.point_samples) {
+                (void)record;
+                ++pin_count;
+            }
+        }
+        if (constraints.pins.is_array()) {
+            for (const auto& pin : constraints.pins) {
+                const auto count_it = pin.find("point_count");
+                if (count_it != pin.end() && count_it->is_number()) {
+                    Json group = Json::object();
+                    group["group_id"] = pin.value("group_id",
+                                                  std::string());
+                    group["group_name"] = pin.value("group_name",
+                                                    std::string());
+                    group["point_count"] = *count_it;
+                    pin_groups.push_back(std::move(group));
+                }
+            }
+        }
+        if (pin_count > 0) {
+            params["constraint_points"] =
+                Json{{"count", pin_count}, {"groups", pin_groups}};
+        } else {
+            params.erase("constraint_points");
+        }
     }
 
     const int height = attached.constrained
@@ -1854,15 +1947,26 @@ ui_workers::FactorPrepareSeams make_factor_prepare_seams(
                 const ConstraintSet constraints = resolve_constraints(
                     args.ctx.constraint_layers, args.ctx.target_horizon,
                     crs);
+                // 约束点 merge: the interpolating sample set = well samples
+                // + value-anchored constraint points. params["sample_points"]
+                // keeps the wells-only view (honest provenance); the pin
+                // count rides params["constraint_points"] in attach.
+                Json merged_points = raw_points;
+                if (merged_points.is_array()
+                    && constraints.point_samples.is_array()) {
+                    for (const auto& pin : constraints.point_samples) {
+                        merged_points.push_back(pin);
+                    }
+                }
                 const AnisotropyParams anisotropy =
                     resolve_anisotropy(resolved.direction_params, params);
 
                 const InterpSamples samples =
-                    load_samples(raw_points, params);
+                    load_samples(merged_points, params);
                 AttachedResult attached;
                 try {
                     attached = apply_interpolation(
-                        raw_points, params, method, grid_n, power,
+                        merged_points, params, method, grid_n, power,
                         constraints, crs, anisotropy,
                         resolved.fingerprints, token);
                 } catch (const job::JobCancelled&) {

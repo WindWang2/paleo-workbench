@@ -1181,17 +1181,17 @@ domain::Result<domain::Json> run_map_qc_on_document(
 
     // Upsert by linked_map_document_id (stable id — re-running QC for the
     // same map replaces the previous report so dashboards do not inflate).
+    // The id must reuse an existing report's id (apply_qc_report upserts).
     Json* reports = mutable_section_array(root, "quality_reports");
-    if (reports == nullptr) {
-        root["quality_reports"] = Json::array();
-        reports = &root["quality_reports"];
-    }
     Json* existing = nullptr;
-    for (auto& report : *reports) {
-        if (report.is_object() &&
-            field_string(report, "linked_map_document_id") == doc_id) {
-            existing = &report;
-            break;
+    if (reports != nullptr) {
+        for (auto& report : *reports) {
+            if (report.is_object()
+                && field_string(report, "linked_map_document_id")
+                       == doc_id) {
+                existing = &report;
+                break;
+            }
         }
     }
 
@@ -1268,25 +1268,47 @@ domain::Result<domain::Json> run_map_qc_on_document(
     // silently dropped (复核记录可重开和追溯).
     report["input_fingerprint"] =
         qc_input_fingerprint(root, *document, inputs);
+    apply_qc_report(root, report, iso_now);
+    return report;
+}
+
+void apply_qc_report(Json& root, const Json& report,
+                     const std::string& iso_now) {
+    const std::string doc_id =
+        field_string(report, "linked_map_document_id");
+    Json* reports = mutable_section_array(root, "quality_reports");
+    if (reports == nullptr) {
+        root["quality_reports"] = Json::array();
+        reports = &root["quality_reports"];
+    }
+    Json* existing = nullptr;
+    for (auto& candidate : *reports) {
+        if (candidate.is_object()
+            && field_string(candidate, "linked_map_document_id")
+                   == doc_id) {
+            existing = &candidate;
+            break;
+        }
+    }
+    Json merged = report;
     if (existing != nullptr) {
         const auto carried = existing->find("review_records");
         if (carried != existing->end() && carried->is_object()) {
-            report["review_records"] = *carried;
+            merged["review_records"] = *carried;
         }
-        *existing = report;
+        *existing = std::move(merged);
     } else {
-        reports->push_back(report);
+        reports->push_back(std::move(merged));
     }
 
     // Bind the active compilation run (qc.py parity: the last run wins).
     Json* runs = mutable_section_array(root, "compilation_runs");
     if (runs != nullptr && !runs->empty()) {
         Json& run = runs->back();
-        run["active_quality_report_id"] = report["id"];
+        run["active_quality_report_id"] = report.at("id");
         run["active_paleomap_document_id"] = doc_id;
         run["updated_at"] = iso_now;
     }
-    return report;
 }
 
 }  // namespace pwb::closure_review

@@ -305,14 +305,23 @@ void install(const Install& install) {
     auto* ribbon = shell->ribbon();
     if (scene == nullptr || ribbon == nullptr) return;
 
-    // 捕捉开关：与场景 snap_manager 同一状态（禁止第二份）。QAction
-    // 绑定让 Ribbon 的 Toggle 按钮随状态走。
+    // 捕捉开关：单一 QAction 驱动两轨同一状态（禁止第二份）：场景
+    // snap_manager（自绘画布）+ QGIS 工程捕捉配置（约束层集限定，
+    // MainWindow::setConstraintSnapping —— QGIS 矢量编辑权威）。
     auto* snap_action = new QAction(QStringLiteral("捕捉"), shell);
     snap_action->setObjectName(QStringLiteral("FactorSnapToggle"));
     snap_action->setCheckable(true);
     snap_action->setChecked(scene->snap_enabled());
-    QObject::connect(snap_action, &QAction::toggled, scene,
-                     [scene](bool on) { scene->set_snap_enabled(on); });
+    QObject::connect(
+        snap_action, &QAction::toggled, scene,
+        [scene, window](bool on) {
+            scene->set_snap_enabled(on);
+#if defined(PWB_WITH_STAGE_FLOW) && defined(PWB_WITH_DATA_INTEGRATION)
+            // QGIS 轨（工程捕捉配置，约束图层集限定）；无该切片的构建
+            // 只有场景轨（诚实降级——无第二套假状态）。
+            window->setConstraintSnapping(on);
+#endif
+        });
     ribbon->set_command_action(QStringLiteral("factor.snap"), snap_action);
 
     // 选中驱动：line → 约束线组（ws2+ws3）；label → 标注组（ws3）；

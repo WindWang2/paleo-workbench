@@ -22,8 +22,14 @@
 //   * 未注入的窗格保持诚实空态 —— 无伪造对比、无假复核状态。
 
 #include <functional>
+#include <optional>
+#include <utility>
 #include <vector>
 
+#include <QList>
+#include <QString>
+#include <QStringList>
+#include <QVariant>
 #include <QWidget>
 
 #include <pwb/domain/json.hpp>
@@ -45,6 +51,9 @@ class SmoothPanController;
 namespace pwb::ui_review {
 class IReviewActions;
 }
+namespace pwb::qgis_processing {
+class PwbTaskOwner;
+}
 
 namespace pwb::app {
 
@@ -63,6 +72,29 @@ public:
     void set_actions_provider(
         std::function<pwb::ui_review::IReviewActions*()> provider);
 
+    // ---- async QC seam（verify.cancel 的生产基础） -------------------------
+    // 三段缝（装全才走异步；缺任一回退同步路径）：
+    //   snapshot — GUI 线程取不可变工程快照 + 文档 id 清单；
+    //   run      — worker 线程在快照副本上逐文档跑真 QC 内核（协作取消）；
+    //   merge    — GUI 线程把报告合并进 LIVE root 并落盘（cancelled 永不
+    //              到这里——上一份有效报告保持不变）。
+    struct AsyncQc {
+        std::function<std::optional<std::pair<pwb::domain::Json,
+                                              std::vector<std::string>>>()>
+            snapshot;
+        std::function<std::vector<pwb::domain::Json>(
+            pwb::domain::Json& snapshot_root,
+            const std::vector<std::string>& doc_ids,
+            const std::function<bool()>& check_cancelled)>
+            run;
+        std::function<std::string(
+            const std::vector<pwb::domain::Json>& reports)>
+            merge;
+    };
+    void set_async_qc(AsyncQc seam);
+    // Task owner（JobCenter 派发；空 = 无异步宿主，run_qc 回退同步）。
+    void set_task_owner(pwb::qgis_processing::PwbTaskOwner* owner);
+
     // Reports refresh (QualityReport dicts — active_quality_reports parity).
     void update_reports(const std::vector<pwb::domain::Json>& reports);
 
@@ -74,6 +106,15 @@ public:
 public slots:
     // 「运行验证」唯一入口（ribbon verify.run / 复核面板 rerun 直调）。
     void run_qc();
+    // 取消运行中的异步 QC（同步回退路径无可取消任务——命令层口径一致）。
+    void cancel_qc();
+
+    // ---- IssueNavigator ----------------------------------------------------
+    // 扁平化问题导航（verify.prev_issue = -1 / verify.locate = +1）。
+    // 固定规则：wrap-around（到尾回到头），无问题时报状态不出错。
+    void navigate_issue(int delta);
+    // 定位当前游标问题（不动游标）。
+    void locate_current_issue();
 
     // Test/inspection surface.
     pwb::ui_map::DisplayMapCanvas* map_canvas() const { return map_; }
@@ -82,6 +123,10 @@ public slots:
     QWidget* compare_view() const { return compare_view_; }
     QWidget* review_panel() const { return review_panel_; }
     const std::vector<pwb::domain::Json>& reports() const { return reports_; }
+    bool qc_running() const { return qc_running_; }
+    int issue_count() const { return flattened_issues_.size(); }
+    int issue_cursor() const { return cursor_; }
+    QString current_issue_key() const;
 
 signals:
     void status_message(const QString& message);
@@ -91,11 +136,14 @@ signals:
     // Emitted at the end of every update_reports — the M5 install
     // refreshes the staleness banner from this.
     void reports_refreshed();
+    // Async QC lifecycle observation (ribbon applicability follows this).
+    void qc_state_changed();
 
 private:
     void locate_issue(const QVariantMap& issue);
     void locate_rule_row(int row, int column);
     void refresh_result_stats();
+    void rebuild_flattened_issues();
 
     pwb::ui_map::DisplayMapCanvas* map_ = nullptr;
     QWidget* seismic_host_ = nullptr;
@@ -112,6 +160,14 @@ private:
     QWidget* review_panel_ = nullptr;
     std::function<pwb::ui_review::IReviewActions*()> actions_provider_;
     std::vector<pwb::domain::Json> reports_;
+    // Async QC orchestration state.
+    AsyncQc async_qc_;
+    pwb::qgis_processing::PwbTaskOwner* task_owner_ = nullptr;
+    bool qc_running_ = false;
+    // IssueNavigator state（全报告扁平化；key = report|qc_issue_key）。
+    QList<QVariantMap> flattened_issues_;
+    QStringList flattened_keys_;
+    int cursor_ = -1;
 };
 
 }  // namespace pwb::app

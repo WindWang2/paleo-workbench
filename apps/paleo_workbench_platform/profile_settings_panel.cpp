@@ -108,4 +108,23 @@ void ProfileSettingsPanel::emit_filter() {
     emit well_filter_changed(filter);
 }
 
+void ProfileSettingsPanel::set_well_filter(const QSet<QString>& visible) {
+    // Programmatic mirror (map→section link projection): rewrite the
+    // checked state without re-emitting well_filter_changed — the caller
+    // already holds that state and the dock filter is set directly.
+    QSet<QString> next;
+    for (const QString& name : names_) {
+        if (visible.contains(name)) next.insert(name);
+    }
+    if (next == checked_) return;
+    checked_ = next;
+    syncing_ = true;
+    const auto checks =
+        wells_box_->parentWidget()->findChildren<QCheckBox*>();
+    for (QCheckBox* check : checks) {
+        check->setChecked(checked_.contains(check->text()));
+    }
+    syncing_ = false;
+}
+
 }  // namespace pwb::app

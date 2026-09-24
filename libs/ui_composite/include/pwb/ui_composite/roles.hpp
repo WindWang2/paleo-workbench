@@ -48,6 +48,7 @@ inline constexpr std::string_view kFaultConstraint = "fault_constraint";
 inline constexpr std::string_view kInterpolationBoundary =
     "interpolation_boundary";
 inline constexpr std::string_view kMaskBoundary = "mask_boundary";
+inline constexpr std::string_view kConstraintPoint = "constraint_point";
 inline constexpr std::string_view kFactorInput = "factor_input";
 inline constexpr std::string_view kFactorGrid = "factor_grid";
 inline constexpr std::string_view kFactorContour = "factor_contour";
@@ -82,6 +83,10 @@ inline constexpr std::string_view kInterpolationBoundary =
 inline constexpr std::string_view kMask = "mask";
 inline constexpr std::string_view kExclusionArea = "exclusion_area";
 inline constexpr std::string_view kTrendLine = "trend_line";
+// Point constraint (值锚定控制点): a positioned control point with a
+// value that joins the interpolation sample set (ws2 约束点). Geometry
+// kind "point" — the only non-line/polygon constraint kind.
+inline constexpr std::string_view kConstraintPin = "constraint_pin";
 }  // namespace constraint_kind
 
 // ROLE_LABELS parity: known role value → Chinese display label; unknown
@@ -109,7 +114,7 @@ std::optional<std::string> constraint_kind_from_value(
     const std::string& value);
 
 // ConstraintKind.geometry_kind parity — "polygon" for MASK/EXCLUSION_AREA,
-// else "line"; unknown → "line".
+// "point" for CONSTRAINT_PIN, else "line"; unknown → "line".
 std::string constraint_kind_geometry_kind(const std::string& kind_value);
 
 // CONSTRAINT_KIND_ROLE parity — kind → its home LayerRole value;

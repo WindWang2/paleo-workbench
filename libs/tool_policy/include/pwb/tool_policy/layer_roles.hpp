@@ -26,6 +26,7 @@ inline constexpr std::string_view kFaciesBoundary = "facies_boundary";
 inline constexpr std::string_view kFaultConstraint = "fault_constraint";
 inline constexpr std::string_view kInterpolationBoundary = "interpolation_boundary";
 inline constexpr std::string_view kMaskBoundary = "mask_boundary";
+inline constexpr std::string_view kConstraintPoint = "constraint_point";
 inline constexpr std::string_view kFactorInput = "factor_input";
 inline constexpr std::string_view kFactorGrid = "factor_grid";
 inline constexpr std::string_view kFactorContour = "factor_contour";

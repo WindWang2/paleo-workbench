@@ -563,6 +563,14 @@ void run_levels_fallback(const Json& c) {
     nums_eq(c.at("expected"), got, "levels_fallback");
 }
 
+void run_levels_from_interval(const Json& c) {
+    const auto& in = c.at("input");
+    const auto got = uw::levels_from_interval(
+        in.at("lo").get<double>(), in.at("hi").get<double>(),
+        in.at("interval").get<double>());
+    nums_eq(c.at("expected"), got, "levels_from_interval");
+}
+
 void run_upsert_draft(const Json& c) {
     const auto& in = c.at("input");
     std::vector<uw::ContourDraftSlice> ledger;
@@ -1480,6 +1488,7 @@ void run_case(const Json& c) {
     else if (kind == "nice_levels_range") run_nice_levels_range(c);
     else if (kind == "nice_levels_grid") run_nice_levels_grid(c);
     else if (kind == "levels_fallback") run_levels_fallback(c);
+    else if (kind == "levels_from_interval") run_levels_from_interval(c);
     else if (kind == "upsert_draft") run_upsert_draft(c);
     else if (kind == "line_features") run_line_features(c);
     else if (kind == "compile_drafts") run_compile_drafts(c);

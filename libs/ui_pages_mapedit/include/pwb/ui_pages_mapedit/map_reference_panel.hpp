@@ -16,6 +16,7 @@
 class QLabel;
 class QListWidget;
 class QListWidgetItem;
+class QCheckBox;
 class QSlider;
 
 namespace pwb::ui_pages_mapedit {
@@ -50,6 +51,14 @@ public:
 
     void set_layers(const std::vector<MapReferenceLayer>& layers);
 
+    // 参考图视图槽（宿主注入真实地图视图 —— 面板本体保持 QGIS-free；
+    // 空槽时面板仍是纯列表控件）。视图显示在图层列表上方。
+    void set_view(QWidget* view);
+    // 参考图与主图联动开关（状态由宿主消费：单一 master 在主图侧）。
+    void set_linked(bool linked);
+    [[nodiscard]] bool linked() const;
+    QCheckBox* link_check() const { return link_check_; }
+
     QListWidget* layer_list() const { return layer_list_; }
     QSlider* opacity_slider() const { return opacity_slider_; }
     QLabel* status_label() const { return status_label_; }
@@ -58,6 +67,9 @@ signals:
     void reference_visibility_changed(const QString& layer_id, bool visible);
     void reference_opacity_changed(const QString& layer_id, double opacity);
     void overlay_requested(const QString& layer_id);
+    // 联动开关变化（宿主据此挂/摘主图 extent 从动；开启时宿主立即
+    // 同步一次主图 extent —— master 永远是主图）。
+    void link_toggled(bool linked);
 
 private:
     void update_layer_item(QListWidgetItem* item, const QString& key);
@@ -68,6 +80,10 @@ private:
     void on_opacity_changed(int value);
 
     QLabel* status_label_ = nullptr;
+    QWidget* view_host_ = nullptr;
+    QLabel* view_placeholder_ = nullptr;
+    QWidget* view_ = nullptr;
+    QCheckBox* link_check_ = nullptr;
     QListWidget* layer_list_ = nullptr;
     QSlider* opacity_slider_ = nullptr;
     std::map<QString, MapReferenceLayer> layers_;

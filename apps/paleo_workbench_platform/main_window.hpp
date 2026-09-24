@@ -249,6 +249,11 @@ public:
     void setDirtyCloseResponder(std::function<int()> responder) {
         dirty_close_responder_ = std::move(responder);
     }
+    // Stage-switch dirty gate（阶段移交三路决策，applyStageValue 入口）：
+    // 同一 Save/Discard/Cancel 语义；测试注入脚本化 responder。
+    void setStageDirtyResponder(std::function<int()> responder) {
+        stage_dirty_responder_ = std::move(responder);
+    }
     // Yes/No confirmation for discarding edits (rollback, stop-with-dirty).
     void setDiscardConfirmResponder(std::function<int()> responder) {
         discard_confirm_responder_ = std::move(responder);
@@ -347,11 +352,13 @@ public:
         const pwb::application::MapPipelineOutcome& outcome,
         const std::string& factor_name, const std::string& crs);
 #endif
+    // Applies a stage switch through the authoritative session stage
+    // (the stage-dirty-gate entry — outside the CONV_27 guard: the gate
+    // contract spans every build).
+    void applyStageValue(const std::string& value);
 #ifdef PWB_WITH_CONV_27
     // ---- CONV-27 workbench surface (test/automation entry points; the
     // actions below drive the same code paths) ----------------------------
-    // Applies a stage switch through the authoritative session stage.
-    void applyStageValue(const std::string& value);
     pwb::ui::StageDock* stageDock() const { return stage_dock_; }
     pwb::ui::LayerTreePanel* layerPanel() const { return layer_panel_; }
     pwb::ui::EditToolController* editTools() const { return edit_tools_; }
@@ -412,6 +419,27 @@ public:
     //     save (Python constraints_sync.py parity). Returns lines synced.
     void createStageConstraint(const QString& kind_value);
     int syncConstraintGeometryOnSave();
+    // ws2 constraint editing entry (reuse-or-create, body in
+    // constraint_authoring.cpp): select an existing live layer of the
+    // constraint kind (start editing + make it active), else create one
+    // via createStageConstraint. The caller arms the governed capture
+    // tool afterwards. Returns "" on success, else a user-readable
+    // reason.
+    QString enterConstraintEditing(const QString& kind_value);
+    // Constraint-scoped QGIS snapping (single authority: the project
+    // snapping config; body in constraint_authoring.cpp). enable=true
+    // snapshots the prior config and scopes snapping to the live
+    // constraint layers only; enable=false restores the snapshot.
+    // restoreProjectSnapping() is the idempotent leave-ws2 path.
+    void setConstraintSnapping(bool enabled);
+    void restoreProjectSnapping();
+
+    // Opaque constraint-snapping state (saved project config + scoped
+    // flag; defined in constraint_authoring.cpp — QgsSnappingConfig stays
+    // out of this header). shared_ptr: the type-erased deleter keeps the
+    // incomplete type legal here; the definition site creates it.
+    struct ConstraintSnapState;
+    std::shared_ptr<ConstraintSnapState> constraint_snap_state_;
 #endif
 
 private:
@@ -709,6 +737,8 @@ public:
 
 private:
     std::function<int()> dirty_close_responder_;
+    // Stage-switch dirty gate responder（同 dirty-close 语义）。
+    std::function<int()> stage_dirty_responder_;
     std::function<int()> discard_confirm_responder_;
     std::function<void(const QString&)> properties_responder_;
     std::set<std::string> wired_action_ids_;

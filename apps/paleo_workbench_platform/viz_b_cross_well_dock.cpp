@@ -654,7 +654,9 @@ void VizBCrossWellDock::on_load_checkshot() {
     }
 }
 
-void VizBCrossWellDock::on_auto_arrange() {
+void VizBCrossWellDock::on_auto_arrange() { arrange_by_pca(); }
+
+void VizBCrossWellDock::arrange_by_pca() {
     if (wells_.size() <= 2) {
         emit status_message(tr("井数 ≤2，无需排列"));
         return;
@@ -687,6 +689,52 @@ void VizBCrossWellDock::on_auto_arrange() {
     } catch (const pwb::viz::cross_well::PlannerError& exc) {
         emit status_message(QString::fromStdString(exc.what()));
     }
+}
+
+QStringList VizBCrossWellDock::current_well_order() const {
+    QStringList names;
+    names.reserve(static_cast<int>(wells_.size()));
+    for (const WellColumnData& well : wells_) {
+        names.append(QString::fromStdString(well.name));
+    }
+    return names;
+}
+
+void VizBCrossWellDock::set_well_order(const QStringList& ordered) {
+    if (wells_.empty()) {
+        emit status_message(tr("剖面尚未加载井数据，路径暂不生效"));
+        return;
+    }
+    // Stable reorder: named wells first (in the given path order), the
+    // unlisted remainder keeps its relative order. Unknown names in the
+    // path are skipped silently (a deleted well must not break the path).
+    std::vector<WellColumnData> arranged;
+    arranged.reserve(wells_.size());
+    std::vector<bool> used(wells_.size(), false);
+    for (const QString& name : ordered) {
+        for (std::size_t i = 0; i < wells_.size(); ++i) {
+            if (used[i]) continue;
+            if (QString::fromStdString(wells_[i].name) == name) {
+                arranged.push_back(wells_[i]);
+                used[i] = true;
+                break;
+            }
+        }
+    }
+    int appended_unlisted = 0;
+    for (std::size_t i = 0; i < wells_.size(); ++i) {
+        if (!used[i]) {
+            arranged.push_back(wells_[i]);
+            used[i] = true;
+            ++appended_unlisted;
+        }
+    }
+    wells_ = std::move(arranged);
+    apply_wells_to_canvas();
+    emit status_message(appended_unlisted > 0
+                            ? tr("剖面已按路径排列（%1 口未列入路径的井"
+                                 "追加在后）").arg(appended_unlisted)
+                            : tr("剖面已按路径排列"));
 }
 
 void VizBCrossWellDock::on_propagate_dtw() {
@@ -1213,6 +1261,14 @@ Json VizBCrossWellDock::save_state() const {
         }
         state["well_source_las"] = std::move(las);
     }
+    // 连井路径：井序以 stable well ids（井名）持久化。
+    {
+        Json order = Json::array();
+        for (const WellColumnData& well : wells_) {
+            order.push_back(well.name);
+        }
+        state["well_order"] = std::move(order);
+    }
     return state;
 }
 
@@ -1267,6 +1323,20 @@ void VizBCrossWellDock::restore_state(const Json& state) {
     }
     if (state.contains("top_meta") && state.at("top_meta").is_object()) {
         top_meta_ = state.at("top_meta");
+    }
+    // 连井路径（factor.crosswell_path）：井序在井数据重载之后应用——
+    // stable well ids（井名）与当前井列求交，缺口静默跳过。
+    if (state.contains("well_order") && state.at("well_order").is_array()) {
+        QStringList ordered;
+        for (const Json& name : state.at("well_order")) {
+            if (name.is_string()) {
+                ordered.append(
+                    QString::fromStdString(name.get<std::string>()));
+            }
+        }
+        if (!ordered.isEmpty() && !wells_.empty()) {
+            set_well_order(ordered);
+        }
     }
     canvas_->update();
     preview_->set_tops(tops_model_.all_tops());

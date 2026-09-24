@@ -1,10 +1,12 @@
 #include "closure_review_install.hpp"
 
+#include <QDateTime>
 #include <QObject>
 
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/closure_review/project_review_actions.hpp>
 #include <pwb/closure_review/review_disposition.hpp>
+#include <pwb/closure_review/review_qc_core.hpp>
 #ifdef PWB_WITH_CLOSURE_WORKFLOW
 #include <pwb/closure_workflow/persistent_catalog.hpp>
 #endif  // PWB_WITH_CLOSURE_WORKFLOW
@@ -13,9 +15,13 @@
 #include <pwb/ui_review/qt/review_export_page.hpp>
 #include <pwb/ui_workstation/verify_records_panel.hpp>
 
+#include "job_center.hpp"
+
+#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -46,6 +52,11 @@ public:
     std::filesystem::path rail_file_;
     std::mutex rail_mutex_;
 #endif  // PWB_WITH_CLOSURE_WORKFLOW
+    // The SAME registrar the sync path delegates through (the async QC
+    // merge stamps provenance with this copy — one registration surface).
+    std::function<std::string(const domain::Json&)> provenance_fn_;
+    // Async QC task owner (JobCenter slot; registered for close protocol).
+    pwb::qgis_processing::PwbTaskOwner* qc_owner_ = nullptr;
 
     ReviewBinding(AppShell* shell, AppContext* context)
         : QObject(shell), shell_(shell), context_(context) {
@@ -80,7 +91,7 @@ public:
         // slice the seam stays unbound — the report keeps its honest
         // provenance_registered=false marker (never a claimed run).
 #ifdef PWB_WITH_CLOSURE_WORKFLOW
-        d.provenance = [this](const domain::Json& report) -> std::string {
+        provenance_fn_ = [this](const domain::Json& report) -> std::string {
             const auto store = context_->projectStore();
             if (store == nullptr) return {};
             auto rail = workflow_rail();
@@ -96,6 +107,7 @@ public:
                 return {};
             }
         };
+        d.provenance = provenance_fn_;
 #endif  // PWB_WITH_CLOSURE_WORKFLOW
         actions_ =
             std::make_unique<clr::ProjectReviewActions>(std::move(d));
@@ -132,7 +144,7 @@ public:
     }
 #endif  // PWB_WITH_CLOSURE_WORKFLOW
 
-    void attach() {
+    void attach(JobCenter* jobs) {
         setObjectName(QString::fromLatin1(kBindingObjectName));
         auto* widget = review_page();
         if (widget == nullptr) {
@@ -154,6 +166,103 @@ public:
                 [exposed]() -> ui_review::IReviewActions* {
                     return exposed;
                 });
+            // ---- async QC seam（verify.cancel 的生产基础） ---------------
+            // snapshot(GUI) → run(worker, 快照副本 + 协作取消) →
+            // merge(GUI, provenance + apply_qc_report 进 LIVE root +
+            // save)。cancelled 永不 merge——上一份有效报告保持不变。
+            if (jobs != nullptr) {
+                qc_owner_ = &jobs->make_owner(this);
+                validation->set_task_owner(qc_owner_);
+            }
+            ValidationWorkspacePage::AsyncQc seam;
+            seam.snapshot =
+                [this]() -> std::optional<
+                    std::pair<domain::Json, std::vector<std::string>>> {
+                    const auto store = context_->projectStore();
+                    if (store == nullptr) return std::nullopt;
+                    const domain::Json& root =
+                        store->document().root();
+                    const domain::Json docs =
+                        clr::paleomap_documents_of(root);
+                    if (!docs.is_array() || docs.empty()) {
+                        return std::nullopt;
+                    }
+                    std::vector<std::string> ids;
+                    for (const auto& doc : docs) {
+                        if (doc.is_object() && doc.contains("id")
+                            && doc.at("id").is_string()) {
+                            ids.push_back(
+                                doc.at("id").get<std::string>());
+                        }
+                    }
+                    if (ids.empty()) return std::nullopt;
+                    // Json copy = deep copy：worker 拿到的是不可变快照。
+                    return std::make_pair(root, ids);
+                };
+            seam.run = [](domain::Json& snapshot_root,
+                          const std::vector<std::string>& doc_ids,
+                          const std::function<bool()>& check_cancelled)
+                -> std::vector<domain::Json> {
+                // The delegate seam takes a pointer to a function OBJECT —
+                // a static wrapper keeps it alive for the whole run.
+                static const clr::CartographicQaDelegate
+                    kDefaultCartographic =
+                        &clr::geometry_cartographic_issues;
+                const std::string iso =
+                    QDateTime::currentDateTime()
+                        .toString(Qt::ISODate)
+                        .toStdString();
+                std::vector<domain::Json> reports;
+                for (const std::string& id : doc_ids) {
+                    if (!check_cancelled()) break;
+                    auto result = clr::run_map_qc_on_document(
+                        snapshot_root, id, /*inputs=*/{},
+                        &kDefaultCartographic, iso,
+                        /*provenance=*/nullptr);
+                    if (result.is_ok()) {
+                        reports.push_back(std::move(result).value());
+                    }
+                }
+                return reports;
+            };
+            seam.merge =
+                [this](const std::vector<domain::Json>& reports)
+                -> std::string {
+                const auto store = context_->projectStore();
+                if (store == nullptr) return "未绑定工程";
+                try {
+                    domain::Json& root = store->document().root();
+                    const std::string iso = QDateTime::currentDateTime()
+                                                .toString(Qt::ISODate)
+                                                .toStdString();
+                    for (const domain::Json& report : reports) {
+                        domain::Json stored = report;
+                        // provenance 注册与同步路径同一注册面（注册失败
+                        // 不失败 QC——false 标记可见）。
+                        stored["provenance_registered"] = false;
+                        if (provenance_fn_) {
+                            try {
+                                const std::string run_id =
+                                    provenance_fn_(stored);
+                                if (!run_id.empty()) {
+                                    stored["provenance_registered"] =
+                                        true;
+                                    stored["provenance_run_id"] =
+                                        run_id;
+                                }
+                            } catch (...) {
+                            }
+                        }
+                        clr::apply_qc_report(root, stored, iso);
+                    }
+                    const auto save_error = store->save_document();
+                    if (!save_error.ok()) return save_error.message;
+                    return {};
+                } catch (const std::exception& exc) {
+                    return exc.what();
+                }
+            };
+            validation->set_async_qc(std::move(seam));
         }
         // 底条「验证记录」表 = quality_reports[].review_records 的只读
         // 投影 —— 同一复核权威；provider 每次 refresh 重拉当前文档，
@@ -270,7 +379,8 @@ private:
 
 }  // namespace
 
-void install_review_actions(AppShell* shell, AppContext* context) {
+void install_review_actions(AppShell* shell, AppContext* context,
+                         JobCenter* jobs) {
     if (shell == nullptr) {
         return;
     }
@@ -280,7 +390,7 @@ void install_review_actions(AppShell* shell, AppContext* context) {
         return;
     }
     auto* binding = new ReviewBinding(shell, context);
-    binding->attach();
+    binding->attach(jobs);
 }
 
 void notify_project_store_changed(AppShell* shell, AppContext* context) {
@@ -291,7 +401,7 @@ void notify_project_store_changed(AppShell* shell, AppContext* context) {
         static_cast<ReviewBinding*>(existing)->rebind(context);
         return;
     }
-    install_review_actions(shell, context);
+    install_review_actions(shell, context, nullptr);
 }
 
 }  // namespace pwb::app::closure_review

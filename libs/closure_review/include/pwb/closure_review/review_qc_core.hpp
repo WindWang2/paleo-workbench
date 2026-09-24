@@ -122,4 +122,14 @@ domain::Result<domain::Json> run_map_qc_on_document(
         nullptr);
 // END V14-COMPILATION-PUBLISH
 
+// apply_qc_report — the upsert+bind tail of run_map_qc_on_document as a
+// public seam: upserts `report` into root["quality_reports"] by its
+// linked_map_document_id (carrying the existing entry's review_records),
+// then binds the active compilation run. The async QC path computes
+// reports on an immutable snapshot in a worker and merges them into the
+// LIVE root on the GUI thread through this one function — the merge
+// semantics never fork (no second upsert implementation).
+void apply_qc_report(domain::Json& root, const domain::Json& report,
+                     const std::string& iso_now);
+
 }  // namespace pwb::closure_review

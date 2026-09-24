@@ -508,6 +508,12 @@ void MainWindow::init_shell(QSettings* services_settings) {
     seismic_volume_service_ =
         std::make_unique<pwb::seismic_service::SeismicVolumeService>();
 #endif
+    stage_dirty_responder_ = [this]() {
+        return QMessageBox::question(
+            this, tr("未提交的修改"),
+            tr("切换阶段前有未提交的修改。保存、放弃还是取消切换？"),
+            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    };
     dirty_close_responder_ = [this]() {
         return QMessageBox::question(
             this, tr("未提交的修改"),
@@ -669,7 +675,8 @@ void MainWindow::buildUi() {
 // BEGIN CLOSURE-REVIEW
 #ifdef PWB_WITH_CLOSURE_REVIEW
     pwb::app::closure_review::install_review_actions(app_shell_,
-                                                     &context_);
+                                                     &context_,
+                                                     job_center_.get());
 #endif
 // END CLOSURE-REVIEW
 #else
@@ -1141,6 +1148,23 @@ void MainWindow::wire_app_shell() {
             [this](const QString& message) {
                 if (status_label_ != nullptr) status_label_->setText(message);
             });
+#if defined(PWB_WITH_DATA_INTEGRATION) && defined(PWB_WITH_STAGE_FLOW)
+    // ws2 约束捕捉的 workspace 契约：离开约束工作区恢复工程捕捉配置；
+    // 重新进入且开关仍开启时按当前约束图层集重新限定（QGIS 配置始终
+    // 单一权威 —— QgsProject::snappingConfig）。
+    connect(app_shell_, &AppShell::workspace_changed, this,
+            [this](int from, int to) {
+                if (from == 2 && to != 2) {
+                    restoreProjectSnapping();
+                } else if (to == 2 && from != 2) {
+                    if (auto* action = app_shell_->findChild<QAction*>(
+                            QStringLiteral("FactorSnapToggle"));
+                        action != nullptr && action->isChecked()) {
+                        setConstraintSnapping(true);
+                    }
+                }
+            });
+#endif
     connect(app_shell_, &AppShell::about_requested, this,
             [this] { showAboutDialog(); });
 #ifdef PWB_WITH_DATA_INTEGRATION
@@ -4734,7 +4758,69 @@ void MainWindow::applyStageValue(const std::string& value) {
     if (!stage.has_value()) return;
     // Canonicalize: the session string feeds the evaluator's stage
     // whitelist comparisons, which speak canonical values only.
-    context_.session().set_mapping_stage(pwb::tool_policy::stage_value(*stage));
+    const std::string next =
+        pwb::tool_policy::stage_value(*stage);
+    // 阶段移交 dirty gate（ws2 → ws3 等）：真切换 + 任一编辑会话有未
+    // 提交修改 → 三路决策（提交/放弃/取消切换）——编辑缓冲绝不静默
+    // 丢失（同一契约此前只在窗口关闭执行，#1447）。
+    const std::optional<std::string> current_stage =
+        context_.session().mapping_stage();
+    if (!next.empty()
+        && (!current_stage.has_value() || *current_stage != next)
+        && anyDirtyEditSession()) {
+        const int choice = stage_dirty_responder_();
+        if (choice == QMessageBox::Cancel) {
+            statusBar()->showMessage(
+                tr("已取消阶段切换（当前阶段保持 %1）")
+                    .arg(current_stage.has_value()
+                             ? QString::fromStdString(*current_stage)
+                             : tr("（未设置）")),
+                8000);
+            return;
+        }
+        if (choice == QMessageBox::Save) {
+            const std::filesystem::path staged_dir =
+                std::filesystem::temp_directory_path() / "pwb-platform"
+                                                       / "staged";
+            for (const std::string& layer_id :
+                 context_.session().edit().editing_layer_ids()) {
+                if (!context_.session().edit().dirty(layer_id)) continue;
+                std::string error;
+                context_.session().stage_commit(layer_id, staged_dir,
+                                                &error);
+                if (!error.empty()) {
+                    statusBar()->showMessage(
+                        tr("保存失败（%1），阶段切换已取消")
+                            .arg(QString::fromStdString(error)),
+                        10000);
+                    return;
+                }
+            }
+#ifdef PWB_WITH_DATA_INTEGRATION
+            {
+                QString saved_to;
+                const QString save_error =
+                    shell_project_actions::save_open_project(*this,
+                                                             &saved_to);
+                if (!save_error.isEmpty()) {
+                    statusBar()->showMessage(
+                        tr("文档保存失败（%1），阶段切换已取消")
+                            .arg(save_error),
+                        10000);
+                    return;
+                }
+            }
+#endif
+        } else {
+            for (const std::string& layer_id :
+                 context_.session().edit().editing_layer_ids()) {
+                if (context_.session().edit().dirty(layer_id)) {
+                    context_.session().edit().roll_back(layer_id);
+                }
+            }
+        }
+    }
+    context_.session().set_mapping_stage(next);
 // BEGIN V14-QGIS-CONTROL
     // Layer-side stage policy: empty-group rematerialization + effective
     // group visibility + edit-target reassignment (instant, never
