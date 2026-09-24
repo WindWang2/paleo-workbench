@@ -42,7 +42,8 @@ if(PWB_BUILD_CONV_21)
         src/postprocess.cpp
         src/spatial_result.cpp
         src/input_contract.cpp
-        src/model_package.cpp)
+        src/model_package.cpp
+        src/run_spec.cpp)
     # Pwb::Ingest/Pwb::Interchange are forward references: libs/prediction is
     # added by the CONV-13 block before their own CONV-14/19 blocks run, but
     # CMake resolves link targets at generate time (the root CONV-21 block

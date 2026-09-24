@@ -25,6 +25,15 @@ if(PWB_BUILD_CONV_21)
         PWB_CONTRACTS_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/prediction_contract_oracle.json")
     add_test(NAME prediction.contracts COMMAND prediction.contracts)
     set_tests_properties(prediction.contracts PROPERTIES TIMEOUT 120)
+
+    # PredictionRunSpec single-run contract (serialization/validation/
+    # mapping) — ORT-free like the contracts replay.
+    add_executable(prediction.run_spec run_spec_test.cpp)
+    target_compile_features(prediction.run_spec PRIVATE cxx_std_20)
+    target_link_libraries(prediction.run_spec PRIVATE
+        Pwb::Prediction Pwb::Domain)
+    add_test(NAME prediction.run_spec COMMAND prediction.run_spec)
+    set_tests_properties(prediction.run_spec PROPERTIES TIMEOUT 120)
 endif()
 # END CONV-21
 
