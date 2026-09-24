@@ -931,6 +931,9 @@ if(PWB_BUILD_PLATFORM)
     include(cmake/PwbQgisSdk.cmake)
     add_subdirectory(libs/tool_policy)
     add_subdirectory(libs/qgis)
+    # QGIS-PLOT — QgsPlotCanvas-based scientific 2D plot infrastructure
+    # (docs/development/qgis-native-plot-convergence/).
+    add_subdirectory(libs/qgis_plot)
 
 # BEGIN PROMPT-7
 # QGIS-native Python runtime (qgispython / PyQGIS / console / plugins).
@@ -1365,7 +1368,7 @@ if(TARGET pwb-platform
         apps/paleo_workbench_platform/m5_data_install.cpp)
     target_link_libraries(pwb-platform PRIVATE
         Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
-        Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt Pwb::UiSeqvizQt
+        Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::QgisPlot Pwb::UiReviewQt Pwb::UiSeqvizQt
         Pwb::UiWellseisQt Pwb::UiRibbonQt Pwb::UiWidgets)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_APP_SHELL=1)
     # BEGIN PWB-V14-THREE-STAGE — product wiring. This is PRODUCTION
@@ -1420,7 +1423,7 @@ if(TARGET pwb-platform
             Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
             Pwb::PlatformServices
             Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
-            Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+            Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::QgisPlot Pwb::UiReviewQt
             Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt
             Pwb::UiWidgets)
         target_compile_definitions(platform_app_shell PRIVATE
@@ -1485,7 +1488,7 @@ if(TARGET pwb-platform
                 Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
                 Pwb::PlatformServices Pwb::UiStageflowQt
                 Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
-                Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+                Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::QgisPlot Pwb::UiReviewQt
                 Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt
                 Pwb::UiWidgets Pwb::FactorHost)
             target_compile_definitions(platform_three_stage_flow PRIVATE
@@ -1551,7 +1554,7 @@ if(TARGET pwb-platform
             Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
             Pwb::PlatformServices Pwb::UiStageflowQt
             Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
-            Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+            Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::QgisPlot Pwb::UiReviewQt
             Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt
             Pwb::UiWidgets Pwb::FactorHost)
         target_compile_definitions(platform_constraint_authoring PRIVATE
@@ -1630,7 +1633,7 @@ if(TARGET pwb-platform
                 Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
                 Pwb::PlatformServices Pwb::Data Pwb::ClosureReview
                 Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
-                Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+                Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::QgisPlot Pwb::UiReviewQt
                 Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt
                 Pwb::UiWidgets)
             target_compile_definitions(platform_closure_review_install PRIVATE
@@ -2073,7 +2076,7 @@ if(TARGET pwb-platform
             apps/paleo_workbench_platform/workflow_install.hpp)
         target_link_libraries(pwb-platform PRIVATE
             Pwb::UiControllers Pwb::UiControllersQt
-            Pwb::UiWorkstationQt Pwb::UiReviewQt Pwb::WorkflowRuntime)
+            Pwb::UiWorkstationQt Pwb::QgisPlot Pwb::UiReviewQt Pwb::WorkflowRuntime)
         # workflow_install's constraint capabilities join when the
         # CONV-32 interpretation slice is in this configure.
         if(TARGET Pwb::WorkflowInterpretation)
@@ -2132,7 +2135,7 @@ if(TARGET pwb-platform
         Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
         Pwb::PlatformServices Pwb::JobQt
         Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
-        Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+        Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::QgisPlot Pwb::UiReviewQt
         Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt Pwb::UiWidgets
         Pwb::UiPagesMapedit Pwb::UiSeqviz Pwb::UiWellseis
         Pwb::UiWorkers Pwb::MappingDocument Pwb::Project
@@ -2195,7 +2198,7 @@ if(TARGET pwb-platform
         Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
         Pwb::PlatformServices Pwb::JobQt
         Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
-        Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+        Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::QgisPlot Pwb::UiReviewQt
         Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt Pwb::UiWidgets
         Pwb::UiPagesMapedit Pwb::UiSeqviz Pwb::UiWellseis
         Pwb::UiWorkers Pwb::MappingDocument Pwb::Project
@@ -2249,7 +2252,7 @@ if(PWB_BUILD_PLATFORM AND TARGET Pwb::VizChartsQt
         apps/paleo_workbench_platform/viz_e_hosts.hpp
         apps/paleo_workbench_platform/viz_e_install.hpp)
     target_link_libraries(pwb-platform PRIVATE
-        Pwb::VizChartsQt Pwb::UiPagesDataQt Pwb::MappingKernel)
+        Pwb::QgisPlot Pwb::VizChartsQt Pwb::UiPagesDataQt Pwb::MappingKernel)
     target_compile_definitions(pwb-platform PRIVATE PWB_WITH_VIZ_E=1)
     if(BUILD_TESTING)
         add_subdirectory(tests/cpp/viz_e)
@@ -2314,7 +2317,7 @@ if(PWB_BUILD_PLATFORM AND TARGET Pwb::VizChartsQt
                 Pwb::Application Pwb::Ui Pwb::Qgis Pwb::ToolPolicy
                 Pwb::PlatformServices
                 Pwb::UiWorkstationQt Pwb::UiCompositeQt Pwb::UiShellQt
-                Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::UiReviewQt
+                Pwb::UiPagesDataQt Pwb::UiMapQgis Pwb::QgisPlot Pwb::UiReviewQt
                 Pwb::UiSeqvizQt Pwb::UiWellseisQt Pwb::UiRibbonQt
                 Pwb::UiWidgets
                 Pwb::UiCanvas Pwb::UiDataCore Pwb::Ingest Pwb::SeismicIo

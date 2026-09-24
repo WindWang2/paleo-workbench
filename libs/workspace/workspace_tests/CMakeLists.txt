@@ -17,7 +17,9 @@ function(pwb_workspace_test target source ctest_name)
     set_tests_properties(${ctest_name} PROPERTIES TIMEOUT 300)
 endfunction()
 
+# QGIS-NATIVE-LAYER-CONTROL: the order-key/diff vocabulary retired with
+# the second layer tree (1000-layer scale coverage moved to
+# platform.layer_tree_composer over the real QGIS tree). The oracle keeps
+# the surviving codec/behavior vocabularies: source_usage + stage view.
 pwb_workspace_test(workspace_layer_control_oracle oracle_replay_test.cpp
     workspace.layer_control_oracle)
-pwb_workspace_test(workspace_layer_control_scale layer_control_scale_test.cpp
-    workspace.layer_control_scale)

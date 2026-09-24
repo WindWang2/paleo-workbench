@@ -12,8 +12,9 @@ target_compile_definitions(viz_charts.oracle_replay PRIVATE
 add_test(NAME viz_charts.oracle_replay COMMAND viz_charts.oracle_replay)
 set_tests_properties(viz_charts.oracle_replay PROPERTIES TIMEOUT 120)
 
-# Qt widget smoke (offscreen): the four ported QPainter widgets construct,
-# render, export and tear down under QT_QPA_PLATFORM=offscreen.
+# Qt widget smoke (offscreen): the surviving domain-specific QPainter
+# widgets (SurfaceWidget, ColorbarWidget) construct, render, export and
+# tear down under QT_QPA_PLATFORM=offscreen.
 if(TARGET Pwb::VizChartsQt)
     add_executable(viz_charts.qt_widgets_smoke qt_widgets_smoke_test.cpp)
     target_compile_features(viz_charts.qt_widgets_smoke PRIVATE cxx_std_20)

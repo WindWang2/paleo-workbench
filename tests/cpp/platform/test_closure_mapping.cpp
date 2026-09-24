@@ -52,7 +52,10 @@ namespace { long test_pid() {
 #include <pwb/ui_pages_mapedit/map_edit_view.hpp>
 #include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
 #include <pwb/ui_shell/adaptive_page_stack.hpp>
-#include <pwb/ui_seqviz/qt/composition_panel.hpp>
+#include <pwb/qgis/layout_authority.hpp>
+#include <pwb/qgis/layout_editor_panel.hpp>
+#include <pwb/qgis/layout_export_service.hpp>
+#include <qgsprintlayout.h>
 #include <pwb/ui_workstation/workstation_frame.hpp>
 
 #include "closure_mapping_document.hpp"
@@ -68,64 +71,53 @@ namespace { long test_pid() {
 #include "app_shell.hpp"
 #include "closure_mapping_install.hpp"
 #include "main_window.hpp"
+#include "app_context.hpp"
 #include "shell_project_actions.hpp"
 
 using pwb::app::AppShell;
 using pwb::app::MainWindow;
 
-// BEGIN V14-COMPILATION-PUBLISH
+// BEGIN V14-COMPILATION-PUBLISH (qgis-native-layout-convergence)
 namespace {
 
-// The composition panel battery: the three surfaces #1433 registered as
-// unwired (template library / preview renderer / export executor) must be
-// live on the installed panel.
-void composition_battery(pwb::ui_seqviz::qt::CompositionPanel& panel) {
-    using pwb::mapping_document::Composition;
-    // 1. Template library includes the professional geographic product path.
-    PWB_CHECK_MSG(panel.template_combo()->count() == 10,
-                  ("template library: ten built-in templates (got " +
-                   std::to_string(panel.template_combo()->count()) + ")")
-                      .c_str());
-    PWB_CHECK(panel.template_combo()->findData(QStringLiteral("professional_geographic")) >= 0);
-    // 2. The panel opens on a template document, not the blank A4 start.
-    const Composition* doc = panel.document();
-    PWB_CHECK(doc != nullptr);
-    PWB_CHECK_MSG(doc->title != "未命名组图",
-                  ("panel opens on a template document (got '" + doc->title + "')")
-                      .c_str());
-    PWB_CHECK_MSG(doc->metadata.is_object() &&
-                      doc->metadata.contains("template_id"),
-                  "template document metadata carries template_id");
-    const std::size_t elements = doc->elements.size();
-    PWB_CHECK_MSG(elements >= 5,
-                  ("template document carries its elements (got " +
-                   std::to_string(elements) + ")")
-                      .c_str());
+// The native layout surface battery: the Stage 3 editor hosts real
+// QgsPrintLayouts; templates materialize through the session authority
+// and the unified exporter writes the product files.
+void layout_battery(MainWindow& window) {
+    auto& authority = window.context().session().layout();
+    const auto created = authority.instantiate_template("professional_geographic");
+    PWB_CHECK_MSG(created.layout != nullptr,
+                  (created.warnings.empty() ? std::string("template instantiation failed")
+                                            : created.warnings.front()).c_str());
+    PWB_CHECK_MSG(created.items >= 5,
+                  ("native template carries its items (got " +
+                   std::to_string(created.items) + ")").c_str());
+    PWB_CHECK(authority.layouts().size() == 1);
 
-    // 3. Preview: a real render (the label holds a pixmap and no failure
-    //    text) — the SVG engine ran over the document.
-    panel.refresh_all();
-    PWB_CHECK_MSG(!panel.preview_label()->pixmap().isNull(),
-                  "preview renders the composition (no 预览渲染失败)");
-    PWB_CHECK_MSG(panel.preview_label()->text().isEmpty(),
-                  "preview label carries no failure text");
+    if (auto* editor = window.findChild<pwb::qgis::LayoutEditorPanel*>()) {
+        editor->refresh();
+        PWB_CHECK(editor->active_layout() == created.layout);
+    }
 
-    // 4. Export executor: a real SVG file with the physical-size contract.
     const std::string out_path =
-        (std::filesystem::temp_directory_path() / "pwb_v14_composition_test.svg")
+        (std::filesystem::temp_directory_path() / "pwb_v14_layout_test.svg")
             .string();
     std::filesystem::remove(out_path);
-    const pwb::ui_seqviz::qt::CompositionExportResult report =
-        panel.export_to(out_path, "svg", 150.0);
-    PWB_CHECK_MSG(report.ok,
-                  ("composition export succeeded: " + report.message).c_str());
+    pwb::qgis::LayoutExportRequest request;
+    request.output_path = out_path;
+    request.format = "svg";
+    request.dpi = 150.0;
+    const pwb::qgis::LayoutExportReport report =
+        pwb::qgis::export_layout(*created.layout, request);
+    PWB_CHECK_MSG(report.ok, report.error.c_str());
     PWB_CHECK_MSG(std::filesystem::exists(out_path),
-                  "composition export wrote the file");
+                  "layout export wrote the file");
     std::ifstream in(out_path);
     std::string svg((std::istreambuf_iterator<char>(in)),
                     std::istreambuf_iterator<char>());
-    PWB_CHECK_MSG(svg.rfind("<svg", 0) == 0, "export is an SVG document");
-    PWB_CHECK_MSG(svg.find("mm\"") != std::string::npos,
+    PWB_CHECK_MSG(svg.find("<svg") != std::string::npos,
+                  "export is an SVG document (xml prolog + svg root)");
+    PWB_CHECK_MSG(svg.find("mm") != std::string::npos,
                   "export carries the physical mm anchors");
     PWB_CHECK_MSG(svg.find("</svg>") != std::string::npos,
                   "export is a complete SVG document");
@@ -306,11 +298,9 @@ int install_battery() {
     PWB_CHECK(mapping_page != nullptr);
     PWB_CHECK(mapping_page->findChild<MapEditView*>() != nullptr);
     PWB_CHECK(mapping_page->findChild<MapEditScene*>() != nullptr);
-    auto* composition =
-        mapping_page->findChild<pwb::ui_seqviz::qt::CompositionPanel*>();
-    PWB_CHECK(composition != nullptr);
-    PWB_CHECK(composition->document() != nullptr);
-    PWB_CHECK(composition->session() != nullptr);
+    auto* layout_editor =
+        mapping_page->findChild<pwb::qgis::LayoutEditorPanel*>();
+    PWB_CHECK(layout_editor != nullptr);
     // The "（未迁移）" placeholders were replaced in the dock/float
     // registries: the page's composition slot hosts the real panel.
     PWB_CHECK_MSG(mapping_page->center_stack()->count() == 2,
@@ -323,7 +313,7 @@ int install_battery() {
     // BEGIN V14-COMPILATION-PUBLISH — the composition panel's three
     // previously-unwired surfaces (template library / preview renderer /
     // export executor) must be live, not the honest-failure texts.
-    composition_battery(*composition);
+    layout_battery(window);
     // END V14-COMPILATION-PUBLISH
     return pwb::test::failure_count();
 }

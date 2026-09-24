@@ -28,14 +28,12 @@ target_sources(pwb_workspace PRIVATE src/mutations.cpp)
 # END CONV-26
 
 # BEGIN V14-QGIS-CONTROL
-# Layer control plane core (Qt-free): ordering engine, domain tree model,
-# keyed-LCS tree diff, state behavior surface and the version->usage
-# reverse query (ports of mapping_workspace/{layer_order,layer_tree,
-# layer_tree_diff,stage_state behavior,source_usage}.py).
+# Layer control plane core (Qt-free), post QGIS-native convergence: the
+# state behavior surface and the version->usage reverse query (ports of
+# mapping_workspace/{stage_state behavior,source_usage}.py). The
+# ordering engine, domain tree model and keyed-LCS diff retired with the
+# second layer tree (QgsLayerTree is the runtime authority).
 target_sources(pwb_workspace PRIVATE
-    src/layer_order.cpp
-    src/layer_tree.cpp
-    src/layer_tree_diff.cpp
     src/state_ops.cpp
     src/source_usage.cpp)
 if(BUILD_TESTING)

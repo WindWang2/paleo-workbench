@@ -357,6 +357,16 @@ bool movable_into_system_group(const std::string& role_value,
     return home_group_for_role(*resolved) == group_id;
 }
 
+std::string effective_home_group(const std::string& role,
+                                 const std::string& created_stage,
+                                 const std::string& factor_task_id) {
+    std::optional<MappingStage> stage;
+    if (!created_stage.empty()) {
+        stage = tool_policy::stage_from_value(created_stage);
+    }
+    return home_group_for_role(role, stage, factor_task_id);
+}
+
 LayerClassification classify_layer_for_migration(
     const std::string& layer_id,
     const std::map<std::string, std::string>& metadata,

@@ -179,7 +179,8 @@ MappingWorkspaceState MappingWorkspaceState::from_json(
     for (auto it = data.begin(); it != data.end(); ++it) {
         if (it.key() != "schema_version" && it.key() != "current_stage" &&
             it.key() != "stage_states" && it.key() != "memberships" &&
-            it.key() != "tree" && it.key() != "artifact_maturity" &&
+            it.key() != "tree" && it.key() != "qgis_project_file" &&
+            it.key() != "artifact_maturity" &&
             it.key() != "compilation_input_set") {
             state.extra[it.key()] = it.value();
         }
@@ -223,6 +224,7 @@ MappingWorkspaceState MappingWorkspaceState::from_json(
     if (tree != data.end() && tree->is_object()) {
         state.tree = *tree;
     }
+    state.qgis_project_file = get_string(data, "qgis_project_file");
     const auto maturity = data.find("artifact_maturity");
     if (maturity != data.end() && maturity->is_object()) {
         for (auto member = maturity->begin(); member != maturity->end();
@@ -270,7 +272,13 @@ Json MappingWorkspaceState::to_json() const {
         members_json[layer_id] = binding_to_dict(binding);
     }
     out["memberships"] = std::move(members_json);
-    out["tree"] = tree;
+    // QGIS-native handoff: once the sibling .qgs file owns the GIS tree,
+    // this section stops persisting a second copy of the structure — the
+    // tree is written empty (the in-memory desired tree keeps driving the
+    // session; a reopen restores structure from the QGIS project and
+    // re-observes it into this state).
+    out["tree"] = qgis_project_file.empty() ? tree : Json::object();
+    out["qgis_project_file"] = qgis_project_file;
     Json maturity = Json::object();
     for (const auto& [key, value] : artifact_maturity) {
         maturity[key] = value;

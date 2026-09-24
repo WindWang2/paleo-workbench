@@ -88,6 +88,5 @@ const ModelSpec& well_entity_spec();
 const ModelSpec& seismic_survey_spec();
 const ModelSpec& domain_entity_spec();
 const ModelSpec& entity_asset_link_spec();
-const ModelSpec& map_reference_layer_spec();
 
 }  // namespace pwb::project
