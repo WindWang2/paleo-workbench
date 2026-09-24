@@ -10,6 +10,8 @@
 #include <qgsvectorlayer.h>
 #include <qgslayertree.h>
 #include <qgslayertreemapcanvasbridge.h>
+
+#include <QPointer>
 #include <qgslayertreeview.h>
 #include <qgslayertreemodel.h>
 #include <qgscoordinatereferencesystem.h>
@@ -47,6 +49,10 @@ QgsMapCanvas* MapSession::createCanvas(QWidget* parent) {
     auto* bridge = new QgsLayerTreeMapCanvasBridge(project_->layerTreeRoot(),
                                                    canvas, canvas);
     bridge->setCanvasLayers();
+    // The vendored bridge subscribes layersAdded on QgsProject::instance()
+    // (the app singleton), not on this session's project — admission must
+    // nudge it explicitly (see syncBridges). Tree-side signals are wired
+    // to the real root and work natively.
     bridges_.push_back(QPointer<QgsLayerTreeMapCanvasBridge>(bridge));
     canvases_.push_back(QPointer<QgsMapCanvas>(canvas));
     return canvas;
@@ -110,8 +116,13 @@ QgsMapLayer* MapSession::adopt_layer(QgsMapLayer* layer,
     }
     layer_adapter::apply(owned.get(), binding);
     QgsMapLayer* admitted = owned.release();
+    assignDeterministicLayerId(admitted, binding);
+    // The registry bridge inserts the node; the canvas layer set follows
+    // through QgsLayerTreeMapCanvasBridge (the single canvas writer —
+    // nudged here because the vendored bridge listens for layersAdded on
+    // the project singleton, not on this session's project).
     project_->addMapLayer(admitted);
-    syncCanvasLayers();
+    syncBridges();
     return admitted;
 }
 
@@ -135,6 +146,16 @@ QgsRasterLayer* MapSession::addRasterLayer(const std::string& uri,
 
 QgsMapLayer* MapSession::layerById(const std::string& layer_id) const {
     if (project_ == nullptr) return nullptr;   // closed session
+    // Fast path: admitted layers carry the domain id as their QGIS id
+    // (assignDeterministicLayerId), so the project registry resolves in
+    // O(1).
+    if (QgsMapLayer* direct = project_->mapLayer(
+            QString::fromStdString(layer_id))) {
+        return direct;
+    }
+    // Fallback for layers admitted outside the deterministic-id policy
+    // (id kept random on a collision): resolve through the pwb/layer_id
+    // custom property instead.
     const auto layers = project_->mapLayers();
     for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
         if (layer_adapter::layer_id_of(it.value()) == layer_id) return it.value();
@@ -263,26 +284,27 @@ void MapSession::zoomToFullExtent(QgsMapCanvas* canvas) {
     if (canvas != nullptr) canvas->zoomToFullExtent();
 }
 
-void MapSession::syncCanvasLayers() {
-    for (const QPointer<QgsMapCanvas>& canvas : canvases_) {
-        if (canvas == nullptr) continue;
-        // The per-canvas bridge follows the tree; a canvas without its
-        // bridge still gets an explicit layer set from the tree order.
-        QList<QgsMapLayer*> layers;
-// R2-14: a closed session must refuse, not deref a null project_.
-    if (project_ == nullptr) {
-    throw std::runtime_error("MapSession::syncCanvasLayers after close()");
-}
-        const QList<QgsMapLayer*> order = project_->layerTreeRoot()->layerOrder();
-        for (QgsMapLayer* layer : order) {
-            if (layer == nullptr || !layer->isSpatial()) continue;
-            QgsLayerTreeLayer* node = project_->layerTreeRoot()->findLayer(layer);
-            if (node == nullptr || !node->isVisible()) continue;
-            layers.append(layer);
-        }
-        canvas->setLayers(layers);
-        canvas->refresh();
+void MapSession::syncBridges() {
+    // Route every post-admission canvas update through the tree bridge
+    // (the single canvas-layer-set writer). No parallel setLayers path.
+    for (const QPointer<QgsLayerTreeMapCanvasBridge>& bridge : bridges_) {
+        if (bridge != nullptr) bridge->setCanvasLayers();
     }
+}
+
+void MapSession::assignDeterministicLayerId(QgsMapLayer* layer,
+                                            const LayerBinding& binding) {
+    // The domain join key doubles as the QGIS layer id: the project
+    // registry resolves layerById in O(1) and the tree sidecar's layer
+    // references (QgsLayerTree::writeXml stores layer ids) survive
+    // across sessions without an id remap. setId only works before the
+    // layer joins a project/store; collisions (id already taken) keep
+    // the random id — the custom-property join still resolves.
+    if (layer == nullptr || binding.layer_id.empty()) return;
+    const QString id = QString::fromStdString(binding.layer_id);
+    if (id == layer->id()) return;
+    if (project_->mapLayer(id) != nullptr) return;  // taken: keep random id
+    layer->setId(id);
 }
 
 void MapSession::close() {
@@ -298,6 +320,7 @@ void MapSession::close() {
         canvas->setProject(nullptr);
     }
     canvases_.clear();
+    bridges_.clear();
     trees_.clear();
     project_->removeAllMapLayers();
     project_.reset();

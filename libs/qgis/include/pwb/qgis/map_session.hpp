@@ -14,9 +14,9 @@
 
 #include <pwb/qgis/layer_adapter.hpp>
 
+class QgsLayerTreeMapCanvasBridge;
 class QgsMapCanvas;
 class QgsLayerTreeView;
-class QgsLayerTreeMapCanvasBridge;
 class QgsProject;
 class QgsVectorLayer;
 class QgsRasterLayer;
@@ -98,13 +98,21 @@ public:
     void detach_canvas_bridges();
 
 private:
-    void syncCanvasLayers();
 
     std::unique_ptr<QgsProject> project_;
     std::vector<QPointer<QgsMapCanvas>> canvases_;
+    // Per-canvas tree bridges (created in createCanvas; nudged after
+    // admission — the vendored bridge cannot see non-singleton project
+    // layer additions by itself).
     std::vector<QPointer<QgsLayerTreeMapCanvasBridge>> bridges_;
     std::vector<QPointer<QgsLayerTreeView>> trees_;
     bool closed_ = false;
+    void syncBridges();
+
+    // Domain join key -> QGIS layer id (call before addMapLayer; see
+    // map_session.cpp for the collision policy).
+    void assignDeterministicLayerId(QgsMapLayer* layer,
+                                    const LayerBinding& binding);
 };
 
 }  // namespace pwb::qgis

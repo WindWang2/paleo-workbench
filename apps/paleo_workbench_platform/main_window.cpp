@@ -109,6 +109,7 @@
 #include <QEventLoop>
 
 #include <pwb/application/adapters/volume_payload.hpp>
+#include <pwb/project/paths.hpp>
 #include <pwb/seismic_viewer/seismic_slice_widget.hpp>
 #include <pwb/viz/seismic_volume.hpp>
 
@@ -148,6 +149,10 @@
 #include <pwb/qgis/layer_factory.hpp>
 #include <pwb/qgis/map_project_store.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
+
+#include <qgslayertreelayer.h>
+#include <qgslayertreemodel.h>
+#include <qgslayertreenode.h>
 #include <pwb/project/paths.hpp>
 #include <pwb/workspace/state_ops.hpp>
 
@@ -2341,6 +2346,11 @@ QString MainWindow::closeProject() {
 #endif
     refreshActionStates();
 #ifdef PWB_WITH_CONV_27
+    // QGIS-NATIVE-LAYER-CONTROL: drop the layer control plane with the
+    // project (a live plane over the emptied tree would re-create the
+    // system skeleton on the next stage-dock switch — ghost groups over
+    // a closed project).
+    resetLayerControlPlane();
     refresh_readiness();
 #endif
     statusBar()->showMessage(tr("工程已关闭"), 8000);
@@ -2598,13 +2608,18 @@ namespace {
 // 地质因子图 re-runs regenerate the two product layers in place: drop the
 // previous instance (join-key lookup, not the QGIS layer id) first.
 void removeLayerById(QgsProject* project, const std::string& layer_id) {
+    // Remove EVERY match (a deterministic-id holder plus a random-id
+    // twin joined by the property would leave a duplicate behind if the
+    // loop stopped at the first hit).
+    std::vector<QString> doomed;
     const auto layers = project->mapLayers();
     for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
-        if (pwb::qgis::layer_adapter::layer_id_of(it.value()) == layer_id) {
-            project->removeMapLayer(it.key());
-            return;
+        if (pwb::qgis::layer_adapter::layer_id_of(it.value()) == layer_id ||
+            it.key().toStdString() == layer_id) {
+            doomed.push_back(it.key());
         }
     }
+    for (const QString& id : doomed) project->removeMapLayer(id);
 }
 }  // namespace
 
@@ -4601,11 +4616,27 @@ void MainWindow::resetLayoutState() {
 
 // BEGIN V14-QGIS-CONTROL
 #ifdef PWB_WITH_CONV_27
-// Native layer control plane glue — see docs/development/
-// qgis-v14-layer-control/02-architecture.md §D. The live workspace state
-// is the single domain authority (loaded from the project document's
-// mapping_workspace section, written back on save); QGIS stays the
-// runtime tree authority through QgsLayerTreeStack.
+// Native layer control plane glue — QGIS-native convergence: the real
+// QgsLayerTree of the session project IS the layer tree (structure,
+// order, grouping, visibility). The domain side keeps only the
+// geological semantics (memberships/roles/stage view states) in
+// MappingWorkspaceState; tree geometry persists through the QGIS-native
+// sidecar (QgsLayerTree::writeXml), never as a second JSON tree.
+void MainWindow::resetLayerControlPlane() {
+    // Teardown order: recorder connection -> tree executor (stage) ->
+    // composer -> policy (groups/targets) -> the referenced workspace
+    // state. Idempotent; called on reopen and project close.
+    if (group_visibility_connection_) {
+        QObject::disconnect(group_visibility_connection_);
+        group_visibility_connection_ = {};
+    }
+    layer_stage_.reset();
+    layer_composer_.reset();
+    layer_targets_.reset();
+    layer_groups_.reset();
+    layer_workspace_.reset();
+}
+
 void MainWindow::applyLayerControlForOpen(bool restored_from_qgis) {
     pwb::application::PwbDataStore* store = context_.projectStore().get();
     if (store == nullptr) {
@@ -4613,8 +4644,13 @@ void MainWindow::applyLayerControlForOpen(bool restored_from_qgis) {
         // open are dangling — never leave them on the window.
         setProperty("pwb.layer_workspace", QVariant());
         setProperty("pwb.layer_groups", QVariant());
+        resetLayerControlPlane();
         return;
     }
+    // Reopen: drop the previous project's control plane FIRST (the
+    // controllers hold references into layer_workspace_ — destroying the
+    // state under them leaves dangling references until they are reset).
+    resetLayerControlPlane();
     pwb::domain::DiagnosticList diagnostics;
     // Const read (the non-const mapping_workspace() would materialize an
     // empty section into the document on every open).
@@ -4623,16 +4659,76 @@ void MainWindow::applyLayerControlForOpen(bool restored_from_qgis) {
         std::make_unique<pwb::workspace::MappingWorkspaceState>(
             pwb::workspace::MappingWorkspaceState::from_json(
                 document.mapping_workspace(), diagnostics));
-    layer_tree_stack_ =
-        std::make_unique<pwb::qgis::QgsLayerTreeStack>(
-            context_.session().map());
     layer_groups_ =
         std::make_unique<pwb::ui_composite::LayerGroupController>(
             *layer_workspace_);
-    layer_groups_->attach_stack(layer_tree_stack_.get());
+    layer_composer_ = std::make_unique<pwb::qgis::LayerTreeComposer>(
+        context_.session().map(), *layer_workspace_);
     layer_stage_ =
         std::make_unique<pwb::ui_composite::LayerStageController>(
             *layer_workspace_, *layer_groups_);
+    // Stage execution hooks: the policy controller (ui_composite) drives
+    // the real QGIS tree through the composer — never a mirror.
+    layer_stage_->set_tree_execution(
+        [this]() { layer_composer_->ensure_system_groups(); },
+        [this](const std::map<std::string, bool>& visibility) {
+            layer_composer_->apply_group_visibility(visibility);
+        });
+    // User checkbox gestures land on real nodes; the per-stage overlay
+    // must learn about them or the next stage switch would push the
+    // profile default over the user's choice. visibilityChanged is
+    // emitted by EACH node (no relay to the root), so the observer rides
+    // the tree MODEL's dataChanged instead — one connection covering
+    // every node. Echoes of programmatic batches are suppressed
+    // (in_structural_batch).
+    if (tree_ != nullptr && tree_->layerTreeModel() != nullptr) {
+        group_visibility_connection_ = QObject::connect(
+            tree_->layerTreeModel(), &QAbstractItemModel::dataChanged, this,
+            [this](const QModelIndex& top, const QModelIndex& bottom,
+                   const QVector<int>& roles) {
+                if (layer_composer_ == nullptr || layer_groups_ == nullptr ||
+                    layer_composer_->in_structural_batch()) {
+                    return;
+                }
+                if (!roles.contains(Qt::CheckStateRole) &&
+                    !roles.isEmpty()) {
+                    return;
+                }
+                auto* model = tree_ != nullptr
+                                  ? tree_->layerTreeModel()
+                                  : nullptr;
+                if (model == nullptr) return;
+                for (int row = top.row(); row <= bottom.row(); ++row) {
+                    const QModelIndex index =
+                        top.sibling(row, top.column());
+                    QgsLayerTreeNode* node = model->index2node(index);
+                    if (node == nullptr) continue;
+                    const bool visible = node->itemVisibilityChecked();
+                    if (node->nodeType() == QgsLayerTreeNode::NodeGroup) {
+                        const std::string gid =
+                            pwb::qgis::LayerTreeComposer::group_id_of(node);
+                        if (!gid.empty()) {
+                            layer_groups_->record_group_visibility_event(
+                                gid, visible);
+                        }
+                    } else if (node->nodeType() ==
+                               QgsLayerTreeNode::NodeLayer) {
+                        auto* layer_node =
+                            static_cast<QgsLayerTreeLayer*>(node);
+                        if (layer_node->layer() != nullptr) {
+                            const std::string lid =
+                                pwb::qgis::layer_adapter::layer_id_of(
+                                    layer_node->layer());
+                            if (!lid.empty()) {
+                                layer_groups_
+                                    ->record_layer_visibility_event(lid,
+                                                                    visible);
+                            }
+                        }
+                    }
+                }
+            });
+    }
     // Composition-root access (stage-action orchestration mutates the
     // SAME live state the save path persists — a second authority would
     // be clobbered by syncLayerControlOnSave). Same property pattern as
@@ -4690,27 +4786,35 @@ void MainWindow::applyLayerControlForOpen(bool restored_from_qgis) {
         [this](const std::string& layer_id) {
             return context_.session().map().layerById(layer_id) != nullptr;
         });
-    layer_snapshots_ = snapshots;
-    // Partial composition (catalog-bound working copies only): ghost
-    // cleanup must NOT run — an absent layer here is not evidence of
-    // deletion (destructive-purge guard; contracts 03 §7).
+    // Membership admission for the materialized working-copy layers
+    // (facts_ holds the domain records of the open project). Partial
+    // composition (catalog-bound working copies only): ghost cleanup
+    // must NOT run — an absent layer here is not evidence of deletion
+    // (destructive-purge guard; contracts 03 §7).
     layer_groups_->ensure_memberships(snapshots, /*full_composition=*/false);
+    // Initial structure build: sidecar restore > legacy state.tree
+    // migration > template routing (the composer owns every path; the
+    // user's live-tree arrangement is never fought).
     try {
         if (restored_from_qgis) {
-            // .qgs-restored tree: ADOPT the runtime structure (same
-            // observation the save path uses for user edits) — placements
-            // and order keys follow the QGIS authority instead of a
-            // persisted desired tree, which the document no longer keeps.
-            layer_groups_->observe_tree_nodes(
-                layer_tree_stack_->tree_snapshot_nodes());
+            // .qgs-restored tree: ADOPT the runtime structure — the
+            // restored tree IS the structure (QGIS authority), so the
+            // composer only ensures the skeleton and routes node-less
+            // layers instead of rebuilding from the sidecar.
+            layer_composer_->adopt_restored_tree();
         } else {
-            // Host guard (02-architecture §5): an applier throw must not
-            // escape openProject — the plane degrades, the open proceeds.
-            layer_groups_->reconcile(snapshots);
+            std::string compose_error;
+            if (!layer_composer_->compose(layerTreeSidecarPath(),
+                                          &compose_error)) {
+                statusBar()->showMessage(
+                    tr("图层树恢复失败（%1），已按分组规则重建")
+                        .arg(QString::fromStdString(compose_error)),
+                    10000);
+            }
         }
     } catch (const std::exception& exc) {
-        // Degrade, but TELL the user (N8: the comment promised a status
-        // surface note that was never emitted — silent degradation).
+        // Degrade, but TELL the user (N8): the open proceeds with the
+        // flat auto-inserted tree; structure edits still work.
         statusBar()->showMessage(
             tr("图层分组同步失败（%1），将继续重试")
                 .arg(QString::fromStdString(exc.what())),
@@ -4785,40 +4889,41 @@ void MainWindow::syncLayerControlOnSave() {
     if (layer_workspace_ == nullptr) return;
     pwb::application::PwbDataStore* store = context_.projectStore().get();
     if (store == nullptr) return;
-    // Adopt user tree-structure edits (drag / group moves) observed on
-    // the QGIS tree, then RE-RECONCILE so the adopted structure reaches
-    // state.tree (observe alone only updates the runtime placement
-    // tables; only reconcile persists the tree — Round-2 review P1-1).
-    // The re-reconcile diffs against the already-observed tree, so it
-    // applies zero structural ops and just rewrites the desired-tree
-    // payload. An illegal placement is rejected by the same
-    // role-routing validation (desired tree unchanged). Real-time
-    // model-signal write-back remains the Prompt-2 integration point
-    // (08 §2).
-    if (layer_tree_stack_ != nullptr && layer_groups_ != nullptr) {
-        if (layer_groups_->observe_tree_nodes(
-                layer_tree_stack_->tree_snapshot_nodes()) &&
-            !layer_snapshots_.empty()) {
-            try {
-                // No force: the diff runs against the pre-drag baseline
-                // and emits exactly the user's minimal move set.
-                layer_groups_->reconcile(layer_snapshots_);
-            } catch (const std::exception& exc) {
-                // Save proceeds with the last persisted tree; the next
-                // successful reconcile re-syncs it. Report the degraded
-                // state instead of staying silent (N8).
-                statusBar()->showMessage(
-                    tr("图层分组同步失败（%1），已按上次持久化结果保存")
-                        .arg(QString::fromStdString(exc.what())),
-                    10000);
-            }
+    // Persist the observed QGIS tree (structure/order/visibility/
+    // expanded) through QGIS's own serializer; the domain project JSON
+    // keeps only the geological semantics (memberships/stage view
+    // states). Single direction: QGIS -> sidecar, no write-back loop
+    // (the user's drag/reorder results in the live tree simply ARE the
+    // result — nothing is re-derived at save time).
+    if (layer_composer_ != nullptr) {
+        std::string tree_error;
+        if (layer_composer_->save_tree(layerTreeSidecarPath(),
+                                       &tree_error)) {
+            // First successful sidecar write retires the legacy JSON
+            // tree for good (this save persists memberships without it;
+            // until now the document kept the pre-migration tree as the
+            // failure-safe carrier).
+            layer_workspace_->tree = pwb::domain::Json();
+        } else {
+            statusBar()->showMessage(
+                tr("图层树保存失败（%1）——已保留旧版树数据，下次保存重试")
+                    .arg(QString::fromStdString(tree_error)),
+                10000);
         }
     }
-    // Persist the desired tree / memberships / stage view states into
-    // the project document (additive section rewrite; the store saves
-    // right after through ProjectManager).
+    // Persist memberships / stage view states into the project document
+    // (additive section rewrite; the store saves right after through
+    // ProjectManager).
     pwb::workspace::write_mapping_workspace(store->document().root(),
                                             *layer_workspace_);
+}
+
+std::filesystem::path MainWindow::layerTreeSidecarPath() const {
+    const pwb::application::PwbDataStore* store =
+        context_.projectStore().get();
+    if (store == nullptr) return {};
+    return pwb::project::artifact_dir_for(store->project_file()) /
+           "layer-tree.xml";
 }
 #endif
 // END V14-QGIS-CONTROL
