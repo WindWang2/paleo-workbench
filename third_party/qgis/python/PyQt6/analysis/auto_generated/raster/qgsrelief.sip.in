@@ -1,0 +1,136 @@
+/************************************************************************
+ * This file has been generated automatically from                      *
+ *                                                                      *
+ * src/analysis/raster/qgsrelief.h                                      *
+ *                                                                      *
+ * Do not edit manually ! Edit header and run scripts/sipify.py again   *
+ ************************************************************************/
+
+
+
+
+
+
+
+class QgsRelief
+{
+%Docstring(signature="appended")
+Produces colored relief rasters from DEM.
+%End
+
+%TypeHeaderCode
+#include "qgsrelief.h"
+%End
+  public:
+    QgsRelief( const QString &inputFile, const QString &outputFile, const QString &outputFormat );
+%Docstring
+Constructor for QgsRelief.
+%End
+    ~QgsRelief();
+
+
+    enum class Result /BaseType=IntEnum/
+    {
+      Success,
+      InvalidInput,
+      OutputCreationFailed,
+      InvalidInputSize,
+      Canceled,
+    };
+
+    QgsRelief::Result processRaster( QgsFeedback *feedback = 0 );
+%Docstring
+Starts the calculation.
+
+Reads from the intput input file and stores the result in the output
+file.
+
+:param feedback: feedback object that receives update and that is
+                 checked for cancellation.
+
+:return: result code. Prior to QGIS 4.2 the results were returned as a
+         raw integer value.
+%End
+
+    double zFactor() const;
+%Docstring
+Returns the z factor, which controls vertical elevation exaggeration.
+
+.. seealso:: :py:func:`setZFactor`
+%End
+
+    void setZFactor( double factor );
+%Docstring
+Sets the z ``factor``, which controls vertical elevation exaggeration.
+
+.. seealso:: :py:func:`zFactor`
+%End
+
+    void clearReliefColors();
+%Docstring
+Clears all existing relief colors.
+
+.. seealso:: :py:func:`addReliefColorClass`
+
+.. seealso:: :py:func:`reliefColors`
+
+.. seealso:: :py:func:`setReliefColors`
+%End
+
+    void addReliefColorClass( const QgsRasterReliefColor &color );
+%Docstring
+Adds a relief ``color``.
+
+.. seealso:: :py:func:`clearReliefColors`
+
+.. seealso:: :py:func:`reliefColors`
+
+.. seealso:: :py:func:`setReliefColors`
+%End
+
+    QList<QgsRasterReliefColor> reliefColors() const;
+%Docstring
+Returns a list of all relief colors.
+
+.. seealso:: :py:func:`clearReliefColors`
+
+.. seealso:: :py:func:`addReliefColorClass`
+
+.. seealso:: :py:func:`setReliefColors`
+%End
+
+    void setReliefColors( const QList<QgsRasterReliefColor> &c );
+%Docstring
+Sets the list of relief colors.
+
+.. seealso:: :py:func:`clearReliefColors`
+
+.. seealso:: :py:func:`addReliefColorClass`
+
+.. seealso:: :py:func:`reliefColors`
+%End
+
+    QList<QgsRasterReliefColor> calculateOptimizedReliefClasses();
+%Docstring
+Calculates class breaks according with the method of Buenzli (2011)
+using an iterative algorithm for segmented regression.
+
+:return: ``True`` in case of success
+%End
+
+    bool exportFrequencyDistributionToCsv( const QString &file );
+%Docstring
+Writes frequency of elevation values to a ``file`` for manual inspection
+%End
+
+  private:
+    QgsRelief( const QgsRelief &rh );
+};
+
+/************************************************************************
+ * This file has been generated automatically from                      *
+ *                                                                      *
+ * src/analysis/raster/qgsrelief.h                                      *
+ *                                                                      *
+ * Do not edit manually ! Edit header and run scripts/sipify.py again   *
+ ************************************************************************/

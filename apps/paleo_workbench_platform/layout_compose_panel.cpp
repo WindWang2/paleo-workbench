@@ -15,8 +15,7 @@
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QPainter>
-#include <QPen>
+#include <QPixmap>
 #include <QPushButton>
 #include <QVBoxLayout>
 
@@ -57,24 +56,6 @@ bool chrome_has(const Json& chrome, const QString& element) {
     }
     return false;
 }
-
-// The vector preview: paper + the selected template's REAL element
-// geometry (mm) + the checked chrome decorations. Painted from the
-// template data — never a screenshot.
-class ComposePreview : public QWidget {
-public:
-    explicit ComposePreview(LayoutComposePanel* panel)
-        : QWidget(panel), panel_(panel) {
-        setObjectName(QStringLiteral("ComposePreview"));
-        setMinimumHeight(160);
-    }
-
-protected:
-    void paintEvent(QPaintEvent* event) override;
-
-private:
-    LayoutComposePanel* panel_;
-};
 
 }  // namespace
 
@@ -133,7 +114,15 @@ LayoutComposePanel::LayoutComposePanel(QWidget* parent) : QWidget(parent) {
     controls->addWidget(export_button);
     outer->addLayout(controls);
 
-    preview_ = new ComposePreview(this);
+    // qgis-native-layout-convergence: the preview shows the REAL layout
+    // rendered by the export engine (render_layout_preview seam) — the
+    // self-painted vector scene is retired.
+    preview_label_ = new QLabel(this);
+    preview_label_->setObjectName(QStringLiteral("ComposePreview"));
+    preview_label_->setMinimumHeight(160);
+    preview_label_->setAlignment(Qt::AlignCenter);
+    preview_label_->setWordWrap(true);
+    preview_ = preview_label_;
     outer->addWidget(preview_, 1);
 
     hint_ = new QLabel(this);
@@ -142,7 +131,10 @@ LayoutComposePanel::LayoutComposePanel(QWidget* parent) : QWidget(parent) {
     outer->addWidget(hint_);
 
     rebuild_template_selector();
-    for (auto* combo : {template_, paper_, orientation_}) {
+    connect(template_, &QComboBox::currentIndexChanged, this, [this](int) {
+        instantiate_selected_template();
+    });
+    for (auto* combo : {paper_, orientation_}) {
         connect(combo, &QComboBox::currentIndexChanged, this,
                 [this](int) { update_preview(); });
     }
@@ -262,123 +254,52 @@ void LayoutComposePanel::emit_chrome() {
     update_preview();
 }
 
-void LayoutComposePanel::update_preview() {
-    preview_->update();
+void LayoutComposePanel::set_layout_instantiate_fn(
+    std::function<bool(const std::string&)> fn) {
+    layout_instantiate_fn_ = std::move(fn);
 }
 
-// ---------------------------------------------------------------------------
-// preview painting (real template geometry, vector)
-// ---------------------------------------------------------------------------
+void LayoutComposePanel::set_layout_preview_fn(std::function<QImage()> fn) {
+    layout_preview_fn_ = std::move(fn);
+}
 
-void ComposePreview::paintEvent(QPaintEvent* event) {
-    QWidget::paintEvent(event);
-    QPainter painter(this);
-    painter.fillRect(rect(), QColor(0xf0, 0xf0, 0xf0));
-
-    const QString paper_name = panel_->paper_selector()->currentData().toString();
-    const auto paper_it = kPaperSizes.find(paper_name);
-    if (paper_it == kPaperSizes.end()) {
-        painter.setPen(QColor(0x53, 0x61, 0x6c));
-        painter.drawText(rect(), Qt::AlignCenter,
-                         QStringLiteral("选择纸张规格"));
+void LayoutComposePanel::instantiate_selected_template() {
+    if (layout_instantiate_fn_ == nullptr) {
+        update_preview();
         return;
     }
-    double paper_w = paper_it->second.first;
-    double paper_h = paper_it->second.second;
-    if (panel_->orientation_selector()->currentData().toString() ==
-        QStringLiteral("landscape")) {
-        std::swap(paper_w, paper_h);
+    const std::string template_id = selected_template_id().toStdString();
+    if (template_id.empty() || !layout_instantiate_fn_(template_id)) {
+        emit status_message(
+            QStringLiteral("版式模板实例化失败：%1")
+                .arg(QString::fromStdString(template_id)));
     }
+    update_preview();
+}
 
-    // Fit the paper into the widget with a margin.
-    const double margin = 12.0;
-    const double scale =
-        std::min((width() - 2 * margin) / paper_w,
-                 (height() - 2 * margin) / paper_h);
-    const double w_px = paper_w * scale;
-    const double h_px = paper_h * scale;
-    const double x0 = (width() - w_px) / 2.0;
-    const double y0 = (height() - h_px) / 2.0;
-
-    painter.fillRect(QRectF(x0, y0, w_px, h_px), Qt::white);
-    painter.setPen(QColor(0xcc, 0xd1, 0xd6));
-    painter.drawRect(QRectF(x0, y0, w_px, h_px));
-    painter.setPen(QColor(0x53, 0x61, 0x6c));
-    painter.drawText(QRectF(x0, y0 - 14, w_px, 12), Qt::AlignLeft,
-                     QStringLiteral("%1 %2 · %3×%4 mm")
-                         .arg(paper_name,
-                              panel_->orientation_selector()
-                                  ->currentData()
-                                  .toString())
-                         .arg(paper_w, 0, 'f', 0)
-                         .arg(paper_h, 0, 'f', 0));
-
-    // The selected template's REAL element geometry (mm → px).
-    const QString template_id = panel_->selected_template_id();
-    const auto* entry =
-        pwb::mapping_document::find_composer_template(template_id.toStdString());
-    if (entry != nullptr) {
-        const double template_w =
-            entry->orientation == "landscape"
-                ? std::max(paper_w, paper_h)
-                : std::min(paper_w, paper_h);
-        const double template_h =
-            entry->orientation == "landscape"
-                ? std::min(paper_w, paper_h)
-                : std::max(paper_w, paper_h);
-        const double offset_x = x0 + (w_px - template_w * scale) / 2.0;
-        const double offset_y = y0 + (h_px - template_h * scale) / 2.0;
-        painter.setPen(QPen(QColor(0x00, 0x78, 0xd4), 1, Qt::DashLine));
-        for (const auto& def : entry->element_definitions) {
-            const QRectF rect(offset_x + def.x_mm * scale,
-                              offset_y + def.y_mm * scale,
-                              def.width_mm * scale, def.height_mm * scale);
-            painter.drawRect(rect);
-            if (rect.height() >= 14) {
-                painter.drawText(rect.adjusted(2, 1, -2, -1),
-                                 Qt::AlignTop | Qt::AlignHCenter,
-                                 QString::fromStdString(def.element_type));
-            }
-        }
-        painter.setPen(QColor(0x53, 0x61, 0x6c));
-        painter.drawText(QRectF(x0, y0 + h_px + 2, w_px, 12), Qt::AlignLeft,
-                         QStringLiteral("模板：%1")
-                             .arg(QString::fromStdString(entry->label)));
+void LayoutComposePanel::update_preview() {
+    if (preview_label_ == nullptr) return;
+    if (layout_preview_fn_ == nullptr) {
+        preview_label_->setPixmap(QPixmap());
+        preview_label_->setText(QStringLiteral(
+            "版式预览未装配（布局渲染 seam 未绑定）"));
+        return;
     }
-
-    // Chrome decorations on the paper margin (real checked state).
-    auto checked = [this](const QString& name) {
-        return panel_->chrome_checked(name);
-    };
-    const bool legend = checked(QStringLiteral("图例"));
-    const bool scale_bar = checked(QStringLiteral("比例尺"));
-    const bool north = checked(QStringLiteral("指北针"));
-    const bool title_bar = checked(QStringLiteral("标题栏"));
-    painter.setPen(QColor(0x25, 0x31, 0x3d));
-    if (title_bar) {
-        painter.fillRect(QRectF(x0 + 8, y0 + 4, w_px - 16, 14),
-                         QColor(0xd8, 0xeb, 0xef));
-        painter.drawText(QRectF(x0 + 8, y0 + 4, w_px - 16, 14),
-                         Qt::AlignCenter, QStringLiteral("标题栏"));
+    const QImage image = layout_preview_fn_();
+    if (image.isNull()) {
+        preview_label_->setPixmap(QPixmap());
+        preview_label_->setText(
+            QStringLiteral("暂无版式布局（选择模板新建）"));
+        return;
     }
-    if (legend) {
-        painter.fillRect(QRectF(x0 + w_px - 56, y0 + 24, 48, 40),
-                         QColor(0xed, 0xf2, 0xf4));
-        painter.drawRect(QRectF(x0 + w_px - 56, y0 + 24, 48, 40));
-        painter.drawText(QRectF(x0 + w_px - 56, y0 + 24, 48, 12),
-                         Qt::AlignCenter, QStringLiteral("图例"));
-    }
-    if (scale_bar) {
-        painter.fillRect(QRectF(x0 + 12, y0 + h_px - 18, 72, 6),
-                         QColor(0x25, 0x31, 0x3d));
-        painter.drawText(QRectF(x0 + 12, y0 + h_px - 30, 72, 10),
-                         Qt::AlignCenter, QStringLiteral("比例尺"));
-    }
-    if (north) {
-        painter.drawText(QRectF(x0 + 10, y0 + 22, 20, 20), Qt::AlignCenter,
-                         QStringLiteral("N"));
-        painter.drawLine(QPointF(x0 + 20, y0 + 40), QPointF(x0 + 20, y0 + 26));
-    }
+    const double margin = 16.0;
+    const double scale = std::min(
+        (width() - 2 * margin) / std::max(1, image.width()),
+        (preview_label_->height() - 2 * margin) / std::max(1, image.height()));
+    preview_label_->setPixmap(QPixmap::fromImage(image).scaled(
+        static_cast<int>(image.width() * std::max(0.05, scale)),
+        static_cast<int>(image.height() * std::max(0.05, scale)),
+        Qt::KeepAspectRatio, Qt::SmoothTransformation));
 }
 
 }  // namespace pwb::app

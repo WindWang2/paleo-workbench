@@ -14,8 +14,10 @@
 
 #include <functional>
 #include <optional>
+#include <utility>
 #include <vector>
 
+#include <QPointF>
 #include <QVariantMap>
 #include <QWidget>
 
@@ -25,6 +27,10 @@
 class QComboBox;
 class QLabel;
 class QToolButton;
+
+namespace pwb::qgis_plot {
+class PwbPlotPanel;
+}
 
 namespace pwb::app {
 
@@ -61,7 +67,7 @@ public:
     QComboBox* object_selector() const { return object_; }
     QComboBox* baseline_selector() const { return baseline_; }
     QComboBox* prediction_selector() const { return prediction_; }
-    QWidget* canvas() const { return canvas_; }
+    QWidget* canvas() const;
     QToolButton* link_toggle() const { return link_toggle_; }
     QString empty_reason() const;
     QString selected_well_id() const;
@@ -92,6 +98,11 @@ private:
     void rebuild_selectors();
     void refresh_bands();
     void refresh_link_gate();
+    // Rebuilds the QGIS-plot strip columns for the current mode/selection.
+    void rebuild_plot();
+    void update_cursor_guide();
+    double depth_at_canvas_pos(QPointF canvas_pos) const;
+    std::pair<double, double> depth_range() const;
 
     std::function<SourceSet()> source_provider_;
     std::function<std::optional<pwb::domain::Json>(const std::string& path)>
@@ -105,7 +116,7 @@ private:
     QComboBox* baseline_ = nullptr;    // 基准解释版本
     QComboBox* prediction_ = nullptr;  // 预测成果
     QToolButton* link_toggle_ = nullptr;
-    QWidget* canvas_ = nullptr;
+    pwb::qgis_plot::PwbPlotPanel* canvas_ = nullptr;
     QLabel* summary_ = nullptr;
 
     // Cached bands for the current selection (painted by the canvas).

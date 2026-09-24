@@ -1,6 +1,7 @@
-// platform.export.layout — A3 export smoke: one real layout (page + map item
-// + legend, live tree layer order) exported as PNG/PDF/SVG with honest
-// capability errors (unknown format rejected; empty output rejected).
+// platform.export.layout — persistent-layout export smoke: a real
+// QgsPrintLayout from the geological template library, exported as
+// PNG/PDF/SVG through the unified QgsLayoutExporter service with honest
+// capability errors (unknown format rejected).
 
 #include <qgsapplication.h>
 #include <QColor>
@@ -10,7 +11,8 @@
 
 #include <qgsvectorlayer.h>
 
-#include <pwb/qgis/layout_service.hpp>
+#include <pwb/qgis/layout_authority.hpp>
+#include <pwb/qgis/layout_export_service.hpp>
 #include <pwb/qgis/map_session.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
 
@@ -29,24 +31,32 @@ int main(int argc, char** argv) {
         std::filesystem::path(temp_dir.path().toStdWString());
 
     {
-        pwb::qgis::MapSession session;
+        pwb::qgis::MapSession map;
+        pwb::qgis::LayoutAuthority layouts(map);
         std::string error;
         pwb::qgis::LayerBinding binding{
             "export.layer", "asset-1", "version-1", "vector"};
-        QgsVectorLayer* layer = session.addVectorLayer(
+        QgsVectorLayer* layer = map.addVectorLayer(
             gpkg_uri.toStdString(), "export", binding, &error);
         PWB_CHECK_MSG(layer != nullptr, error);
-        pwb::qgis::LayoutService layouts(session);
 
-        pwb::qgis::LayoutSpec spec;
-        spec.map.extent[0] = 108.0;
-        spec.map.extent[1] = 28.0;
-        spec.map.extent[2] = 118.0;
-        spec.map.extent[3] = 36.0;
+        layouts.set_map_seed(
+            std::optional<std::array<double, 4>>{{108.0, 28.0, 118.0, 36.0}},
+            "EPSG:4326");
+        const auto instantiated = layouts.instantiate_template("single_factor");
+        PWB_CHECK_MSG(instantiated.layout != nullptr,
+                      instantiated.warnings.empty()
+                          ? std::string("template instantiation failed")
+                          : instantiated.warnings.front());
+
+        pwb::qgis::LayoutExportRequest request;
+        request.dpi = 96.0;
 
         const std::filesystem::path png = base / "export.png";
-        PWB_CHECK_MSG(layouts.export_layout(spec, png, "png", 96.0).empty(),
-                      "PNG export failed");
+        request.output_path = png.string();
+        request.format = "png";
+        const auto png_report = pwb::qgis::export_layout(*instantiated.layout, request);
+        PWB_CHECK_MSG(png_report.ok, png_report.error);
         QImage image(QString::fromStdWString(png.wstring()));
         PWB_CHECK(!image.isNull());
         PWB_CHECK(image.width() > 100 && image.height() > 50);
@@ -59,8 +69,10 @@ int main(int argc, char** argv) {
         PWB_CHECK_MSG(non_white, "PNG export is blank");
 
         const std::filesystem::path pdf = base / "export.pdf";
-        PWB_CHECK_MSG(layouts.export_layout(spec, pdf, "pdf", 96.0).empty(),
-                      "PDF export failed");
+        request.output_path = pdf.string();
+        request.format = "pdf";
+        const auto pdf_report = pwb::qgis::export_layout(*instantiated.layout, request);
+        PWB_CHECK_MSG(pdf_report.ok, pdf_report.error);
         QFile pdf_file(QString::fromStdWString(pdf.wstring()));
         PWB_CHECK(pdf_file.open(QIODevice::ReadOnly));
         const QByteArray magic = pdf_file.read(5);
@@ -68,8 +80,10 @@ int main(int argc, char** argv) {
         pdf_file.close();
 
         const std::filesystem::path svg = base / "export.svg";
-        PWB_CHECK_MSG(layouts.export_layout(spec, svg, "svg", 96.0).empty(),
-                      "SVG export failed");
+        request.output_path = svg.string();
+        request.format = "svg";
+        const auto svg_report = pwb::qgis::export_layout(*instantiated.layout, request);
+        PWB_CHECK_MSG(svg_report.ok, svg_report.error);
         QFile svg_file(QString::fromStdWString(svg.wstring()));
         PWB_CHECK(svg_file.open(QIODevice::ReadOnly));
         const QByteArray head = svg_file.read(2048);
@@ -77,12 +91,18 @@ int main(int argc, char** argv) {
         svg_file.close();
 
         // Honest failure: unknown format is rejected, not faked.
-        const std::string bad = layouts.export_layout(spec, base / "export.docx",
-                                                      "docx", 96.0);
-        PWB_CHECK(!bad.empty());
-        PWB_CHECK(!std::filesystem::exists(base / "export.docx"));
+        const std::filesystem::path bad_path = base / "export.docx";
+        request.output_path = bad_path.string();
+        request.format = "docx";
+        const auto bad_report = pwb::qgis::export_layout(*instantiated.layout, request);
+        PWB_CHECK(!bad_report.ok);
+        PWB_CHECK(!bad_report.error.empty());
+        PWB_CHECK(!std::filesystem::exists(bad_path));
 
-        session.close();
+        // Pixel budget: an A2 page at 2400 dpi is a caller error.
+        PWB_CHECK(!pwb::qgis::check_export_pixel_budget(594.0, 420.0, 2400.0).empty());
+
+        map.close();
     }
 
     pwb::qgis::QgisRuntime::release();

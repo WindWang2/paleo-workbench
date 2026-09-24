@@ -42,6 +42,18 @@ set_target_properties(pwb-platform PROPERTIES
 target_compile_definitions(pwb-platform PRIVATE
     PWB_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
+# QGIS-native generic data browser dock (data-management convergence):
+# QgsBrowserModel-backed dock replacing hand-rolled generic file browsing
+# for GIS datasources. The domain data page is unaffected.
+option(PWB_WITH_QGIS_BROWSER
+    "Install the QGIS browser dock as the generic data source manager" ON)
+if(PWB_WITH_QGIS_BROWSER)
+    target_sources(pwb-platform PRIVATE
+        qgis_data_workspace_install.cpp
+        qgis_data_workspace_install.hpp)
+    target_compile_definitions(pwb-platform PRIVATE PWB_WITH_QGIS_BROWSER=1)
+endif()
+
 # WLE dock: consume C's viewer adapter (the only WLE build) when present.
 if(TARGET Pwb::VisualizationWellLog)
     target_link_libraries(pwb-platform PRIVATE Pwb::VisualizationWellLog)
@@ -239,7 +251,8 @@ endif()
 
 # BEGIN CONV-29
 # Composition/Layout/Export C++ closure: the export dialog routes through
-# CompositionLayoutService (kernel spec + shared executor + parity).
+# (retired) CompositionLayoutService — the persistent-layout authority
+# (Pwb::Qgis layout_*) superseded the kernel-spec chain.
 # Service and kernel join the link closure via Pwb::Qgis (CONV-29 gated in
 # libs/qgis).
 if(PWB_BUILD_CONV_29)

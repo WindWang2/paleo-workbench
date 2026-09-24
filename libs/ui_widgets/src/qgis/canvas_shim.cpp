@@ -1464,7 +1464,7 @@ QString QgisCanvasShim::export_vector(const QString& path,
     // same list the canvas draws), restricted to the document mirrors.
     // project->mapLayers() is a QMap keyed by QGIS layer id: using it
     // directly produced an id-sorted z-order that could disagree with
-    // the screen and with LayoutService's explicit reversal.
+    // the screen and with the layout exporter's explicit reversal.
     // Join key: pwb/layer_id (V14 open path) with legacy pwb/doc_id
     // read-compat (mirror flow) — layer_adapter::layer_id_of reports the
     // legacy key through the out-param.

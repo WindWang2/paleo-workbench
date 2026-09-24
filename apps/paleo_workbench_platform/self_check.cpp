@@ -30,7 +30,9 @@
 
 #include <pwb/ui_composite/composite_document.hpp>
 
-#include <pwb/qgis/layout_service.hpp>
+#include <pwb/qgis/layout_authority.hpp>
+#include <qgsprintlayout.h>
+#include <pwb/qgis/layout_export_service.hpp>
 #include <pwb/qgis/qgis_runtime.hpp>
 
 #if defined(PWB_WITH_CONV_01)
@@ -494,21 +496,33 @@ QVector<SelfCheck::Result> SelfCheck::run(const QString& source_dir) {
     }
 
     {
+        // qgis-native-layout-convergence: smoke the persistent-layout
+        // export path (authority template instantiation + unified
+        // QgsLayoutExporter service — the only product export engine).
         Result r{QStringLiteral("layout_export"), false, {}};
-        pwb::qgis::LayoutService layouts(context.session().map());
-        pwb::qgis::LayoutSpec spec;
-        const std::filesystem::path png =
-            std::filesystem::path(temp_dir.path().toStdWString()) / "smoke.png";
-        const std::string export_error =
-            layouts.export_layout(spec, png, "png", 96.0);
-        if (!export_error.empty()) {
-            r.detail = QString::fromStdString(export_error);
-        } else if (!std::filesystem::exists(png)) {
-            r.detail = QStringLiteral("export reported success, file absent");
+        auto& authority = context.session().layout();
+        const auto instantiated = authority.instantiate_template("single_factor");
+        if (instantiated.layout == nullptr) {
+            r.detail = QStringLiteral("template instantiation failed");
         } else {
-            r.passed = true;
-            r.detail = QStringLiteral("%1 bytes").arg(
-                static_cast<qulonglong>(std::filesystem::file_size(png)));
+            const std::filesystem::path png =
+                std::filesystem::path(temp_dir.path().toStdWString()) / "smoke.png";
+            pwb::qgis::LayoutExportRequest request;
+            request.output_path = png.string();
+            request.format = "png";
+            request.dpi = 96.0;
+            const pwb::qgis::LayoutExportReport report =
+                pwb::qgis::export_layout(*instantiated.layout, request);
+            if (!report.ok) {
+                r.detail = QString::fromStdString(report.error);
+            } else if (!std::filesystem::exists(png)) {
+                r.detail = QStringLiteral("export reported success, file absent");
+            } else {
+                r.passed = true;
+                r.detail = QStringLiteral("%1 bytes").arg(
+                    static_cast<qulonglong>(std::filesystem::file_size(png)));
+            }
+            authority.remove_layout(instantiated.layout->name().toStdString());
         }
         add(r);
     }

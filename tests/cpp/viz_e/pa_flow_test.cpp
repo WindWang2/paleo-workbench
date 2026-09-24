@@ -20,7 +20,7 @@
 #include "viz_e_hosts.hpp"
 #include "viz_e_install.hpp"
 
-#include <pwb/viz_charts/qt/plot_widget.hpp>
+#include <pwb/qgis_plot/plot_canvas.hpp>
 
 #include <pwb/ui_pages_data/asset_view.hpp>
 #include <pwb/ui_pages_data/qt/asset_selection_bus.hpp>
@@ -343,7 +343,7 @@ int main(int argc, char** argv) {
         QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
 
         // view bounds carry the REAL data extents (autofit ±5%)
-        const auto [xmin, xmax, ymin, ymax] = page.xy_host()->plot()->view_bounds();
+        const auto [xmin, xmax, ymin, ymax] = page.xy_host()->canvas()->viewBounds();
         CHECK(xmin <= 100.0 && xmax >= 141.25);
         CHECK(ymin <= 480.25 && ymax >= 525.0);
 

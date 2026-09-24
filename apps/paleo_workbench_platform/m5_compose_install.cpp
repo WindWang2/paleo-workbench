@@ -20,6 +20,9 @@
 
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/domain/json.hpp>
+#include <qgsprintlayout.h>
+#include <pwb/qgis/layout_authority.hpp>
+#include <pwb/qgis/layout_export_service.hpp>
 #include <pwb/ui_data_qt/map_edit_items.hpp>
 #include <pwb/ui_map/map_chrome_panel.hpp>
 #include <pwb/ui_pages_mapedit/map_edit_scene.hpp>
@@ -117,6 +120,56 @@ void install(const Install& install) {
         emit shell->status_message(QStringLiteral("图件整饰已更新"));
     });
     panel->set_export_action(window->governedAction(QStringLiteral("map_export")));
+    // BEGIN qgis-native-layout-convergence
+    // Template selection materializes a REAL persistent QgsPrintLayout
+    // through the session authority; the preview renders the active
+    // layout with the same QgsLayoutExporter the export path uses.
+    // Browsing templates must not pile up persistent layouts: the seam
+    // replaces the previous CLEAN preview layout (a dirty one is kept —
+    // the user edited it) and the preview always renders the layout this
+    // seam last produced.
+    auto preview_name = std::make_shared<QString>();
+    panel->set_layout_instantiate_fn(
+        [window, preview_name](const std::string& template_id) -> bool {
+            auto& authority = window->context().session().layout();
+            if (!preview_name->isEmpty()) {
+                QgsPrintLayout* previous =
+                    authority.layout_by_name(preview_name->toStdString());
+                bool previous_clean = true;
+                for (const pwb::qgis::LayoutInfo& info : authority.layouts()) {
+                    if (info.name == preview_name->toStdString()) {
+                        previous_clean = !info.dirty;
+                        break;
+                    }
+                }
+                // Replace the previous CLEAN preview layout only — a
+                // user-edited one is a document, not a browsing artifact.
+                if (previous != nullptr && previous_clean &&
+                    authority.layouts().size() > 1) {
+                    authority.remove_layout(preview_name->toStdString());
+                }
+            }
+            const auto created = authority.instantiate_template(template_id);
+            if (created.layout == nullptr) return false;
+            *preview_name = created.layout->name();
+            return true;
+        });
+    panel->set_layout_preview_fn([window, preview_name]() -> QImage {
+        auto& authority = window->context().session().layout();
+        QgsPrintLayout* active = preview_name->isEmpty()
+                                     ? nullptr
+                                     : authority.layout_by_name(
+                                           preview_name->toStdString());
+        if (active == nullptr) {
+            const std::vector<pwb::qgis::LayoutInfo> layouts =
+                authority.layouts();
+            if (layouts.empty()) return {};
+            active = authority.layout_by_name(layouts.front().name);
+        }
+        if (active == nullptr) return {};
+        return pwb::qgis::render_layout_preview(*active, 96.0);
+    });
+    // END qgs-native-layout-convergence
     QObject::connect(panel, &LayoutComposePanel::status_message, shell,
                      &AppShell::status_message);
     shell->set_stage3_compose(panel);
