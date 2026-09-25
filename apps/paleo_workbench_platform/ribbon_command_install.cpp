@@ -27,6 +27,9 @@
 #include "m5_validation_install.hpp"
 #include "review_disposition_panel.hpp"
 #include "validation_workspace_page.hpp"
+#if defined(PWB_WITH_V14_DATA_LINEAGE)
+#include "data_governance_install.hpp"
+#endif
 
 #include <QFileDialog>
 #include <QTextStream>
@@ -300,17 +303,39 @@ void data_commands(ui_shell::CommandRegistry& registry,
                   toolbar_emit(&ui_pages_data::qt::DataToolbar::
                                    plan_import_requested),
                   [c](const CommandContext&) { return needs_project(c); });
-    // M5-3: link_well/set_role 保持禁用（原因改准确）——生产侧无实体
-    // 关联/角色写入后端（导航树仅只读展示 entity_asset_links）。
+    // PWB-DATA-GOVERNANCE: link_well/set_role 真实后端（项目 JSON
+    // entity_asset_links，WritableSession 原子保存；对话框与写服务在
+    // data_governance_* 模块，这里只注册）。治理切片缺席的构建诚实降级。
+#if defined(PWB_WITH_V14_DATA_LINEAGE)
+    register_real(registry, ids, "data.link_well",
+                  QStringLiteral("关联到井"),
+                  QStringLiteral("把资产关联到井实体并设置角色/主数据"),
+                  QStringLiteral("关联 link 井"),
+                  [c] {
+                      data_governance::open_link_well_dialog(
+                          c.context, c.shell, c.window);
+                  },
+                  [c](const CommandContext&) { return needs_selection(c); });
+    register_real(registry, ids, "data.set_role",
+                  QStringLiteral("设置角色"),
+                  QStringLiteral("编辑资产与实体关联的角色（词汇表+自定义）"),
+                  QStringLiteral("角色 role"),
+                  [c] {
+                      data_governance::open_set_role_dialog(
+                          c.context, c.shell, c.window);
+                  },
+                  [c](const CommandContext&) { return needs_selection(c); });
+#else
     register_disabled(registry, ids, "data.link_well",
                       QStringLiteral("关联到井"),
                       QStringLiteral("把数据版本关联到井对象"),
                       QStringLiteral("关联 link 井"),
-                      QStringLiteral("能力未接入生产（实体关联当前仅导航树只读展示）"));
+                      QStringLiteral("治理切片未接入本次构建"));
     register_disabled(registry, ids, "data.set_role",
                       QStringLiteral("设置角色"), QStringLiteral("设置资产角色"),
                       QStringLiteral("角色 role"),
-                      QStringLiteral("能力未接入生产（角色词汇只读，无编辑后端）"));
+                      QStringLiteral("治理切片未接入本次构建"));
+#endif
     // data.check / data.units: 工程级真实概览（目录快照真实计数），
     // 范围诚实标注（非逐资产深度检查）。
     register_real(registry, ids, "data.check", QStringLiteral("检查数据"),
@@ -438,22 +463,51 @@ void data_commands(ui_shell::CommandRegistry& registry,
                               .arg(bus->assets().size()));
                   },
                   [c](const CommandContext&) { return needs_project(c); });
-    // 稿式新增：标签/影响分析/回收站 —— 资产标签与影响分析
-    // 后端未接入，回收站（软删除区）无实现。
+    // PWB-DATA-GOVERNANCE: 标签/影响分析/回收站真实后端——
+    //   * 标签：catalog TagStore（正规化+事务回滚），对话框批量增删；
+    //   * 影响分析：ImpactService 真实读模型，进血缘面板第三页签；
+    //   * 回收站：trash_service 两阶段软删（RAW 进 artifacts/trash/，
+    //     关联保留、可恢复）。治理切片缺席的构建诚实降级。
+#if defined(PWB_WITH_V14_DATA_LINEAGE)
+    register_real(registry, ids, "data.tags", QStringLiteral("标签"),
+                  QStringLiteral("资产标签管理（增删/批量/过滤）"),
+                  QStringLiteral("标签 tag"),
+                  [c] {
+                      data_governance::open_tags_dialog(c.context, c.shell,
+                                                        c.window);
+                  },
+                  [c](const CommandContext&) { return needs_selection(c); });
+    register_real(registry, ids, "data.impact",
+                  QStringLiteral("影响分析"),
+                  QStringLiteral("删除/替换当前版本的下游影响（血缘页签）"),
+                  QStringLiteral("影响 impact 分析"),
+                  [c] { data_governance::focus_impact_tab(c.shell); },
+                  [c](const CommandContext&) { return needs_selection(c); });
+    register_real(registry, ids, "data.trash",
+                  QStringLiteral("回收站"),
+                  QStringLiteral("软删除资产回收区（查看/恢复）"),
+                  QStringLiteral("回收站 trash 删除"),
+                  [c] {
+                      data_governance::open_trash_dialog(c.context, c.shell,
+                                                         c.window);
+                  },
+                  [c](const CommandContext&) { return needs_project(c); });
+#else
     register_disabled(registry, ids, "data.tags", QStringLiteral("标签"),
                       QStringLiteral("资产标签管理"),
                       QStringLiteral("标签 tag"),
-                      QStringLiteral("资产标签后端未接入"));
+                      QStringLiteral("治理切片未接入本次构建"));
     register_disabled(registry, ids, "data.impact",
                       QStringLiteral("影响分析"),
                       QStringLiteral("版本的下游影响分析"),
                       QStringLiteral("影响 impact 分析"),
-                      QStringLiteral("影响分析后端未接入"));
+                      QStringLiteral("治理切片未接入本次构建"));
     register_disabled(registry, ids, "data.trash",
                       QStringLiteral("回收站"),
                       QStringLiteral("软删除资产回收区"),
                       QStringLiteral("回收站 trash 删除"),
-                      QStringLiteral("回收站（软删除）未实现"));
+                      QStringLiteral("治理切片未接入本次构建"));
+#endif
 }
 
 // ---------------------------------------------------------------------------

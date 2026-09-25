@@ -144,6 +144,17 @@ if(TARGET Pwb::Data AND TARGET Pwb::UiPagesDataQt AND PWB_V14_WELLSEIS)
         Pwb::Data Pwb::UiPagesDataQt Pwb::UiWellseis pwb_ui_wellseis_qt)
     target_compile_definitions(pwb-platform PRIVATE
         PWB_WITH_V14_DATA_LINEAGE=1)
+    # BEGIN PWB-DATA-GOVERNANCE
+    # 治理闭环：读写服务在 Pwb::Data（data_suite/governance）；这里装
+    # workspace 接线（无壳依赖）+ 对话框 + ribbon 回调体（全壳专用）。
+    target_sources(pwb-platform PRIVATE
+        data_governance_dialogs.cpp
+        data_governance_dialogs.hpp
+        data_governance_workspace.cpp
+        data_governance_workspace.hpp
+        data_governance_install.cpp
+        data_governance_install.hpp)
+    # END PWB-DATA-GOVERNANCE
 endif()
 # END PWB-V14-DATA-LINEAGE
 # BEGIN native-product closure

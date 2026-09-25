@@ -157,6 +157,52 @@ if(TARGET Pwb::Data AND TARGET Pwb::UiPagesDataQt AND PWB_V14_WELLSEIS)
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
         TIMEOUT 300)
+
+    # BEGIN PWB-DATA-GOVERNANCE
+    # ws0 治理闭环 UI 电池：snapshot 行治理字段、真实 workspace 过滤装配、
+    # 四个治理对话框写路径、run_trash_flow decision seam、bus republish、
+    # 血缘面板第三页签。源文件直接编译（pwb-platform 是可执行不可链接）；
+    # V14 define 使 data_lineage_panel 的真实读路径生效（app_context +
+    # diagnostics 供给 projectStore 符号，pwb_link_job_runtime 补齐
+    # qgis_processing 传递闭包 —— platform_app_shell 同款配方）。
+    add_executable(platform_data_governance test_data_governance.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/app_context.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/diagnostics.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/closure_data_workspace.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/closure_preview_adapters.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/data_governance_dialogs.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/data_governance_workspace.cpp
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform/data_lineage_panel.cpp)
+    if(COMMAND pwb_link_job_runtime)
+        pwb_link_job_runtime(platform_data_governance)
+    endif()
+    set_target_properties(platform_data_governance PROPERTIES AUTOMOC ON)
+    target_compile_features(platform_data_governance PRIVATE cxx_std_20)
+    target_compile_definitions(platform_data_governance PRIVATE
+        PWB_WITH_V14_DATA_LINEAGE=1)
+    target_include_directories(platform_data_governance PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/apps/paleo_workbench_platform
+        ${CMAKE_SOURCE_DIR}/libs/application/include
+        ${CMAKE_SOURCE_DIR}/libs/domain/include
+        ${CMAKE_SOURCE_DIR}/libs/catalog/include
+        ${CMAKE_SOURCE_DIR}/libs/data_suite/include
+        ${CMAKE_SOURCE_DIR}/libs/project/include
+        ${CMAKE_SOURCE_DIR}/libs/ui_pages_data/include
+        ${CMAKE_SOURCE_DIR}/libs/ui_wellseis/include
+        ${CMAKE_SOURCE_DIR}/libs/ui_data_core/include
+        ${CMAKE_SOURCE_DIR}/libs/ui_pages_preview/include
+        ${CMAKE_BINARY_DIR}/generated)
+    target_link_libraries(platform_data_governance PRIVATE
+        Pwb::Data Pwb::Application Pwb::UiPagesData Pwb::UiPagesDataQt
+        Pwb::UiWellseis pwb_ui_wellseis_qt Pwb::UiWidgets Qt6::Widgets)
+    add_test(NAME platform.data_governance
+             COMMAND platform_data_governance)
+    set_tests_properties(platform.data_governance PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${PALEO_QGIS_RUNTIME};PATH=path_list_prepend:${PWB_QT_RUNTIME};LD_LIBRARY_PATH=path_list_prepend:${PALEO_QGIS_RUNTIME}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PROJ_LIB=${PWB_PROJ_DATA};PROJ_DATA=${PWB_PROJ_DATA}${PWB_GDAL_DATA_ENV}"
+        TIMEOUT 300)
+    # END PWB-DATA-GOVERNANCE
 endif()
 # END PWB-V14-DATA-LINEAGE
 # BEGIN qgis-native-layout-convergence

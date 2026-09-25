@@ -75,6 +75,8 @@ Result<ProjectSnapshotV1> DataFacade::open_snapshot() const {
         snapshot.catalog_assets = std::move(catalog.value().assets);
         snapshot.catalog_versions = std::move(catalog.value().versions);
         snapshot.catalog_runs = std::move(catalog.value().runs);
+        snapshot.catalog_tags = std::move(catalog.value().tags);
+        snapshot.catalog_asset_tags = std::move(catalog.value().asset_tags);
         std::vector<pwb::catalog::WorkspaceBindingRef> bindings;
         for (const auto& binding : snapshot.layer_bindings) {
             bindings.push_back({binding.layer_id, binding.source_asset_id,

@@ -192,4 +192,13 @@ pwb_data_test(data_manual_edit manual_edit_provenance_test.cpp
     data.manual_edit)
 pwb_data_test(data_fabric_e2e data_fabric_e2e_test.cpp data.data_fabric_e2e)
 # END PWB-V14-DATA-LINEAGE
+# BEGIN PWB-DATA-GOVERNANCE
+# ws0 治理闭环核心：link/unlink/role 编辑与重开一致、tags 正规化/重开、
+# trash 保留关联 + 恢复、impact 直接下游计数、负路径。
+pwb_data_test(data_governance_ops governance_ops_test.cpp
+    data.governance_ops)
+# 规模烟测：10 万资产标签查询 + 链接扫描线性度（无 O(N²)）。
+pwb_data_test(data_governance_scale governance_scale_test.cpp
+    data.governance_scale)
+# END PWB-DATA-GOVERNANCE
 

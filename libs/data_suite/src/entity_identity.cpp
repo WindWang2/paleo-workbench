@@ -416,6 +416,116 @@ std::vector<std::string> asset_ids_for_entity(
     return ids;
 }
 
+bool entity_exists(const domain::Json& project_root,
+                   std::string_view entity_type, std::string_view entity_id) {
+    const char* section = nullptr;
+    if (entity_type == "well") {
+        section = "wells";
+    } else if (entity_type == "seismic_survey") {
+        section = "seismic_surveys";
+    } else if (entity_type == "geological_entity") {
+        section = "geological_entities";
+    } else if (entity_type == "auxiliary_entity") {
+        section = "auxiliary_entities";
+    } else {
+        return false;
+    }
+    auto nodes = project_root.find(section);
+    if (nodes == project_root.end() || !nodes->is_array()) return false;
+    for (const auto& node : *nodes) {
+        if (node.is_object() &&
+            node.value("id", std::string()) == entity_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int remove_entity_asset_link(domain::Json& project_root,
+                             std::string_view entity_type,
+                             std::string_view entity_id,
+                             std::string_view asset_id,
+                             std::string_view role) {
+    auto links = project_root.find("entity_asset_links");
+    if (links == project_root.end() || !links->is_array()) return 0;
+    const std::size_t before = links->size();
+    domain::Json kept = domain::Json::array();
+    for (const auto& link : *links) {
+        const bool drop =
+            link.is_object() &&
+            link.value("entity_type", std::string()) == entity_type &&
+            link.value("entity_id", std::string()) == entity_id &&
+            link.value("asset_id", std::string()) == asset_id &&
+            (role.empty() ||
+             link.value("role", std::string()) == role);
+        if (!drop) kept.push_back(link);
+    }
+    const std::size_t removed = before - kept.size();
+    if (removed != 0) {
+        project_root["entity_asset_links"] = std::move(kept);
+    }
+    return static_cast<int>(removed);
+}
+
+LinkRoleEdit set_link_role(domain::Json& project_root,
+                           std::string_view entity_type,
+                           std::string_view entity_id,
+                           std::string_view asset_id,
+                           std::string_view old_role,
+                           std::string_view new_role) {
+    domain::Json* links = nullptr;
+    if (auto it = project_root.find("entity_asset_links");
+        it != project_root.end() && it->is_array()) {
+        links = &*it;
+    }
+    // The (entity, asset, old_role) row must exist for any outcome below.
+    bool pair_linked = false;
+    if (links != nullptr) {
+        for (const auto& link : *links) {
+            if (!link.is_object()) continue;
+            if (link.value("entity_type", std::string()) != entity_type ||
+                link.value("entity_id", std::string()) != entity_id ||
+                link.value("asset_id", std::string()) != asset_id) {
+                continue;
+            }
+            pair_linked = true;
+            if (old_role == new_role &&
+                link.value("role", std::string()) == old_role) {
+                return LinkRoleEdit::Ok;  // idempotent no-op
+            }
+        }
+    }
+    if (!pair_linked || links == nullptr) return LinkRoleEdit::NotFound;
+    domain::Json* target = nullptr;
+    for (auto& link : *links) {
+        if (!link.is_object()) continue;
+        if (link.value("entity_type", std::string()) != entity_type ||
+            link.value("entity_id", std::string()) != entity_id ||
+            link.value("asset_id", std::string()) != asset_id) {
+            continue;
+        }
+        if (link.value("role", std::string()) == new_role) {
+            // The pair already owns a row with the new role — an in-place
+            // edit would create an upsert-key duplicate; never merge
+            // silently.
+            return LinkRoleEdit::Conflicts;
+        }
+        if (link.value("role", std::string()) == old_role &&
+            target == nullptr) {
+            target = &link;
+        }
+    }
+    if (target == nullptr) return LinkRoleEdit::NotFound;
+    (*target)["role"] = new_role;
+    if (target->value("is_primary", false)) {
+        demote_sibling_primaries(*links, std::string(entity_type),
+                                 std::string(entity_id),
+                                 std::string(new_role),
+                                 target->value("id", std::string()));
+    }
+    return LinkRoleEdit::Ok;
+}
+
 // ---- link read views + entity domain ops (V14; project/domain.py parity) --
 
 namespace {
@@ -426,7 +536,10 @@ EntityLinkView link_view(const domain::Json& link) {
     view.entity_type = link.value("entity_type", std::string());
     view.entity_id = link.value("entity_id", std::string());
     view.asset_id = link.value("asset_id", std::string());
-    view.role = link.value("role", std::string());
+    // schema default: missing role reads as "other"（upsert 恒写非空——
+    // 规范化避免 legacy 畸形行把 role="" 传给删除语义（""=全删））。
+    view.role = link.value("role", std::string("other"));
+    if (view.role.empty()) view.role = "other";
     view.is_primary = link.value("is_primary", false);
     view.unresolved = link.value("unresolved", false);
     view.ordinal = link.value("ordinal", 0);
