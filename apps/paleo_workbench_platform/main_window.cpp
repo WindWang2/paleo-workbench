@@ -179,6 +179,9 @@
 #include "workspace_compose.hpp"
 #include "ribbon_command_install.hpp"
 #include "m5_validation_install.hpp"
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+#include "prediction_workflow_install.hpp"
+#endif
 #include <pwb/ui_composite/composite_document.hpp>
 #if defined(PWB_WITH_CLOSURE_MAPPING)
 #include "m5_compose_install.hpp"
@@ -1134,6 +1137,11 @@ void MainWindow::wire_app_shell() {
             return store->project_file();
         },
         app_shell_);
+// BEGIN PREDICTION-WORKFLOW — ws1 RunSpec 控制器 + 生产对话框 + 井震联动
+// （predict.select_well/model_params/params/link/run/cancel 的命令后端；
+// findChild 解回上面的 binding，不再造第二套推理栈）。
+    pwb::app::prediction_workflow::install({this, app_shell_, &context_});
+// END PREDICTION-WORKFLOW
 #endif
 // END CLOSURE-SCIENCE
 
@@ -2060,6 +2068,12 @@ QString MainWindow::openProject(const QString& project_file) {
     pwb::app::workflow_wiring::notify_project_changed(this);
 #endif
 // END UI-14 WORKFLOW-WIRING
+// BEGIN PREDICTION-WORKFLOW — restore the ws1 RunSpec persisted for THIS
+// project (no cross-project spec leakage) + refresh link availability.
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+    pwb::app::prediction_workflow::notify_project_changed(this);
+#endif
+// END PREDICTION-WORKFLOW
 #ifdef PWB_WITH_APP_SHELL
     // Unbound project-gated commands (data.import / predict.run /
     // factor.compute / verify.run …) evaluate availability only when the
@@ -2082,6 +2096,9 @@ QString MainWindow::openProject(const QString& project_file) {
 #endif
 #ifdef PWB_WITH_WORKFLOW_WIRING
         pwb::app::workflow_wiring::notify_project_changed(this);
+#endif
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+        pwb::app::prediction_workflow::notify_project_changed(this);
 #endif
         return QString::fromStdString(snapshot.error().message);
     }
@@ -2545,6 +2562,11 @@ QString MainWindow::closeProject() {
     pwb::app::closure_mapping::notify_project_changed(this);
 #endif
 // END CLOSURE-MAPPING
+// BEGIN PREDICTION-WORKFLOW — project closed: reset the ws1 RunSpec draft.
+#if defined(PWB_WITH_CLOSURE_SCIENCE) && defined(PWB_WITH_DATA_INTEGRATION)
+    pwb::app::prediction_workflow::notify_project_changed(this);
+#endif
+// END PREDICTION-WORKFLOW
 #if defined(PWB_WITH_CLOSURE_PREVIEW)
     pwb::closure_preview::notify_project_store_changed();
 #endif

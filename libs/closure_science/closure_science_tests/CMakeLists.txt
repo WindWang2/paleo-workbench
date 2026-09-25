@@ -33,6 +33,19 @@ target_compile_features(closure_science_mock_facies_test PRIVATE cxx_std_20)
 add_test(NAME closure_science.mock_facies COMMAND closure_science_mock_facies_test)
 set_tests_properties(closure_science.mock_facies PROPERTIES TIMEOUT 120)
 
+# run_spec_service — well/model candidates + preflight failure matrix +
+# run-parameter mapping. ORT-free (a tiled preflight without ORT fails
+# honestly and the matrix asserts that outcome explicitly).
+add_executable(closure_science_run_spec_service_test run_spec_service_test.cpp)
+target_link_libraries(closure_science_run_spec_service_test
+    PRIVATE Pwb::ClosureScience Pwb::Domain)
+target_compile_features(closure_science_run_spec_service_test PRIVATE cxx_std_20)
+target_compile_definitions(closure_science_run_spec_service_test PRIVATE
+    PWB_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+add_test(NAME closure_science.run_spec_service
+    COMMAND closure_science_run_spec_service_test)
+set_tests_properties(closure_science.run_spec_service PROPERTIES TIMEOUT 120)
+
 add_test(NAME closure_science.core COMMAND closure_science_core_test)
 set_tests_properties(closure_science.core PROPERTIES TIMEOUT 600)
 if(PWB_ONNXRUNTIME_LIBRARY AND EXISTS "${PWB_ONNXRUNTIME_LIBRARY}")
@@ -55,6 +68,23 @@ if(TARGET pwb_closure_science_qt)
     set_target_properties(closure_science_qt_hooks_test PROPERTIES AUTOMOC ON)
     add_test(NAME closure_science.qt_hooks COMMAND closure_science_qt_hooks_test)
     set_tests_properties(closure_science.qt_hooks PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 300)
+
+    # prediction_workflow — link gate/conversion through the real panel
+    # gates, dialog data paths, controller seams + publish end-to-end.
+    add_executable(closure_science_prediction_workflow_qt_test
+        prediction_workflow_qt_test.cpp)
+    target_link_libraries(closure_science_prediction_workflow_qt_test
+        PRIVATE Pwb::ClosureScienceQt Pwb::Domain
+            Qt6::Widgets Qt6::Test)
+    target_compile_features(closure_science_prediction_workflow_qt_test
+        PRIVATE cxx_std_20)
+    set_target_properties(closure_science_prediction_workflow_qt_test
+        PROPERTIES AUTOMOC ON)
+    add_test(NAME closure_science.prediction_workflow_qt
+        COMMAND closure_science_prediction_workflow_qt_test)
+    set_tests_properties(closure_science.prediction_workflow_qt PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         TIMEOUT 300)
     if(PWB_ONNXRUNTIME_LIBRARY AND EXISTS "${PWB_ONNXRUNTIME_LIBRARY}")

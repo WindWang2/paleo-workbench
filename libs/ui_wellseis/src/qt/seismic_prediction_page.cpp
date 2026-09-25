@@ -204,6 +204,13 @@ SeismicPredictionPage::selected_seismic_resource_id() const {
     return selected_resource_id_;
 }
 
+void SeismicPredictionPage::begin_external_run() {
+    // Mirrors start_inference's busy state so the queued completion from
+    // the RunSpec path passes the session guard.
+    inference_active_ = true;
+    context_toolbar_->set_inferring(true);
+}
+
 bool SeismicPredictionPage::select_seismic_resource(
     const std::string& resource_id) {
     if (project_ == nullptr) {
@@ -220,6 +227,7 @@ bool SeismicPredictionPage::select_seismic_resource(
     control_panel_->update_state(nullptr, view_panel_->volume_shape());
     sync_workbench_context(nullptr);
     control_panel_->set_controls_enabled(view_panel_->is_view_ready());
+    emit seismic_selection_changed(qs(*selected_resource_id_));
     return loaded;
 }
 
@@ -370,6 +378,12 @@ void SeismicPredictionPage::on_inference_completed(
         // Async completion: in-page status instead of a modal dialog.
         context_toolbar_->set_status(
             QStringLiteral("推断失败: %1").arg(qs(error)));
+        return;
+    }
+    // Terminal cancel: honest status — never a fabricated completion and
+    // never a failure scare (the partial tiles stay resume-eligible).
+    if (run_status == "cancelled") {
+        context_toolbar_->set_status(QStringLiteral("推断已取消"));
         return;
     }
     const Json& result = json_field(payload, "result");

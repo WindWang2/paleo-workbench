@@ -15,6 +15,7 @@ add_library(pwb_closure_science STATIC
     src/inference_service.cpp
     src/mock_facies.cpp
     src/providers.cpp
+    src/run_spec_service.cpp
     src/task_journal.cpp)
 add_library(Pwb::ClosureScience ALIAS pwb_closure_science)
 target_include_directories(pwb_closure_science PUBLIC
@@ -37,7 +38,13 @@ endif()
 if(TARGET Pwb::UiWellseisQt AND TARGET Qt6::Widgets)
     add_library(pwb_closure_science_qt STATIC
         include/pwb/closure_science/qt/page_binding.hpp
-        src/qt/page_binding.cpp)
+        src/qt/page_binding.cpp
+        include/pwb/closure_science/qt/prediction_workflow.hpp
+        src/qt/prediction_workflow.cpp
+        include/pwb/closure_science/qt/prediction_workflow_dialogs.hpp
+        src/qt/prediction_workflow_dialogs.cpp
+        include/pwb/closure_science/qt/well_seismic_link.hpp
+        src/qt/well_seismic_link.cpp)
     add_library(Pwb::ClosureScienceQt ALIAS pwb_closure_science_qt)
     target_include_directories(pwb_closure_science_qt PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -51,6 +58,20 @@ if(TARGET Pwb::UiWellseisQt AND TARGET Qt6::Widgets)
             Pwb::Catalog
             Pwb::Project)
     set_target_properties(pwb_closure_science_qt PROPERTIES AUTOMOC ON)
+    # Well-tie time-depth conversion (np.interp clamp semantics) is the
+    # single authority for the ws1 link. The root flow configures this
+    # directory after VIZ-B, so the target exists; a configuration without
+    # VIZ-B compiles the same TU here directly (CONV-29 dual-compile
+    # pattern — never two copies in one link).
+    if(TARGET Pwb::VisualizationWellTie)
+        target_link_libraries(pwb_closure_science_qt
+            PRIVATE Pwb::VisualizationWellTie)
+    else()
+        target_sources(pwb_closure_science_qt PRIVATE
+            ${CMAKE_SOURCE_DIR}/libs/visualization/src/well_tie/calibration.cpp)
+        target_include_directories(pwb_closure_science_qt PRIVATE
+            ${CMAKE_SOURCE_DIR}/libs/visualization/include)
+    endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(pwb_closure_science_qt PRIVATE -Wall -Wextra)
     elseif(MSVC)

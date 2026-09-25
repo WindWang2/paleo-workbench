@@ -294,6 +294,13 @@ void WellLogPredictionPage::set_source_import_status(const QString& text) {
     evidence_panel_->set_status(text);
 }
 
+void WellLogPredictionPage::begin_external_run() {
+    // Mirrors start_inference's busy state so the queued completion from
+    // the RunSpec path passes the session guard.
+    inference_active_ = true;
+    evidence_panel_->set_inferring(true);
+}
+
 bool WellLogPredictionPage::select_well_resource(
     const std::string& resource_id) {
     if (project_ == nullptr) {
@@ -323,6 +330,7 @@ bool WellLogPredictionPage::select_well_resource(
         nullptr, canvas_panel_->has_bound_las(),
         /*selected_source=*/true);
     restore_latest_failed_online_run(resource->id);
+    emit well_selection_changed(qs(*selected_resource_id_));
     return true;
 }
 
@@ -541,6 +549,13 @@ void WellLogPredictionPage::on_inference_completed(
                 .arg(qs(redact_diagnostic_text(error))));
         write_run_diagnostic(run.is_object() ? &run_slice : nullptr,
                              "失败", error);
+        return;
+    }
+    // Terminal cancel: honest status — never "完成", never a failure scare.
+    // The cancelled run's partial tiles stay resume-eligible (resume=true).
+    if (run_slice.status == "cancelled") {
+        evidence_panel_->set_status(QStringLiteral("推断已取消"));
+        write_run_diagnostic(&run_slice, "已取消");
         return;
     }
     const Json& result = json_field(payload, "result");

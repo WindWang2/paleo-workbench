@@ -110,6 +110,13 @@ public:
     bool set_selected_well(const std::string& well_name);
     void set_source_import_status(const QString& text);
 
+    // External-run seam: the RunSpec path (SciencePageBinding::
+    // start_spec_run) launches through the same worker + queued
+    // completion, but not through this page's start_inference — the host
+    // marks the run in flight so on_inference_completed/failed accept the
+    // payload instead of dropping it at the session guard.
+    void begin_external_run();
+
     [[nodiscard]] PredictionTaskPanel* task_panel() const;
     [[nodiscard]] WellLogCanvasPanel* canvas_panel() const;
     [[nodiscard]] PredictionEvidencePanel* evidence_panel() const;
@@ -125,6 +132,10 @@ signals:
     void prediction_updated();
     void send_to_preparation_requested();
     void well_log_import_requested(const QStringList& paths);
+    // Stable resource id of the newly selected well source (combo or
+    // programmatic select_well_resource) — the ws1 link/RunSpec wiring
+    // consumes this; never a row index.
+    void well_selection_changed(const QString& resource_id);
 
 protected:
     void closeEvent(QCloseEvent* event) override;

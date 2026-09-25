@@ -4,6 +4,7 @@
 #include <pwb/prediction/model_package_runtime.hpp>
 #include <pwb/prediction/prediction_input.hpp>
 #include <pwb/prediction/prediction_service.hpp>
+#include <pwb/prediction/run_spec.hpp>
 
 #include <atomic>
 #include <cmath>
@@ -238,8 +239,18 @@ ProviderRun make_tiled_onnx_provider(const TiledOnnxProviderConfig& config) {
             (config.work_root / ("inference_" + input_version_id)).string();
         request.options.resume = true;
         request.options.cancel = cancel;
-        if (parameters.contains("prefer_gpu") &&
-            parameters["prefer_gpu"].is_boolean()) {
+        // RunSpec parameter truth (predict.params): the UI-edited spec rides
+        // the run parameters verbatim; the SAME mapping the params panel
+        // previews is the only place tile/batch/budget become options. The
+        // legacy flat prefer_gpu key stays for page-started runs.
+        if (parameters.contains("_run_spec") &&
+            parameters["_run_spec"].is_object() &&
+            parameters["_run_spec"].contains("params") &&
+            parameters["_run_spec"]["params"].is_object()) {
+            pwb::prediction::apply_prediction_params(
+                parameters["_run_spec"]["params"], request.options);
+        } else if (parameters.contains("prefer_gpu") &&
+                   parameters["prefer_gpu"].is_boolean()) {
             request.options.prefer_gpu =
                 parameters["prefer_gpu"].get<bool>();
         }

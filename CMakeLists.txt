@@ -1707,6 +1707,8 @@ if(PWB_BUILD_CLOSURE_SCIENCE)
     endif()
     if(TARGET pwb-platform AND TARGET pwb_closure_science_qt
        AND TARGET Pwb::UiWellseisQt)
+        target_sources(pwb-platform PRIVATE
+            apps/paleo_workbench_platform/prediction_workflow_install.cpp)
         target_link_libraries(pwb-platform PRIVATE Pwb::ClosureScienceQt)
         target_compile_definitions(pwb-platform PRIVATE
             PWB_WITH_CLOSURE_SCIENCE=1)
