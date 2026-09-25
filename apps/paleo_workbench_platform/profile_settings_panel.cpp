@@ -131,6 +131,20 @@ void ProfileSettingsPanel::set_well_filter(const QSet<QString>& visible) {
         check->setChecked(checked_.contains(check->text()));
     }
     syncing_ = false;
+    // Re-base the emit diff to the projected state: the next USER check
+    // must be evaluated against what is now shown, not against the
+    // pre-projection filter (otherwise a genuine user change back to the
+    // pre-projection filter would be swallowed as "no change").
+    QSet<QString> projected;
+    if (checked_.size() == names_.size()) {
+        // 全勾：空 filter。
+    } else if (checked_.isEmpty()) {
+        projected.insert(QStringLiteral("__none__"));
+    } else {
+        projected = checked_;
+    }
+    last_emitted_filter_ = projected;
+    has_emitted_filter_ = true;
 }
 
 }  // namespace pwb::app
