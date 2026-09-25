@@ -161,7 +161,15 @@ void ReviewDispositionPanel::save_record() {
         return;
     }
     Draft draft;
-    draft.issue_key = issue_.value(QStringLiteral("key")).toString();
+    // M5 stable review identity = the qc_issue_key (the canonical string
+    // the persistence layer matches reports by). The validation page's
+    // navigator adds a report-id prefix under "key" for cursor identity —
+    // the bare identity rides "issue_key" when present (older payloads
+    // keep the plain key).
+    draft.issue_key = issue_.contains(QStringLiteral("issue_key"))
+                          ? issue_.value(QStringLiteral("issue_key"))
+                                .toString()
+                          : issue_.value(QStringLiteral("key")).toString();
     draft.rule = issue_.value(QStringLiteral("rule")).toString();
     draft.severity = issue_.value(QStringLiteral("severity")).toString();
     draft.disposition_id =

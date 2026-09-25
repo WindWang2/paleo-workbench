@@ -282,34 +282,6 @@ Json* target_group(Json& root, const LinkedLines& matched) {
     return &groups->back();
 }
 
-// _linked_points: the point-kind counterpart of linked_lines — primary
-// stamp match (properties.layer_id) over group["points"] entries.
-std::vector<Json*> linked_points(Json& root, const std::string& layer_id) {
-    std::vector<Json*> out;
-    if (layer_id.empty()) return out;
-    Json* groups = root.contains("constraint_layers")
-                       ? &root.at("constraint_layers")
-                       : nullptr;
-    if (groups == nullptr || !groups->is_array()) return out;
-    for (auto& group : *groups) {
-        if (!group.is_object()) continue;
-        Json* points = group.contains("points") ? &group.at("points")
-                                                : nullptr;
-        if (points == nullptr || !points->is_array()) continue;
-        for (auto& point : *points) {
-            if (!point.is_object()) continue;
-            const Json props = point.contains("properties")
-                                   ? point.at("properties")
-                                   : Json::object();
-            if (props.is_object() && props.contains("layer_id")
-                && props.at("layer_id").get<std::string>() == layer_id) {
-                out.push_back(&point);
-            }
-        }
-    }
-    return out;
-}
-
 std::string new_constraint_line_id() {
     static int counter = 0;
     return "cline_" + std::to_string(++counter) + "_"
@@ -406,6 +378,7 @@ int sync_point_layer(Json& root, const std::string& layer_id,
                                    ? entry.at("properties")
                                    : Json::object();
             if (props.is_object() && props.contains("layer_id")
+                && props.at("layer_id").is_string()
                 && props.at("layer_id").get<std::string>() == layer_id) {
                 group = &candidate;
                 break;
@@ -413,7 +386,25 @@ int sync_point_layer(Json& root, const std::string& layer_id,
         }
         if (group != nullptr) break;
     }
-    if (group == nullptr) group = &(*groups)[0];
+    if (group == nullptr) {
+        // No stamped entry anywhere: fall back to the first group, or
+        // create a fresh well-formed one (operator[](0) on an empty
+        // array would append a null element and later mutations would
+        // write a malformed group).
+        if (!groups->empty()) {
+            group = &(*groups)[0];
+        } else {
+            Json fresh = Json::object();
+            fresh["id"] = "clayers_1";
+            fresh["name"] = "约束层";
+            fresh["target_horizon"] = "";
+            fresh["lines"] = Json::array();
+            fresh["points"] = Json::array();
+            fresh["linked_factor_task_ids"] = Json::array();
+            groups->push_back(std::move(fresh));
+            group = &groups->back();
+        }
+    }
 
     if (!group->contains("points") || !group->at("points").is_array()) {
         (*group)["points"] = Json::array();
@@ -428,6 +419,7 @@ int sync_point_layer(Json& root, const std::string& layer_id,
                                ? entry.at("properties")
                                : Json::object();
         if (props.is_object() && props.contains("layer_id")
+            && props.at("layer_id").is_string()
             && props.at("layer_id").get<std::string>() == layer_id
             && props.contains("constraint_kind")) {
             template_kind_props = props;
@@ -441,6 +433,7 @@ int sync_point_layer(Json& root, const std::string& layer_id,
                                : Json::object();
         const bool stale =
             props.is_object() && props.contains("layer_id")
+            && props.at("layer_id").is_string()
             && props.at("layer_id").get<std::string>() == layer_id;
         if (!stale) kept.push_back(std::move(entry));
     }
@@ -920,6 +913,14 @@ QString MainWindow::enterConstraintEditing(const QString& kind_value_q) {
         return QString();
     }
     createStageConstraint(kind_value_q);
+    // The create path registers the new layer in facts_ — refresh the
+    // scoped snap set the same way the reuse branch does (the ribbon
+    // already navigated to ws2 before calling, so no workspace_changed
+    // signal will fire here).
+    if (constraint_snap_state_ != nullptr
+        && constraint_snap_state_->scoped_active) {
+        setConstraintSnapping(true);
+    }
     return QString();
 }
 

@@ -2496,6 +2496,15 @@ QString MainWindow::closeProject() {
     if (context_.session().store() == nullptr) {
         return QString();  // idempotent: no project open
     }
+    // The scoped constraint-snap contract must not ride the project
+    // persist below: restore the user's snapping config BEFORE any save
+    // writes QgsProject, and drop the stale snapshot (a scoped state
+    // leaking into .qgs — or restored into ANOTHER project later — would
+    // silently overwrite the user's snapping contract).
+#if defined(PWB_WITH_STAGE_FLOW)
+    restoreProjectSnapping();
+    constraint_snap_state_.reset();
+#endif
     // Dirty protection — the SAME three-way decision as window close,
     // over every open edit session (not just the active layer).
     if (anyDirtyEditSession()) {

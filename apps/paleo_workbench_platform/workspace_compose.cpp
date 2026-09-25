@@ -809,7 +809,15 @@ bool run_crosswell_path_dialog(QMainWindow* window_as_qmain) {
                      &QDialog::reject);
     layout->addWidget(buttons);
 
-    if (dialog.exec() != QDialog::Accepted) return true;  // 取消=未改动
+    if (dialog.exec() != QDialog::Accepted) {
+        // Cancel must restore the entry order: the in-dialog 自动排列
+        // applied through the dock immediately (the preview is real
+        // state, not a scratch copy) — snapshot & restore on reject.
+        if (dock->current_well_order() != order) {
+            dock->set_well_order(order);
+        }
+        return true;
+    }
     QStringList ordered;
     for (int i = 0; i < list->count(); ++i) {
         ordered.append(list->item(i)->text());

@@ -233,6 +233,35 @@ struct ConstraintSet {
     return payload.dump();
 }
 
+// 约束点 canonical key: 9-decimal-rounded position + the raw anchored
+// value (ID-free, name-free — renames/regeneration must not flip it).
+[[nodiscard]] std::string canonical_point_key(const Json& point) {
+    Json payload = Json::object();
+    Json coords = Json::array();
+    if (const Json* raw = find_field(point, "coordinates");
+        raw != nullptr && raw->is_array()) {
+        for (const auto& xy : *raw) {
+            if (!xy.is_array() || xy.size() < 2) continue;
+            if (!xy[0].is_number() || !xy[1].is_number()) continue;
+            std::ostringstream x_out, y_out;
+            x_out << std::fixed << std::setprecision(9)
+                  << xy[0].get<double>();
+            y_out << std::fixed << std::setprecision(9)
+                  << xy[1].get<double>();
+            coords.push_back(x_out.str() + "," + y_out.str());
+        }
+    }
+    payload["coordinates"] = std::move(coords);
+    const Json* props = find_field(point, "properties");
+    if (props != nullptr && props->is_object()) {
+        if (const Json* value = find_field(*props, "value");
+            value != nullptr && value->is_number()) {
+            payload["value"] = *value;
+        }
+    }
+    return payload.dump();
+}
+
 [[nodiscard]] std::string polyline_content_hash(
     const Json& layer, const std::string& horizon) {
     std::vector<std::string> keys;
@@ -247,6 +276,22 @@ struct ConstraintSet {
             }();
             if (!active) continue;
             keys.push_back(canonical_line_key(line));
+        }
+    }
+    // 约束点 join the group digest: a moved/valor-changed pin is consumed
+    // content (it lands in the sample merge), so the recorded content
+    // hash must move with it. Key = position + anchored value.
+    if (const Json* points = find_field(layer, "points");
+        points != nullptr && points->is_array()) {
+        for (const auto& point : *points) {
+            if (!point.is_object()) continue;
+            const bool active = [&] {
+                const Json* flag = find_field(point, "active");
+                return flag == nullptr || !flag->is_boolean() ? true
+                                                              : flag->get<bool>();
+            }();
+            if (!active) continue;
+            keys.push_back(canonical_point_key(point));
         }
     }
     std::sort(keys.begin(), keys.end());
@@ -426,12 +471,14 @@ struct ConstraintSet {
                 const double x = (*coords)[0].get<double>();
                 const double y = (*coords)[1].get<double>();
                 if (!std::isfinite(x) || !std::isfinite(y)) continue;
+                // Pointer form: the ternary-temporary variant would have
+                // find_field return a pointer INTO a destroyed temporary
+                // (heap-use-after-free on every valued pin).
+                const Json* props = find_field(point, "properties");
                 const Json* value =
-                    find_field(find_field(point, "properties")
-                                   != nullptr
-                                   ? point.at("properties")
-                                   : Json::object(),
-                               "value");
+                    props != nullptr && props->is_object()
+                        ? find_field(*props, "value")
+                        : nullptr;
                 if (value == nullptr || !value->is_number()) continue;
                 const double v = value->get<double>();
                 if (!std::isfinite(v)) continue;

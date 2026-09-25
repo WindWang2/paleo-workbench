@@ -105,6 +105,12 @@ void ProfileSettingsPanel::emit_filter() {
     } else {
         filter = checked_;
     }
+    // State diff (link-loop guard): the map↔section projection drives
+    // set_well_names programmatically; re-emitting an unchanged filter
+    // would restart the cycle.
+    if (has_emitted_filter_ && filter == last_emitted_filter_) return;
+    last_emitted_filter_ = filter;
+    has_emitted_filter_ = true;
     emit well_filter_changed(filter);
 }
 

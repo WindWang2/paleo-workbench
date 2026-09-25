@@ -657,7 +657,8 @@ bool install(const Install& install) {
         // Tree-driven canvas layer set (bridge dies with the canvas; the
         // same tree the main canvas bridge reads — never a second layer
         // list).
-        new QgsLayerTreeMapCanvasBridge(project->layerTreeRoot(), preview);
+        new QgsLayerTreeMapCanvasBridge(project->layerTreeRoot(), preview,
+                                        preview);
         reference_panel->set_view(preview);
 
         // 图层行喂数：工程栅格层（可见性/透明度读真实图层与树）。
@@ -757,10 +758,19 @@ bool install(const Install& install) {
                 new QAction(QStringLiteral("联动"), install.window);
             ref_link->setObjectName(QStringLiteral("MapRefLinkToggle"));
             ref_link->setCheckable(true);
-            QObject::connect(ref_link, &QAction::toggled, reference_panel,
-                             [reference_panel](bool on) {
-                                 reference_panel->set_linked(on);
-                             });
+            QObject::connect(
+                ref_link, &QAction::toggled, reference_panel,
+                [reference_panel, preview, main_canvas,
+                 applying](bool on) {
+                    reference_panel->set_linked(on);
+                    if (on) {
+                        // Same one-shot sync the panel checkbox path
+                        // does (single master: the main canvas).
+                        *applying = true;
+                        preview->setExtent(main_canvas->extent());
+                        *applying = false;
+                    }
+                });
             QObject::connect(
                 reference_panel,
                 &pwb::ui_pages_mapedit::MapReferencePanel::link_toggled,

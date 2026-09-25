@@ -45,7 +45,9 @@ Json read_section(pwb::application::PwbDataStore* store,
 }
 
 // write_section: one document round — mutate + save; an unsaved mutation
-// is a failure, never a success.
+// is a failure, never a success. A failed save rolls the section back so
+// the in-memory document never half-applies (compute must not read a
+// value the next project open would silently revert).
 bool write_section(pwb::application::PwbDataStore* store, const char* name,
                    const Json& section, std::string* error) {
     if (store == nullptr) {
@@ -53,10 +55,24 @@ bool write_section(pwb::application::PwbDataStore* store, const char* name,
         return false;
     }
     try {
+        Json previous = [&] {
+            try {
+                return store->coordinator().document_section(
+                    name, store->document());
+            } catch (const std::exception&) {
+                return Json();
+            }
+        }();
         store->coordinator().set_document_section(name, section,
                                                   store->document());
         const auto save_error = store->save_document();
         if (!save_error.ok()) {
+            try {
+                store->coordinator().set_document_section(
+                    name, previous, store->document());
+            } catch (const std::exception&) {
+                // Rollback failure must not mask the original error.
+            }
             if (error != nullptr) *error = save_error.message;
             return false;
         }

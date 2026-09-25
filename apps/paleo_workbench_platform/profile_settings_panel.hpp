@@ -38,6 +38,11 @@ class ProfileSettingsPanel : public QWidget {
     QVBoxLayout* wells_box_ = nullptr;
     QStringList names_;
     QSet<QString> checked_;
+    // Last filter actually emitted — the map↔section link re-enters
+    // set_well_names on every dock broadcast; a state diff here breaks
+    // the cycle (no change, no signal).
+    QSet<QString> last_emitted_filter_;
+    bool has_emitted_filter_ = false;
     bool syncing_ = false;
 };
 

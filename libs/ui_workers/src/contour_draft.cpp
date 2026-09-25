@@ -333,7 +333,10 @@ std::vector<double> levels_from_interval(double lo, double hi,
     // First multiple of interval strictly above lo (epsilon-robust against
     // lo sitting exactly on a multiple), then step until hi. The 512
     // guard mirrors the ladder's cap (a hand-typed 1e-9 interval must not
-    // forge a million-level set).
+    // forge a million-level set). A quotient beyond ±1e15 cannot yield a
+    // legal <512-level set and would overflow the long long cast — bail
+    // to the empty fallback instead.
+    if (!(std::fabs(lo / interval) <= 1e15)) return {};
     const double eps = interval * 1e-9;
     long long first = static_cast<long long>(std::ceil(lo / interval));
     if (first * interval <= lo + eps) ++first;

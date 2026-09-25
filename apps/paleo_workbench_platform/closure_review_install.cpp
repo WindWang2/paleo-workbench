@@ -255,9 +255,13 @@ public:
                         }
                         clr::apply_qc_report(root, stored, iso);
                     }
+                    // The LIVE root is the runtime authority — surface
+                    // the merged reports even when the disk write fails
+                    // (the error still travels; staleness banner stays
+                    // truthful because the fingerprint rides the root).
                     const auto save_error = store->save_document();
-                    if (!save_error.ok()) return save_error.message;
-                    return {};
+                    return save_error.ok() ? std::string()
+                                           : save_error.message;
                 } catch (const std::exception& exc) {
                     return exc.what();
                 }

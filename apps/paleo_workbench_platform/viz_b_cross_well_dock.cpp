@@ -253,6 +253,11 @@ QStringList VizBCrossWellDock::all_well_names() const {
 }
 
 void VizBCrossWellDock::set_well_filter(const QSet<QString>& names) {
+    // State diff: the link loop re-enters here through wells_changed →
+    // set_well_names → emit_filter; re-applying an unchanged filter would
+    // restart the cycle (each round rescans every layer). No change, no
+    // broadcast.
+    if (names == well_filter_) return;
     well_filter_ = names;
     apply_wells_to_canvas();
 }
