@@ -94,6 +94,15 @@ class VizBCrossWellDock : public QDockWidget {
     // 面板初始化/刷新用：全部井名（未过滤）。
     [[nodiscard]] QStringList all_well_names() const;
 
+    // ---- 连井路径（factor.crosswell_path 的生产面） ----
+    // 当前剖面井序（稳定井 id = 井名；dock 的井列顺序即显示顺序）。
+    [[nodiscard]] QStringList current_well_order() const;
+    // 按路径重排：ordered 中列名的井按序前置，未列名的井保持相对顺序
+    // 追加在后（删除/改名后的缺口静默跳过——graceful degradation）。
+    void set_well_order(const QStringList& ordered);
+    // 按井位坐标自动排列（PCA 主轴 planner；坐标缺失时诚实保持现状）。
+    void arrange_by_pca();
+
   signals:
     void status_message(const QString& message);
     // 井列变化（加载/重排/清空）后广播全部井名——剖面井勾选清单

@@ -22,6 +22,11 @@ class ProfileSettingsPanel : public QWidget {
     // 重建剖面井清单（默认全勾；同名井的勾选态跨刷新保留）。
     void set_well_names(const QStringList& names);
 
+    // 程序化镜像（联动 map→剖面 的选中投影）：把勾选态设为 visible 集
+    // （不重发 well_filter_changed——调用方已持有该状态，避免回环）。
+    // 空 visible 集 = 全部取消勾选（与用户手办一致，dock 侧显示无井）。
+    void set_well_filter(const QSet<QString>& visible);
+
   signals:
     // 勾选集为空 = 显示全部井（dock 语义一致）。
     void well_filter_changed(const QSet<QString>& visible);
@@ -33,6 +38,11 @@ class ProfileSettingsPanel : public QWidget {
     QVBoxLayout* wells_box_ = nullptr;
     QStringList names_;
     QSet<QString> checked_;
+    // Last filter actually emitted — the map↔section link re-enters
+    // set_well_names on every dock broadcast; a state diff here breaks
+    // the cycle (no change, no signal).
+    QSet<QString> last_emitted_filter_;
+    bool has_emitted_filter_ = false;
     bool syncing_ = false;
 };
 

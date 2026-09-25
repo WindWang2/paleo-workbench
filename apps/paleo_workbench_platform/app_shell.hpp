@@ -319,6 +319,10 @@ public:
         pwb::ui_data_core::PreviewProvider provider);
 
 signals:
+    // Five-workspace navigation observation (emitted at the END of a
+    // navigate_workspace call). Consumers restore workspace-scoped
+    // contracts (e.g. the ws2 constraint snapping scope).
+    void workspace_changed(int from, int to);
     // App bar / home-page project actions forwarded to the host window
     // (Python AppShell.*_requested parity).
     void new_project_requested();

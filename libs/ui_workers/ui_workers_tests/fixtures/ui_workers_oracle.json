@@ -85110,6 +85110,81 @@
     "n_levels": 8
    },
    "kind": "nice_levels_range"
+  },
+  {
+   "expected": [
+    20.0,
+    40.0,
+    60.0,
+    80.0
+   ],
+   "id": "lfi_0",
+   "input": {
+    "hi": 100.0,
+    "interval": 20.0,
+    "lo": 0.0
+   },
+   "kind": "levels_from_interval"
+  },
+  {
+   "expected": [
+    12.5,
+    25.0,
+    37.5
+   ],
+   "id": "lfi_1",
+   "input": {
+    "hi": 48.2,
+    "interval": 12.5,
+    "lo": 5.5
+   },
+   "kind": "levels_from_interval"
+  },
+  {
+   "expected": [
+    20.0,
+    30.0,
+    40.0
+   ],
+   "id": "lfi_2",
+   "input": {
+    "hi": 50.0,
+    "interval": 10.0,
+    "lo": 10.0
+   },
+   "kind": "levels_from_interval"
+  },
+  {
+   "expected": [],
+   "id": "lfi_3",
+   "input": {
+    "hi": 5.0,
+    "interval": 10.0,
+    "lo": 0.0
+   },
+   "kind": "levels_from_interval"
+  },
+  {
+   "expected": [],
+   "id": "lfi_4",
+   "input": {
+    "hi": 100.0,
+    "interval": 0.0,
+    "lo": 0.0
+   },
+   "kind": "levels_from_interval"
+  },
+  {
+   "expected": [
+    40.0
+   ],
+   "id": "lfi_5",
+   "input": {
+    "hi": 60.0,
+    "interval": 20.0,
+    "lo": 20.0
+   },
+   "kind": "levels_from_interval"
   }
  ],
  "meta": {

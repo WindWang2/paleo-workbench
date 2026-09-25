@@ -43,6 +43,7 @@
 #include <qgsgeometry.h>
 #include <qgsmaplayer.h>
 #include <qgsproject.h>
+#include <qgssnappingconfig.h>
 #include <qgsvectorfilewriter.h>
 #include <qgsvectorlayer.h>
 
@@ -289,6 +290,182 @@ std::string new_constraint_line_id() {
                              .count());
 }
 
+// Point fingerprint: sha256 over the canonical JSON of the 9-decimal
+// rounded position plus the raw anchored value (the value participates —
+// changing a pin's value must invalidate the content hash).
+std::string point_fingerprint(double x, double y,
+                              const std::optional<double>& value) {
+    Json canonical = Json::array(
+        {py_round9(x), py_round9(y),
+         value.has_value() ? Json(*value) : Json(nullptr)});
+    return Sha256::of_bytes(
+        pwb::factor_host::canonical_encode(canonical));
+}
+
+struct HarvestedPoint {
+    double x = 0.0;
+    double y = 0.0;
+    std::optional<double> value;
+};
+
+// Point-kind harvest: one group["points"] entry per live point feature
+// (position + optional anchored value), same replace semantics as the
+// line path — stale stamped entries drop, an empty transient layer never
+// wipes previously synced geometry. Returns entries written.
+int sync_point_layer(Json& root, const std::string& layer_id,
+                     QgsVectorLayer* vl, const std::string& layer_name) {
+    const int value_index = vl->fields().indexOf(QStringLiteral("value"));
+    std::vector<HarvestedPoint> points;
+    QgsFeatureIterator feature_it = vl->getFeatures();
+    QgsFeature feature;
+    while (feature_it.nextFeature(feature)) {
+        if (!feature.hasGeometry()) continue;
+        Json geometry;
+        try {
+            geometry = Json::parse(
+                feature.geometry().asJson().toStdString());
+        } catch (const Json::exception&) {
+            continue;
+        }
+        if (!geometry.is_object()
+            || geometry.value("type", std::string()) != "Point") {
+            continue;
+        }
+        const Json* coordinates =
+            geometry.contains("coordinates")
+                ? &geometry.at("coordinates")
+                : nullptr;
+        if (coordinates == nullptr || !coordinates->is_array()
+            || coordinates->size() < 2 || !(*coordinates)[0].is_number()
+            || !(*coordinates)[1].is_number()) {
+            continue;
+        }
+        HarvestedPoint point;
+        point.x = (*coordinates)[0].get<double>();
+        point.y = (*coordinates)[1].get<double>();
+        if (!std::isfinite(point.x) || !std::isfinite(point.y)) continue;
+        if (value_index >= 0) {
+            // QGIS 4: QgsFeature::hasAttribute is gone — an unset field
+            // reads back a NULL QVariant (isValid() alone is true; a null
+            // double would silently anchor the surface at 0.0).
+            const QVariant attribute = feature.attribute(value_index);
+            if (attribute.isValid() && !attribute.isNull()
+                && attribute.canConvert<double>()) {
+                bool ok = false;
+                const double value = attribute.toDouble(&ok);
+                if (ok && std::isfinite(value)) point.value = value;
+            }
+        }
+        points.push_back(point);
+    }
+    if (points.empty()) return 0;
+
+    // Replace semantics over the stamped points of the owning group.
+    Json* groups = root.contains("constraint_layers")
+                       ? &root.at("constraint_layers")
+                       : nullptr;
+    if (groups == nullptr || !groups->is_array()) return 0;
+    Json* group = nullptr;
+    for (auto& candidate : *groups) {
+        if (!candidate.is_object()) continue;
+        Json* entries = candidate.contains("points")
+                            ? &candidate.at("points")
+                            : nullptr;
+        if (entries == nullptr || !entries->is_array()) continue;
+        for (auto& entry : *entries) {
+            const Json props = entry.is_object() && entry.contains(
+                                   "properties")
+                                   ? entry.at("properties")
+                                   : Json::object();
+            if (props.is_object() && props.contains("layer_id")
+                && props.at("layer_id").is_string()
+                && props.at("layer_id").get<std::string>() == layer_id) {
+                group = &candidate;
+                break;
+            }
+        }
+        if (group != nullptr) break;
+    }
+    if (group == nullptr) {
+        // No stamped entry anywhere: fall back to the first group, or
+        // create a fresh well-formed one (operator[](0) on an empty
+        // array would append a null element and later mutations would
+        // write a malformed group).
+        if (!groups->empty()) {
+            group = &(*groups)[0];
+        } else {
+            Json fresh = Json::object();
+            fresh["id"] = "clayers_1";
+            fresh["name"] = "约束层";
+            fresh["target_horizon"] = "";
+            fresh["lines"] = Json::array();
+            fresh["points"] = Json::array();
+            fresh["linked_factor_task_ids"] = Json::array();
+            groups->push_back(std::move(fresh));
+            group = &groups->back();
+        }
+    }
+
+    if (!group->contains("points") || !group->at("points").is_array()) {
+        (*group)["points"] = Json::array();
+    }
+    Json& entries = (*group)["points"];
+    // Template kind stamp read BEFORE the replace mutation (pointer
+    // invalidation parity with the line path).
+    std::optional<Json> template_kind_props;
+    for (const auto& entry : entries) {
+        if (!entry.is_object()) continue;
+        const Json props = entry.contains("properties")
+                               ? entry.at("properties")
+                               : Json::object();
+        if (props.is_object() && props.contains("layer_id")
+            && props.at("layer_id").is_string()
+            && props.at("layer_id").get<std::string>() == layer_id
+            && props.contains("constraint_kind")) {
+            template_kind_props = props;
+            break;
+        }
+    }
+    Json kept = Json::array();
+    for (auto& entry : entries) {
+        const Json props = entry.is_object() && entry.contains("properties")
+                               ? entry.at("properties")
+                               : Json::object();
+        const bool stale =
+            props.is_object() && props.contains("layer_id")
+            && props.at("layer_id").is_string()
+            && props.at("layer_id").get<std::string>() == layer_id;
+        if (!stale) kept.push_back(std::move(entry));
+    }
+    entries = std::move(kept);
+    int written = 0;
+    for (const HarvestedPoint& point : points) {
+        Json entry = Json::object();
+        entry["id"] = new_constraint_line_id();
+        entry["name"] = layer_name;
+        entry["role"] = "pin";
+        entry["coordinates"] = Json::array({point.x, point.y});
+        entry["active"] = true;
+        Json props = Json::object(
+            {{"layer_id", layer_id},
+             {"content_fingerprint",
+              point_fingerprint(point.x, point.y, point.value)}});
+        if (point.value.has_value()) {
+            props["value"] = *point.value;
+        }
+        if (template_kind_props.has_value()
+            && template_kind_props->is_object()
+            && template_kind_props->contains("constraint_kind")) {
+            props["constraint_kind"] =
+                template_kind_props->at("constraint_kind");
+        }
+        entry["properties"] = std::move(props);
+        entries.push_back(std::move(entry));
+        ++written;
+    }
+    return written;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- create --
@@ -350,10 +527,17 @@ void MainWindow::createStageConstraint(const QString& kind_value_q) {
         constraints_dir / (layer_id + ".gpkg");
     const QString crs_id = QString::fromStdString(
         context_.session().map().project()->crs().authid().toStdString());
-    const QString memory_uri = QStringLiteral("%1?crs=%2&field=name:string(64)&field=kind:string(32)")
-        .arg(geometry_kind == "polygon" ? QStringLiteral("Polygon")
-                                        : QStringLiteral("LineString"))
-        .arg(crs_id.isEmpty() ? QStringLiteral("EPSG:4326") : crs_id);
+    // Point constraint layers carry the anchored value the interpolation
+    // sample merge consumes; line/polygon layers keep the two-field
+    // Python-parity schema (no field the algorithms never read).
+    const QString memory_uri =
+        QStringLiteral(
+            "%1?crs=%2&field=name:string(64)&field=kind:string(32)"
+            "&field=value:double")
+            .arg(geometry_kind == "polygon" ? QStringLiteral("Polygon")
+                 : geometry_kind == "point" ? QStringLiteral("Point")
+                                            : QStringLiteral("LineString"))
+            .arg(crs_id.isEmpty() ? QStringLiteral("EPSG:4326") : crs_id);
     QgsVectorLayer scratch(memory_uri, QStringLiteral("scratch"),
                            QStringLiteral("memory"));
     if (!scratch.isValid()) {
@@ -434,8 +618,29 @@ void MainWindow::createStageConstraint(const QString& kind_value_q) {
             groups.push_back(std::move(fresh));
             group = &groups.back();
         }
-        if (group->contains("lines")
-            && group->at("lines").is_array()) {
+        // Document registration (Python parity: first group or a fresh
+        // 约束层 group; the entry carries EMPTY coordinates — geometry is
+        // digitized into the vector layer and harvested at save). Line/
+        // polygon kinds register under "lines" (Python parity); the point
+        // kind (约束点) registers under "points" — a separate array with
+        // the same entry shape so the save-time harvest and the prepare
+        // constraint resolver each keep their own replace semantics.
+        if (geometry_kind == "point") {
+            if (!group->contains("points")
+                || !group->at("points").is_array()) {
+                (*group)["points"] = Json::array();
+            }
+            Json point = Json::object();
+            point["id"] = new_constraint_line_id();
+            point["name"] = name;
+            point["role"] = interp_role.value_or("pin");
+            point["coordinates"] = Json::array();
+            point["active"] = true;
+            point["properties"] = Json::object(
+                {{"layer_id", layer_id}, {"constraint_kind", kind}});
+            group->at("points").push_back(std::move(point));
+        } else if (group->contains("lines")
+                   && group->at("lines").is_array()) {
             Json line = Json::object();
             line["id"] = new_constraint_line_id();
             line["name"] = name;
@@ -494,22 +699,27 @@ int MainWindow::syncConstraintGeometryOnSave() {
 
     int synced_lines = 0;
     // Collect the stamped layer ids first — the replace semantics below
-    // rewrite group["lines"] arrays, invalidating pointers mid-walk.
+    // rewrite group["lines"]/["points"] arrays, invalidating pointers
+    // mid-walk. Both arrays are scanned: line and point constraint layers
+    // stamp the same properties.layer_id.
     std::set<std::string> stamped_ids;
     for (const auto& group : root.at("constraint_layers")) {
-        if (!group.is_object() || !group.contains("lines")
-            || !group.at("lines").is_array()) {
-            continue;
-        }
-        for (const auto& line : group.at("lines")) {
-            if (!line.is_object()) continue;
-            const Json props = line.contains("properties")
-                                   ? line.at("properties")
-                                   : Json::object();
-            if (props.is_object() && props.contains("layer_id")
-                && props.at("layer_id").is_string()) {
-                stamped_ids.insert(
-                    props.at("layer_id").get<std::string>());
+        if (!group.is_object()) continue;
+        for (const char* section : {"lines", "points"}) {
+            if (!group.contains(section)
+                || !group.at(section).is_array()) {
+                continue;
+            }
+            for (const auto& entry : group.at(section)) {
+                if (!entry.is_object()) continue;
+                const Json props = entry.contains("properties")
+                                       ? entry.at("properties")
+                                       : Json::object();
+                if (props.is_object() && props.contains("layer_id")
+                    && props.at("layer_id").is_string()) {
+                    stamped_ids.insert(
+                        props.at("layer_id").get<std::string>());
+                }
             }
         }
     }
@@ -520,6 +730,11 @@ int MainWindow::syncConstraintGeometryOnSave() {
         const std::string layer_name = vl->name().toStdString();
         const bool is_line =
             vl->geometryType() == Qgis::GeometryType::Line;
+        if (vl->geometryType() == Qgis::GeometryType::Point) {
+            synced_lines +=
+                sync_point_layer(root, layer_id, vl, layer_name);
+            continue;
+        }
         // First pass with the stamp only: the constraint kind for the
         // legacy name fallback comes from the matched entries below.
         LinkedLines matched =
@@ -630,6 +845,136 @@ int MainWindow::syncConstraintGeometryOnSave() {
         }
     }
     return synced_lines;
+}
+
+// ------------------------------------------------------------------ edit --
+
+// The constraint layer roles (the layer set snapping scopes to — never
+// unrelated data-management layers).
+bool is_constraint_layer_role(const std::string& role) {
+    static const std::set<std::string> roles = {
+        "provenance_direction", "provenance_line", "distribution_line",
+        "paleo_shoreline", "facies_boundary", "fault_constraint",
+        "interpolation_boundary", "mask_boundary", "constraint_point",
+    };
+    return roles.count(role) != 0;
+}
+
+struct MainWindow::ConstraintSnapState {
+    QgsSnappingConfig saved;
+    bool scoped_active = false;
+};
+
+QString MainWindow::enterConstraintEditing(const QString& kind_value_q) {
+    const std::string kind = kind_value_q.toStdString();
+    std::string label;
+    try {
+        label = pwb::ui_composite::constraint_kind_label(kind);
+    } catch (const std::out_of_range&) {
+        return tr("未知约束类型：%1").arg(kind_value_q);
+    }
+    const auto store = context_.projectStore();
+    if (store == nullptr) {
+        return tr("先新建或打开工程——约束层随工程保存");
+    }
+    const auto role =
+        pwb::ui_composite::constraint_kind_layer_role(kind);
+
+    // Reuse: a live layer of the SAME constraint kind (role + role label —
+    // kinds sharing a role, e.g. mask/exclusion or trend/distribution,
+    // are told apart by the kind label stamped at creation).
+    for (const auto& [id, facts] : facts_) {
+        if (facts.role != role.value_or("\x01")) continue;
+        if (facts.role_label != label) continue;
+        if (context_.session().map().vectorLayerById(id) == nullptr) {
+            continue;
+        }
+        if (!context_.session().edit().editing(id)) {
+            const std::string error =
+                context_.session().edit().start_editing(id);
+            if (!error.empty()) {
+                return tr("开始编辑失败：%1")
+                    .arg(QString::fromStdString(error));
+            }
+        }
+        context_.session().set_active_layer(facts);
+        refreshActionStates();
+        // Keep the scoped snap set current (a freshly created constraint
+        // layer must be snappable without re-toggling).
+        if (constraint_snap_state_ != nullptr
+            && constraint_snap_state_->scoped_active) {
+            setConstraintSnapping(true);
+        }
+        statusBar()->showMessage(
+            tr("已进入 %1 编辑（图层：%2；数字化后保存生效）")
+                .arg(QString::fromStdString(label),
+                     QString::fromStdString(id)),
+            10000);
+        return QString();
+    }
+    createStageConstraint(kind_value_q);
+    // The create path registers the new layer in facts_ — refresh the
+    // scoped snap set the same way the reuse branch does (the ribbon
+    // already navigated to ws2 before calling, so no workspace_changed
+    // signal will fire here).
+    if (constraint_snap_state_ != nullptr
+        && constraint_snap_state_->scoped_active) {
+        setConstraintSnapping(true);
+    }
+    return QString();
+}
+
+void MainWindow::setConstraintSnapping(bool enabled) {
+    if (constraint_snap_state_ == nullptr) {
+        constraint_snap_state_ = std::make_shared<ConstraintSnapState>();
+    }
+    auto& edit = context_.session().edit();
+    if (!enabled) {
+        if (constraint_snap_state_->scoped_active) {
+            edit.set_snapping_config(constraint_snap_state_->saved);
+            constraint_snap_state_->scoped_active = false;
+            statusBar()->showMessage(
+                tr("约束捕捉已关闭（工程捕捉配置已恢复）"), 6000);
+        }
+        return;
+    }
+    // The live constraint layer set (by role; stale ids resolve to null
+    // inside the controller and drop out).
+    std::vector<std::string> layer_ids;
+    for (const auto& [id, facts] : facts_) {
+        if (is_constraint_layer_role(facts.role)) {
+            layer_ids.push_back(id);
+        }
+    }
+    if (!constraint_snap_state_->scoped_active) {
+        constraint_snap_state_->saved = edit.snapping_config();
+        constraint_snap_state_->scoped_active = true;
+    }
+    const std::string error =
+        edit.set_snapping_scoped(true, 12.0, layer_ids);
+    if (!error.empty()) {
+        statusBar()->showMessage(
+            tr("约束捕捉设置失败：%1")
+                .arg(QString::fromStdString(error)),
+            8000);
+        return;
+    }
+    statusBar()->showMessage(
+        layer_ids.empty()
+            ? tr("没有约束图层可捕捉——先创建约束线/约束点")
+            : tr("约束捕捉已开启：%1 个约束图层（顶点+线段，12 px）")
+                  .arg(layer_ids.size()),
+        8000);
+}
+
+void MainWindow::restoreProjectSnapping() {
+    if (constraint_snap_state_ == nullptr
+        || !constraint_snap_state_->scoped_active) {
+        return;
+    }
+    context_.session().edit().set_snapping_config(
+        constraint_snap_state_->saved);
+    constraint_snap_state_->scoped_active = false;
 }
 
 #endif  // PWB_WITH_DATA_INTEGRATION

@@ -105,7 +105,46 @@ void ProfileSettingsPanel::emit_filter() {
     } else {
         filter = checked_;
     }
+    // State diff (link-loop guard): the map↔section projection drives
+    // set_well_names programmatically; re-emitting an unchanged filter
+    // would restart the cycle.
+    if (has_emitted_filter_ && filter == last_emitted_filter_) return;
+    last_emitted_filter_ = filter;
+    has_emitted_filter_ = true;
     emit well_filter_changed(filter);
+}
+
+void ProfileSettingsPanel::set_well_filter(const QSet<QString>& visible) {
+    // Programmatic mirror (map→section link projection): rewrite the
+    // checked state without re-emitting well_filter_changed — the caller
+    // already holds that state and the dock filter is set directly.
+    QSet<QString> next;
+    for (const QString& name : names_) {
+        if (visible.contains(name)) next.insert(name);
+    }
+    if (next == checked_) return;
+    checked_ = next;
+    syncing_ = true;
+    const auto checks =
+        wells_box_->parentWidget()->findChildren<QCheckBox*>();
+    for (QCheckBox* check : checks) {
+        check->setChecked(checked_.contains(check->text()));
+    }
+    syncing_ = false;
+    // Re-base the emit diff to the projected state: the next USER check
+    // must be evaluated against what is now shown, not against the
+    // pre-projection filter (otherwise a genuine user change back to the
+    // pre-projection filter would be swallowed as "no change").
+    QSet<QString> projected;
+    if (checked_.size() == names_.size()) {
+        // 全勾：空 filter。
+    } else if (checked_.isEmpty()) {
+        projected.insert(QStringLiteral("__none__"));
+    } else {
+        projected = checked_;
+    }
+    last_emitted_filter_ = projected;
+    has_emitted_filter_ = true;
 }
 
 }  // namespace pwb::app

@@ -26,10 +26,20 @@
 
 #include <QMetaObject>
 #include <QObject>
+#include <QAction>
+#include <QComboBox>
 #include <QPushButton>
 #include <QVariant>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <qgsmapcanvas.h>
+#include <qgsmaplayer.h>
+#include <qgsproject.h>
+#include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
+#include <qgsrasterlayer.h>
+#include <qgslayertree.h>
+#include <qgslayertreemapcanvasbridge.h>
 
 #include <algorithm>
 #include <any>
@@ -58,6 +68,7 @@
 
 #if PWB_WITH_FACTOR_KERNEL
 #include "factor_prepare_production.hpp"
+#include "factor_method_config.hpp"
 #endif
 
 #include <pwb/application/adapters/data_store.hpp>
@@ -369,6 +380,8 @@ Json draft_to_json(const pwb::ui_workers::ContourDraftSlice& draft) {
     out["source_backend"] = draft.source_backend;
     out["source_value_range"] = Json::array(
         {draft.source_value_range.first, draft.source_value_range.second});
+    // 等值线间距 provenance（>0 = 固定间距策略；0 = nice 阶梯）。
+    out["source_interval"] = draft.source_interval;
     out["status"] = draft.status;
     out["generator_version"] = draft.generator_version;
     out["updated_at"] = draft.updated_at;
@@ -399,6 +412,14 @@ public:
 
     QString selected_method() const override {
         return panel_->selected_method();
+    }
+    void set_selected_method(const QString& method) override {
+        // The combo keeps the method vocabulary — an unknown label is a
+        // no-op (the document authority never writes unregistered labels,
+        // but a hand-edited project file must not blank the selection).
+        const int index =
+            panel_->method_combo()->findText(method);
+        if (index >= 0) panel_->method_combo()->setCurrentIndex(index);
     }
     void update_state(const Json& tasks) override {
         std::vector<pwb::ui_seqviz::FactorTaskRecord> records;
@@ -577,8 +598,9 @@ bool install(const Install& install) {
     auto* view = new pwb::ui_pages_mapedit::MapEditView(mapping_page);
     auto* scene = view->edit_scene();
     mapping_page->adopt_edit_view(view);
-    mapping_page->adopt_reference_panel(
-        new pwb::ui_pages_mapedit::MapReferencePanel(mapping_page));
+    auto* reference_panel =
+        new pwb::ui_pages_mapedit::MapReferencePanel(mapping_page);
+    mapping_page->adopt_reference_panel(reference_panel);
     mapping_page->adopt_bottom_workbench(
         new pwb::ui_pages_mapedit::MapWorkbenchBottom(mapping_page));
 
@@ -617,6 +639,150 @@ bool install(const Install& install) {
                          });
     }
     // END qgis-native-layout-convergence
+
+    // ---- 1b. 参考图视图 + 主图联动（map.ref_link 的真实后端） -------------
+    // 参考图面板从死列表复活为真实参考视图：预览画布显示主 QgsProject
+    // 的图层（经 QgsLayerTreeMapCanvasBridge —— 图层树是唯一权威，
+    // 预览可见性即树可见性，与主画布同一契约）；联动开启时预览 extent
+    // 跟随主画布（单一 master = 主画布；从动方向单向，reentrancy 守卫
+    // 防递归反馈），关闭后两个视图独立漫游。透明度滑杆写真实
+    // QgsMapLayer（不是面板本地状态）。
+    {
+        auto* project = window_session->map().project();
+        auto* preview = new QgsMapCanvas(reference_panel);
+        preview->setObjectName(QStringLiteral("MapReferencePreviewCanvas"));
+        preview->setMinimumHeight(180);
+        preview->enableAntiAliasing(true);
+        preview->setDestinationCrs(project->crs());
+        // Tree-driven canvas layer set (bridge dies with the canvas; the
+        // same tree the main canvas bridge reads — never a second layer
+        // list).
+        new QgsLayerTreeMapCanvasBridge(project->layerTreeRoot(), preview,
+                                        preview);
+        reference_panel->set_view(preview);
+
+        // 图层行喂数：工程栅格层（可见性/透明度读真实图层与树）。
+        const auto feed_reference_rows = [reference_panel, preview,
+                                          project]() {
+            std::vector<pwb::ui_pages_mapedit::MapReferenceLayer> rows;
+            const QList<QgsRasterLayer*> layers =
+                project->layers<QgsRasterLayer*>();
+            for (QgsMapLayer* map_layer : layers) {
+                auto* raster = qobject_cast<QgsRasterLayer*>(map_layer);
+                if (raster == nullptr) continue;
+                pwb::ui_pages_mapedit::MapReferenceLayer row;
+                row.id = raster->id();
+                row.name = raster->name();
+                row.source_kind = QStringLiteral("raster");
+                row.opacity = raster->opacity();
+                if (auto* node =
+                        project->layerTreeRoot()->findLayer(raster->id())) {
+                    row.visible = node->itemVisibilityChecked();
+                }
+                rows.push_back(std::move(row));
+            }
+            reference_panel->set_layers(rows);
+            preview->refreshAllLayers();
+        };
+        feed_reference_rows();
+        QObject::connect(project, &QgsProject::layersAdded,
+                         reference_panel,
+                         [feed_reference_rows](const QList<QgsMapLayer*>&) {
+                             feed_reference_rows();
+                         });
+        QObject::connect(project, &QgsProject::layersRemoved,
+                         reference_panel, [feed_reference_rows]() {
+                             feed_reference_rows();
+                         });
+
+        // 行勾选 → 图层树可见性（唯一权威）；滑杆 → 真实图层透明度。
+        QObject::connect(
+            reference_panel,
+            &pwb::ui_pages_mapedit::MapReferencePanel::
+                reference_visibility_changed,
+            reference_panel,
+            [project, preview](const QString& layer_id, bool visible) {
+                if (auto* node =
+                        project->layerTreeRoot()->findLayer(layer_id)) {
+                    node->setItemVisibilityChecked(visible);
+                }
+                preview->refreshAllLayers();
+            });
+        QObject::connect(
+            reference_panel,
+            &pwb::ui_pages_mapedit::MapReferencePanel::
+                reference_opacity_changed,
+            reference_panel,
+            [project, preview](const QString& layer_id, double opacity) {
+                const QList<QgsMapLayer*> layers =
+                    project->layers<QgsMapLayer*>();
+                for (QgsMapLayer* map_layer : layers) {
+                    if (map_layer->id() == layer_id) {
+                        map_layer->setOpacity(opacity);
+                        map_layer->triggerRepaint();
+                        preview->refreshAllLayers();
+                        return;
+                    }
+                }
+            });
+
+        // 主图联动：extentChanged → setExtent 单向；开启瞬间同步一次。
+        // applying 守卫：预览自身 extent 变化绝不再写回主图（无反向
+        // 通道），守卫只防同帧重入。
+        auto* main_canvas = window_session->canvas();
+        const auto applying = std::make_shared<bool>(false);
+        QObject::connect(
+            main_canvas, &QgsMapCanvas::extentsChanged, reference_panel,
+            [reference_panel, preview, main_canvas,
+             applying]() {
+                if (!reference_panel->linked() || *applying) return;
+                *applying = true;
+                preview->setExtent(main_canvas->extent());
+                *applying = false;
+            });
+        QObject::connect(
+            reference_panel,
+            &pwb::ui_pages_mapedit::MapReferencePanel::link_toggled,
+            reference_panel,
+            [reference_panel, preview, main_canvas, applying](bool on) {
+                if (on) {
+                    *applying = true;
+                    preview->setExtent(main_canvas->extent());
+                    *applying = false;
+                }
+            });
+
+        // Ribbon 联动开关（map.ref_link）：QAction ↔ 面板复选框同一状态。
+        if (install.shell->ribbon() != nullptr) {
+            auto* ref_link =
+                new QAction(QStringLiteral("联动"), install.window);
+            ref_link->setObjectName(QStringLiteral("MapRefLinkToggle"));
+            ref_link->setCheckable(true);
+            QObject::connect(
+                ref_link, &QAction::toggled, reference_panel,
+                [reference_panel, preview, main_canvas,
+                 applying](bool on) {
+                    reference_panel->set_linked(on);
+                    if (on) {
+                        // Same one-shot sync the panel checkbox path
+                        // does (single master: the main canvas).
+                        *applying = true;
+                        preview->setExtent(main_canvas->extent());
+                        *applying = false;
+                    }
+                });
+            QObject::connect(
+                reference_panel,
+                &pwb::ui_pages_mapedit::MapReferencePanel::link_toggled,
+                ref_link, [ref_link](bool on) {
+                    const QSignalBlocker block(ref_link);
+                    ref_link->setChecked(on);
+                });
+            install.shell->ribbon()->set_command_action(
+                QStringLiteral("map.ref_link"), ref_link);
+        }
+    }
+
     // ---- 2. document bank -------------------------------------------------
     auto* bank = new MapDocumentBank(scene, view, install.window);
     // BEGIN V14-COMPILATION-PUBLISH — the context was created before the
@@ -652,6 +818,17 @@ bool install(const Install& install) {
         new pwb::ui_pages_data::qt::PreparationPage(install.window);
     preparation->setObjectName(QStringLiteral("PreparationPage"));
     preparation->set_task_panel(new TaskPanelShim(preparation));
+    // Restore the document method authority (root["factor_settings"]
+    // .method — factor.method 命令/对话框写) onto the panel combo：面板是
+    // compute 读取的单一状态面，重开工程后选择不丢。
+    if (store != nullptr) {
+        const std::string saved_method =
+            pwb::app::factor_config::read_method(store.get());
+        if (!saved_method.empty()) {
+            preparation->task_panel()->set_selected_method(
+                QString::fromStdString(saved_method));
+        }
+    }
     preparation->set_well_table_panel(new WellTableShim(preparation));
     preparation->set_preview_grid(new PreviewGridShim(preparation));
     preparation->set_boundary_panel(
@@ -764,15 +941,21 @@ bool install(const Install& install) {
                 std::function<void(const QString&)> failed,
                 std::function<void()> cancelled) {
             // Snapshot on the host thread (the GUI thread at call time) so
-            // the scientific inputs match the Stage-4 fingerprints.
+            // the scientific inputs match the Stage-4 fingerprints. The
+            // run parameters come from the document authority
+            // (root["factor_settings"] — factor.params 命令写) so a run
+            // records exactly what the user configured.
             const auto store = project_store_fn();
+            const auto run_params =
+                pwb::app::factor_config::read_params(store.get());
             pwb::ui_workers::FactorPrepareSnapshot snapshot;
             if (store != nullptr) {
                 const auto slice = pwb::factor_production::
                     build_prepare_slice(store->document().root());
                 snapshot = pwb::ui_workers::build_prepare_snapshot(
-                    slice, gen, method, /*grid_n=*/std::nullopt,
-                    /*power=*/2.0, /*force=*/false, /*seed=*/0,
+                    slice, gen, method,
+                    /*grid_n=*/std::optional<int>(run_params.grid_n),
+                    run_params.power, /*force=*/false, run_params.seed,
                     /*target_horizon=*/std::nullopt,
                     /*factor_types=*/std::nullopt, seams);
             }
@@ -1061,7 +1244,9 @@ bool install(const Install& install) {
             [completed = std::move(completed),
              failed = std::move(failed), store,
              tasks_json = std::move(tasks_json),
-             resolved_grids = std::move(resolved_grids)](
+             resolved_grids = std::move(resolved_grids),
+             interval_m = pwb::app::factor_config::read_contour_interval(
+                 store.get())](
                 WorkerLane::Client& client,
                 pwb::qgis_processing::PaleoTaskBodyContext& ctx) {
             try {
@@ -1178,7 +1363,7 @@ bool install(const Install& install) {
                             tasks, ledger, std::nullopt, /*only_complete=*/true,
                             pwb::ui_workers::kContourDefaultNLevels, token,
                             extract, /*id_fn=*/{},
-                            /*updated_at=*/{});
+                            /*updated_at=*/{}, interval_m);
                     count = static_cast<int>(drafts.size());
                     for (const auto& draft : drafts) {
                         payload->push_back(draft_to_json(draft));

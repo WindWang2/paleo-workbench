@@ -8,18 +8,34 @@
 #include <memory>
 #include <vector>
 
+#include <QAction>
 #include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFrame>
 #include <QHash>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QLabel>
+#include <QListWidget>
 #include <QPixmap>
+#include <QPushButton>
 #include <QSplitter>
 #include <QTabWidget>
+#include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
+
+#include <pwb/ui_ribbon/qt/ribbon_bar.hpp>
+#include <pwb/ui_map/display_map_canvas.hpp>
+
+#include <qgsfeature.h>
+#include <qgsfeatureiterator.h>
+#include <qgsmaplayer.h>
+#include <qgsproject.h>
+#include <qgsvectorlayer.h>
 
 #include "app_context.hpp"
 #include "app_shell.hpp"
@@ -265,6 +281,174 @@ void compose_constraint_bottom(MainWindow* window, AppShell* shell,
                      dock, &VizBCrossWellDock::set_well_filter);
     QObject::connect(settings, &ProfileSettingsPanel::frame_toggled, dock,
                      &VizBCrossWellDock::set_show_frame);
+
+    // ---- 联动开关（factor.link）：地图井选择 ↔ 剖面井过滤 双向投影 ----
+    // 井名是稳定 join key（dock 的井 id 即井名——不新建第二份井选择
+    // 权威）。选择变化经 150 ms 单发 QTimer 节流；程序化选择用
+    // applying 布尔守卫阻断回环（selectionChanged 直连同步触发）。
+    {
+        auto* link_row = new QWidget(host);
+        auto* link_layout = new QHBoxLayout(link_row);
+        link_layout->setContentsMargins(6, 2, 6, 0);
+        auto* link_action = new QAction(QStringLiteral("与地图联动"), window);
+        link_action->setObjectName(QStringLiteral("FactorLinkToggle"));
+        link_action->setCheckable(true);
+        link_action->setToolTip(QStringLiteral(
+            "地图上选中井 → 剖面只显示所选井（取消选择 = 全部）；"
+            "剖面井勾选 → 地图高亮对应井要素"));
+        auto* link_button = new QToolButton(link_row);
+        link_button->setDefaultAction(link_action);
+        link_layout->addWidget(link_button);
+        link_layout->addStretch();
+        layout->insertWidget(0, link_row);
+        if (shell->ribbon() != nullptr) {
+            shell->ribbon()->set_command_action(
+                QStringLiteral("factor.link"), link_action);
+        }
+
+        auto* throttle = new QTimer(split);
+        throttle->setSingleShot(true);
+        throttle->setInterval(150);
+        const auto applying = std::make_shared<bool>(false);
+        // 记住联动触碰过的图层 id（清空选择时能找回井图层）。
+        const auto linked_layer_ids =
+            std::make_shared<QStringList>();
+
+        // 井名候选字段（样例井位 GeoJSON 与通用井表的名列）。
+        const auto feature_name = [](QgsVectorLayer* layer,
+                                     const QgsFeature& feature) {
+            static const char* kNameFields[] = {"name", "well",
+                                                "well_name", "WELL",
+                                                "井名"};
+            for (const char* field : kNameFields) {
+                const int index = layer->fields().indexOf(
+                    QLatin1String(field));
+                if (index < 0) continue;
+                const QVariant value = feature.attribute(index);
+                if (value.isValid() && !value.toString().isEmpty()) {
+                    return value.toString();
+                }
+            }
+            return QString();
+        };
+
+        // 地图 → 剖面：与 dock 井名求交的所选要素名投影为剖面过滤。
+        const auto apply_map_to_section = [window, dock, settings,
+                                           link_action, applying,
+                                           feature_name]() {
+            if (!link_action->isChecked() || *applying) return;
+            const QStringList known = dock->all_well_names();
+            if (known.isEmpty()) return;
+            const QSet<QString> known_set(known.begin(), known.end());
+            QSet<QString> selected;
+            const QList<QgsVectorLayer*> layers =
+                window->context()
+                    .session()
+                    .map()
+                    .project()
+                    ->layers<QgsVectorLayer*>();
+            for (QgsVectorLayer* layer : layers) {
+                if (layer == nullptr
+                    || layer->selectedFeatureCount() == 0) {
+                    continue;
+                }
+                QgsFeature feature;
+                QgsFeatureIterator it = layer->getSelectedFeatures();
+                while (it.nextFeature(feature)) {
+                    const QString name = feature_name(layer, feature);
+                    if (!name.isEmpty() && known_set.contains(name)) {
+                        selected.insert(name);
+                    }
+                }
+            }
+            // 地图取消选择（或选中的都不是井）= 剖面回到全部井。
+            dock->set_well_filter(selected);
+            QSet<QString> visible = selected;
+            if (visible.isEmpty()) {
+                visible = known_set;
+            }
+            settings->set_well_filter(visible);
+        };
+        QObject::connect(throttle, &QTimer::timeout, split,
+                         apply_map_to_section);
+
+        // 剖面 → 地图：勾选变化把井要素选择到地图上。
+        QObject::connect(
+            settings, &ProfileSettingsPanel::well_filter_changed, split,
+            [window, dock, link_action, applying, linked_layer_ids,
+             feature_name](const QSet<QString>& filter) {
+                if (!link_action->isChecked() || *applying) return;
+                const QStringList known = dock->all_well_names();
+                if (known.isEmpty()) return;
+                QSet<QString> visible;
+                if (filter.contains(QStringLiteral("__none__"))) {
+                    // 全不显示 = 清空地图井选择。
+                } else if (filter.isEmpty()) {
+                    visible = QSet<QString>(known.begin(), known.end());
+                } else {
+                    visible = filter;
+                }
+                *applying = true;
+                const QList<QgsVectorLayer*> layers =
+                    window->context()
+                        .session()
+                        .map()
+                        .project()
+                        ->layers<QgsVectorLayer*>();
+                for (QgsVectorLayer* layer : layers) {
+                    if (layer == nullptr) continue;
+                    QgsFeatureIds select;
+                    if (!visible.isEmpty()) {
+                        QgsFeature feature;
+                        QgsFeatureIterator it = layer->getFeatures();
+                        while (it.nextFeature(feature)) {
+                            const QString name =
+                                feature_name(layer, feature);
+                            if (!name.isEmpty()
+                                && visible.contains(name)) {
+                                select.insert(feature.id());
+                            }
+                        }
+                    }
+                    if (!select.isEmpty()) {
+                        layer->selectByIds(select);
+                        if (!linked_layer_ids->contains(layer->id())) {
+                            linked_layer_ids->append(layer->id());
+                        }
+                    } else if (visible.isEmpty()
+                               && linked_layer_ids->contains(
+                                   layer->id())) {
+                        layer->removeSelection();
+                    }
+                }
+                *applying = false;
+            });
+
+        // 订阅图层选择变化（现有 + 未来图层）。
+        const auto hook_layer = [throttle](QgsMapLayer* map_layer) {
+            if (auto* vector_layer =
+                    qobject_cast<QgsVectorLayer*>(map_layer)) {
+                QObject::connect(
+                    vector_layer, &QgsVectorLayer::selectionChanged,
+                    throttle,
+                    [throttle]() { throttle->start(); },
+                    Qt::UniqueConnection);
+            }
+        };
+        const QList<QgsMapLayer*> current_layers =
+            window->context().session().map().project()->mapLayers().values();
+        for (QgsMapLayer* map_layer : current_layers) {
+            hook_layer(map_layer);
+        }
+        QObject::connect(
+            window->context().session().map().project(),
+            &QgsProject::layersAdded, split,
+            [hook_layer](const QList<QgsMapLayer*>& added) {
+                for (QgsMapLayer* map_layer : added) {
+                    hook_layer(map_layer);
+                }
+            });
+    }
 #else
     (void)window;
     (void)host;
@@ -483,7 +667,7 @@ void compose_compilation_bottom(MainWindow* window, AppShell* shell,
 // ws4 — validation seismic comparison pane (P0-4)
 // ---------------------------------------------------------------------------
 
-void compose_validation_page(AppShell* shell) {
+void compose_validation_page(MainWindow* window, AppShell* shell) {
     auto* page = shell->validation_page();
     if (page == nullptr) return;
     QObject::connect(page, &ValidationWorkspacePage::status_message, shell,
@@ -493,6 +677,56 @@ void compose_validation_page(AppShell* shell) {
     pane->setObjectName(QStringLiteral("ValidationSeismicPane"));
     page->set_seismic_pane(pane);
 #endif
+    // 验证画布喂数（locate 的前置）：把主工程矢量层镜像成
+    // DisplayMapCanvas 的不可变快照（此前 locate 在空白画布上平移）。
+    // 主画布仍是空间权威——这里只是只读投影，随报告刷新重建。要素
+    // 上限防大图层拖垮 GUI 线程（超限截断）。
+    if (window != nullptr && page->map_canvas() != nullptr) {
+        const auto feed_validation_map = [window, page]() {
+            auto* project = window->context().session().map().project();
+            pwb::domain::Json snapshot = pwb::domain::Json::object();
+            snapshot["project_crs"] =
+                project->crs().authid().toStdString();
+            pwb::domain::Json layers = pwb::domain::Json::array();
+            const QList<QgsVectorLayer*> vector_layers =
+                project->layers<QgsVectorLayer*>();
+            constexpr int kMaxFeaturesPerLayer = 5000;
+            for (QgsVectorLayer* layer : vector_layers) {
+                if (layer == nullptr || !layer->isValid()) continue;
+                pwb::domain::Json layer_json = pwb::domain::Json::object();
+                layer_json["id"] = layer->id().toStdString();
+                layer_json["name"] = layer->name().toStdString();
+                layer_json["layer_type"] = "vector";
+                layer_json["crs"] = layer->crs().authid().toStdString();
+                pwb::domain::Json features = pwb::domain::Json::array();
+                int count = 0;
+                QgsFeature feature;
+                QgsFeatureIterator it = layer->getFeatures();
+                while (it.nextFeature(feature)
+                       && count < kMaxFeaturesPerLayer) {
+                    if (!feature.hasGeometry()) continue;
+                    pwb::domain::Json geo;
+                    try {
+                        geo = pwb::domain::Json::parse(
+                            feature.geometry().asJson().toStdString());
+                    } catch (const pwb::domain::Json::exception&) {
+                        continue;
+                    }
+                    features.push_back(std::move(geo));
+                    ++count;
+                }
+                layer_json["features"] = std::move(features);
+                layers.push_back(std::move(layer_json));
+            }
+            snapshot["layers"] = std::move(layers);
+            page->map_canvas()->set_layer_snapshot(snapshot);
+        };
+        feed_validation_map();
+        QObject::connect(
+            page, &ValidationWorkspacePage::reports_refreshed, shell,
+            [feed_validation_map]() { feed_validation_map(); },
+            Qt::UniqueConnection);
+    }
 }
 
 }  // namespace
@@ -503,7 +737,106 @@ void compose(const Install& install) {
     compose_prediction_bottom(install.shell);
     compose_constraint_bottom(window, install.shell, install.context);
     compose_compilation_bottom(window, install.shell, install.context);
-    compose_validation_page(install.shell);
+    compose_validation_page(window, install.shell);
+}
+
+// ---------------------------------------------------------------------------
+// factor.crosswell_path / factor.link 的命令后端（P0-2 面的公共入口）。
+// ---------------------------------------------------------------------------
+
+bool run_crosswell_path_dialog(QMainWindow* window_as_qmain) {
+#if defined(PWB_WITH_VIZ_B)
+    auto* window = dynamic_cast<MainWindow*>(window_as_qmain);
+    auto* dock =
+        window != nullptr ? window->vizBCrossWellDock() : nullptr;
+    if (dock == nullptr || dock->all_well_names().isEmpty()) {
+        return false;
+    }
+    QDialog dialog(window_as_qmain);
+    dialog.setWindowTitle(QStringLiteral("连井剖面路径（井序）"));
+    dialog.setObjectName(QStringLiteral("CrosswellPathDialog"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* list = new QListWidget(&dialog);
+    list->setObjectName(QStringLiteral("CrosswellPathList"));
+    const QStringList order = dock->current_well_order();
+    for (const QString& name : order) {
+        list->addItem(name);
+    }
+    list->setCurrentRow(0);
+    layout->addWidget(list);
+
+    auto* row = new QWidget(&dialog);
+    auto* row_layout = new QHBoxLayout(row);
+    row_layout->setContentsMargins(0, 0, 0, 0);
+    auto* up = new QPushButton(QStringLiteral("上移"), row);
+    auto* down = new QPushButton(QStringLiteral("下移"), row);
+    auto* auto_pca = new QPushButton(QStringLiteral("自动排列（PCA）"), row);
+    up->setObjectName(QStringLiteral("CrosswellPathUp"));
+    down->setObjectName(QStringLiteral("CrosswellPathDown"));
+    row_layout->addWidget(up);
+    row_layout->addWidget(down);
+    row_layout->addStretch();
+    row_layout->addWidget(auto_pca);
+    layout->addWidget(row);
+
+    const auto move_selected = [list](int delta) {
+        const int row = list->currentRow();
+        const int target = row + delta;
+        if (row < 0 || target < 0 || target >= list->count()) return;
+        QListWidgetItem* item = list->takeItem(row);
+        list->insertItem(target, item);
+        list->setCurrentRow(target);
+    };
+    QObject::connect(up, &QPushButton::clicked, &dialog,
+                     [move_selected] { move_selected(-1); });
+    QObject::connect(down, &QPushButton::clicked, &dialog,
+                     [move_selected] { move_selected(1); });
+    // 自动排列先按当前井位坐标重排，结果回到对话框继续手工微调。
+    QObject::connect(auto_pca, &QPushButton::clicked, &dialog,
+                     [dock, list] {
+                         dock->arrange_by_pca();
+                         list->clear();
+                         for (const QString& name :
+                              dock->current_well_order()) {
+                             list->addItem(name);
+                         }
+                         if (list->count() > 0) list->setCurrentRow(0);
+                     });
+
+    auto* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog,
+                     &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog,
+                     &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        // Cancel must restore the entry order: the in-dialog 自动排列
+        // applied through the dock immediately (the preview is real
+        // state, not a scratch copy) — snapshot & restore on reject.
+        if (dock->current_well_order() != order) {
+            dock->set_well_order(order);
+        }
+        return true;
+    }
+    QStringList ordered;
+    for (int i = 0; i < list->count(); ++i) {
+        ordered.append(list->item(i)->text());
+    }
+    dock->set_well_order(ordered);
+    return true;
+#else
+    (void)window_as_qmain;
+    return false;
+#endif
+}
+
+bool crosswell_link_active(QMainWindow* window_as_qmain) {
+    if (window_as_qmain == nullptr) return false;
+    auto* action = window_as_qmain->findChild<QAction*>(
+        QStringLiteral("FactorLinkToggle"));
+    return action != nullptr && action->isChecked();
 }
 
 }  // namespace pwb::app::workspace_compose

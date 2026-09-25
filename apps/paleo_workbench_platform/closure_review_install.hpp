@@ -20,12 +20,15 @@ namespace pwb::app {
 
 class AppShell;
 class AppContext;
+class JobCenter;
 
 namespace closure_review {
 
 // Idempotent. Creates the shell-parented binding (QObject lifetime — the
-// host never owns anything) and reflects the current store state.
-void install_review_actions(AppShell* shell, AppContext* context);
+// host never owns anything) and reflects the current store state. jobs
+// non-null additionally installs the async QC task owner (verify.cancel).
+void install_review_actions(AppShell* shell, AppContext* context,
+                            JobCenter* jobs = nullptr);
 
 // Re-evaluate the binding after the context's project store changed
 // (open success / close): flips the page's project-bound state and

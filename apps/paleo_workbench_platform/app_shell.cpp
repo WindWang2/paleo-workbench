@@ -803,6 +803,8 @@ void AppShell::navigate_workspace(int workspace_index) {
         workspace_index >= ui_ribbon::kWorkspaceCount) {
         return;
     }
+    const int from =
+        ribbon_ != nullptr ? ribbon_->current_workspace() : 0;
     const auto workspace =
         ui_ribbon::kWorkspaceOrder[static_cast<size_t>(workspace_index)];
     const bool scientific =
@@ -960,6 +962,7 @@ void AppShell::navigate_workspace(int workspace_index) {
     workstation_->set_horizon_strip_enabled(workspace_index != 0);
 
     sync_workflow_panel(workspace_index);
+    emit workspace_changed(from, workspace_index);
 }
 
 void AppShell::sync_workflow_panel(int workspace_index) {

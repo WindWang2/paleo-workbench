@@ -42,6 +42,16 @@ struct Install {
 // Idempotent per window. GUI thread only.
 void compose(const Install& install);
 
+// factor.crosswell_path 的真实后端（workspace_compose.cpp）：井序编辑
+// 对话框（上移/下移 + 自动 PCA 排列）→ VizBCrossWellDock::set_well_order
+// （井序随 dock sidecar 持久化，stable well ids = 井名）。返回 false =
+// 剖面未装配/无井数据（命令层如实报告）。
+bool run_crosswell_path_dialog(class QMainWindow* window);
+
+// factor.link 的状态查询（联动开关在 ws2 剖面窗格头，同一 QAction 被
+// Ribbon 命令触发）：无剖面窗格时 false。
+bool crosswell_link_active(class QMainWindow* window);
+
 }  // namespace workspace_compose
 
 }  // namespace pwb::app

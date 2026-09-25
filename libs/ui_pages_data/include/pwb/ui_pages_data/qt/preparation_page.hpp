@@ -27,6 +27,10 @@ class FactorTaskPanelApi : public QWidget {
 public:
     using QWidget::QWidget;
     virtual QString selected_method() const = 0;
+    // Select a method label on the panel (the panel is the single state
+    // surface compute reads). No-op default — concrete panels override;
+    // hosts tolerate panels without a combo.
+    virtual void set_selected_method(const QString& /*method*/) {}
     virtual void update_state(const pwb::domain::Json& tasks) = 0;
     virtual QPushButton* generate_btn() = 0;
     virtual QPushButton* contour_draft_btn() = 0;

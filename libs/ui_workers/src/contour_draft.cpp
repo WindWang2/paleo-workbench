@@ -324,6 +324,30 @@ std::vector<double> suggest_nice_levels(const Grid2D& grid_z, int n_levels) {
     return suggest_levels_fallback(lo, hi, n_levels);
 }
 
+std::vector<double> levels_from_interval(double lo, double hi,
+                                         double interval) {
+    if (!std::isfinite(lo) || !std::isfinite(hi) || !std::isfinite(interval)
+        || interval <= 0.0 || hi <= lo) {
+        return {};
+    }
+    // First multiple of interval strictly above lo (epsilon-robust against
+    // lo sitting exactly on a multiple), then step until hi. The 512
+    // guard mirrors the ladder's cap (a hand-typed 1e-9 interval must not
+    // forge a million-level set). A quotient beyond ±1e15 cannot yield a
+    // legal <512-level set and would overflow the long long cast — bail
+    // to the empty fallback instead.
+    if (!(std::fabs(lo / interval) <= 1e15)) return {};
+    const double eps = interval * 1e-9;
+    long long first = static_cast<long long>(std::ceil(lo / interval));
+    if (first * interval <= lo + eps) ++first;
+    std::vector<double> levels;
+    for (long long k = first; k * interval < hi - eps && levels.size() < 512;
+         ++k) {
+        levels.push_back(py_round(k * interval, 6));
+    }
+    return levels;
+}
+
 ContourDraftSlice upsert_contour_draft(
     ContourDraftSlice draft, std::vector<ContourDraftSlice>& existing,
     const std::string& updated_at) {
@@ -387,7 +411,7 @@ ContourDraftSlice contour_draft_from_factor_task(
     const std::optional<std::vector<double>>& levels, int n_levels,
     const std::optional<std::string>& name,
     const job::CancellationToken& token, const ExtractLinesFn& extract_lines_fn,
-    const IdFn& id_fn_raw) {
+    const IdFn& id_fn_raw, double interval) {
     const IdFn id_fn = id_fn_or_default(id_fn_raw);
     const ResolvedGrid grid = grid_from_task(task);
 
@@ -405,8 +429,22 @@ ContourDraftSlice contour_draft_from_factor_task(
         throw PyValueError("网格无有效数值，无法生成等值线");
     }
 
-    std::vector<double> use_levels =
-        levels ? *levels : suggest_nice_levels(grid.z, n_levels);
+    // Level pick precedence: explicit levels > fixed interval > nice
+    // ladder. The interval strategy records itself on the draft so a
+    // re-opened project can show which 间距 produced the level set.
+    double used_interval = 0.0;
+    std::vector<double> use_levels;
+    if (levels) {
+        use_levels = *levels;
+    } else if (interval > 0.0) {
+        use_levels = levels_from_interval(zmin, zmax, interval);
+        if (!use_levels.empty()) {
+            used_interval = interval;
+        }
+    }
+    if (use_levels.empty()) {
+        use_levels = suggest_nice_levels(grid.z, n_levels);
+    }
     if (use_levels.empty()) use_levels = {zmin};
 
     std::vector<ContourSegmentSlice> segments;
@@ -444,6 +482,7 @@ ContourDraftSlice contour_draft_from_factor_task(
     draft.source_backend =
         backend.value_or(!task.method.empty() ? task.method : "");
     draft.source_value_range = {zmin, zmax};
+    draft.source_interval = used_interval;
     draft.status = "draft";
     draft.generator_version = kContourDraftGeneratorVersion;
     return draft;
@@ -453,9 +492,10 @@ ContourDraftSlice compile_contour_draft_from_task(
     const FactorTaskSlice& task, std::vector<ContourDraftSlice>& ledger,
     const std::optional<std::vector<double>>& levels, int n_levels,
     const job::CancellationToken& token, const ExtractLinesFn& extract_lines_fn,
-    const IdFn& id_fn, const std::string& updated_at) {
+    const IdFn& id_fn, const std::string& updated_at, double interval) {
     auto draft = contour_draft_from_factor_task(
-        task, levels, n_levels, std::nullopt, token, extract_lines_fn, id_fn);
+        task, levels, n_levels, std::nullopt, token, extract_lines_fn, id_fn,
+        interval);
     return upsert_contour_draft(std::move(draft), ledger, updated_at);
 }
 
@@ -465,7 +505,7 @@ std::vector<ContourDraftSlice> compile_contour_drafts_for_project(
     const std::optional<std::set<std::string>>& task_ids, bool only_complete,
     int n_levels, const job::CancellationToken& token,
     const ExtractLinesFn& extract_lines_fn, const IdFn& id_fn,
-    const std::string& updated_at) {
+    const std::string& updated_at, double interval) {
     std::vector<ContourDraftSlice> drafts;
     for (const auto& task : factor_map_tasks) {
         token.check_cancelled();
@@ -474,7 +514,7 @@ std::vector<ContourDraftSlice> compile_contour_drafts_for_project(
         try {
             auto draft = compile_contour_draft_from_task(
                 task, ledger, std::nullopt, n_levels, token, extract_lines_fn,
-                id_fn, updated_at);
+                id_fn, updated_at, interval);
             drafts.push_back(std::move(draft));
         } catch (const PyValueError&) {
             continue;
@@ -497,7 +537,7 @@ ContourDraftResult run_contour_drafts(const ContourDraftInput& input,
         auto drafts = compile_contour_drafts_for_project(
             input.factor_map_tasks, ledger, std::nullopt, /*only_complete=*/true,
             input.n_levels, ctx.token(), input.extract_lines_fn, input.id_fn,
-            input.updated_at);
+            input.updated_at, input.interval);
         ctx.check_cancelled();
         return {std::move(drafts), std::move(ledger)};
     });

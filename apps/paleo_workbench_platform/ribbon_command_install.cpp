@@ -32,7 +32,12 @@
 #endif
 
 #include <QFileDialog>
+#include <QInputDialog>
 #include <QTextStream>
+
+#include "factor_method_config.hpp"
+#include "factor_method_dialogs.hpp"
+#include "workspace_compose.hpp"
 
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/application/project_session.hpp>
@@ -762,32 +767,49 @@ void factor_commands(ui_shell::CommandRegistry& registry,
     // M5-2: 约束线编辑接编图场景真实工具（"line"）与捕捉真实状态
     // （场景 snap_manager，QAction 单一绑定）；上下文 Ribbon 组随选中
     // 出现（m5_compose install）。
-#if defined(PWB_WITH_CLOSURE_MAPPING)
+#if defined(PWB_WITH_CLOSURE_MAPPING) && defined(PWB_WITH_STAGE_FLOW) \
+    && defined(PWB_WITH_DATA_INTEGRATION)
+    // 约束线/点编辑接 QGIS 权威栈（createStageConstraint/EnterConstraint
+    // Editing 的 GPKG 约束层 + EditController 编辑会话）；治理化
+    // add_line/add_point 捕获工具按活动图层几何类型路由。自绘场景
+    // 的 "line" 工具不再冒充约束编辑（断链修复）。
+    const auto enter_constraint_editing = [c](const char* kind,
+                                              const char* capture_tool,
+                                              const char* what) {
+        c.shell->navigate_workspace(2);
+        auto* window = c.window;
+        if (window == nullptr) return;
+        const QString problem =
+            window->enterConstraintEditing(QString::fromLatin1(kind));
+        if (!problem.isEmpty()) {
+            emit c.shell->status_message(problem);
+            return;
+        }
+        trigger_governed(c, QString::fromLatin1(capture_tool));
+        emit c.shell->status_message(
+            QStringLiteral("%1：在地图画布数字化（顶点自动捕捉到约束层"
+                           "要素，数字化后保存生效）")
+                .arg(QString::fromUtf8(what)));
+    };
     register_real(registry, ids, "factor.edit_sourcing",
                   QStringLiteral("编辑物源线"),
-                  QStringLiteral("进入物源线编辑（编图场景线工具）"),
+                  QStringLiteral("进入物源线编辑（QGIS 约束层 + 治理捕获工具）"),
                   QStringLiteral("物源 sourcing 约束"),
-                  [c] {
-                      if (auto* scene = find_edit_scene(c); scene != nullptr) {
-                          scene->set_tool("line");
-                          emit c.shell->status_message(
-                              QStringLiteral("物源线编辑：在编图画布绘制/编辑线要素"));
-                      }
+                  [enter_constraint_editing] {
+                      enter_constraint_editing(
+                          "provenance_line", "add_line", "物源线编辑");
                   },
                   [c](const CommandContext&) { return needs_project(c); });
     register_real(registry, ids, "factor.edit_trend", QStringLiteral("展布线"),
-                  QStringLiteral("进入展布线编辑（编图场景线工具）"),
+                  QStringLiteral("进入展布线编辑（QGIS 约束层 + 治理捕获工具）"),
                   QStringLiteral("展布 trend"),
-                  [c] {
-                      if (auto* scene = find_edit_scene(c); scene != nullptr) {
-                          scene->set_tool("line");
-                          emit c.shell->status_message(
-                              QStringLiteral("展布线编辑：在编图画布绘制/编辑线要素"));
-                      }
+                  [enter_constraint_editing] {
+                      enter_constraint_editing(
+                          "distribution_line", "add_line", "展布线编辑");
                   },
                   [c](const CommandContext&) { return needs_project(c); });
     register_real(registry, ids, "factor.snap", QStringLiteral("捕捉"),
-                  QStringLiteral("约束线捕捉开关（与画布同一状态）"),
+                  QStringLiteral("约束捕捉开关（QGIS 工程捕捉配置限定约束图层集）"),
                   QStringLiteral("捕捉 snap"),
                   [c] {
                       if (auto* action = c.shell->findChild<QAction*>(
@@ -796,6 +818,17 @@ void factor_commands(ui_shell::CommandRegistry& registry,
                           action->trigger();
                       }
                   });
+    // 约束点（值锚定控制点）：QGIS 点约束层（value 属性）→ 保存采集进
+    // constraint_layers[].points → 插值样本合并（全部后端真实消费）。
+    register_real(registry, ids, "factor.constraint_point",
+                  QStringLiteral("约束点"),
+                  QStringLiteral("进入约束点编辑（值锚定控制点，参与插值）"),
+                  QStringLiteral("约束点 constraint point 钉 pin"),
+                  [enter_constraint_editing] {
+                      enter_constraint_editing(
+                          "constraint_pin", "add_point", "约束点编辑");
+                  },
+                  [c](const CommandContext&) { return needs_project(c); });
 #else
     register_disabled(registry, ids, "factor.edit_sourcing",
                       QStringLiteral("编辑物源线"), QStringLiteral("物源线约束编辑"),
@@ -809,20 +842,67 @@ void factor_commands(ui_shell::CommandRegistry& registry,
                       QStringLiteral("约束线捕捉开关"), QStringLiteral("捕捉 snap"),
                       QStringLiteral("编图场景切片未接入本次构建"));
 #endif
-    // 稿：约束点编辑——编图场景工具词汇（line/facies/label/vertex）
-    // 无点约束工具，诚实禁用。
+#if !defined(PWB_WITH_CLOSURE_MAPPING)
+    // 无编图闭包切片的构建：点约束编辑能力不在场，诚实禁用。
     register_disabled(registry, ids, "factor.constraint_point",
                       QStringLiteral("约束点"),
                       QStringLiteral("约束点要素编辑"),
                       QStringLiteral("约束点 constraint point"),
-                      QStringLiteral("场景无点约束编辑工具"));
-    // 稿：插值方法下拉（约束IDW ▼）——Ribbon 无 combo 类型；
-    // 真方法选择在数据制备任务面板（工程内，稿不入界面）。
+                      QStringLiteral("编图场景切片未接入本次构建"));
+#endif
+    // 插值方法：注册表驱动的真实选择（对话框只列 native 内核真正实现
+    // 的后端）→ 文档权威 root["factor_settings"].method + 制备页面板
+    // （compute 读取的单一状态面）同步。
+#if defined(PWB_WITH_CLOSURE_MAPPING)
+    register_real(registry, ids, "factor.method",
+                  QStringLiteral("插值方法"),
+                  QStringLiteral("选择插值方法（注册表驱动，随工程保存）"),
+                  QStringLiteral("插值 方法 idw kriging method"),
+                  [c] {
+                      QString current;
+                      if (auto* preparation =
+                              closure_mapping::preparation_page(c.window);
+                          preparation != nullptr
+                          && preparation->task_panel() != nullptr) {
+                          current = preparation->task_panel()
+                                        ->selected_method();
+                      }
+                      if (const std::string saved = factor_config::read_method(
+                              c.context->projectStore().get());
+                          !saved.empty()) {
+                          current = QString::fromStdString(saved);
+                      }
+                      FactorMethodDialog dialog(current, c.window);
+                      if (dialog.exec() != QDialog::Accepted) return;
+                      const QString method = dialog.selected_method();
+                      std::string error;
+                      if (!factor_config::write_method(
+                              c.context->projectStore().get(),
+                              method.toStdString(), &error)) {
+                          emit c.shell->status_message(
+                              QStringLiteral("方法保存失败：%1")
+                                  .arg(QString::fromStdString(error)));
+                          return;
+                      }
+                      if (auto* preparation =
+                              closure_mapping::preparation_page(c.window);
+                          preparation != nullptr
+                          && preparation->task_panel() != nullptr) {
+                          preparation->task_panel()->set_selected_method(
+                              method);
+                      }
+                      emit c.shell->status_message(
+                          QStringLiteral("插值方法已设为 %1（随工程保存）")
+                              .arg(method));
+                  },
+                  [c](const CommandContext&) { return needs_project(c); });
+#else
     register_disabled(registry, ids, "factor.method",
-                      QStringLiteral("约束IDW"),
-                      QStringLiteral("插值方法选择（当前：约束IDW）"),
+                      QStringLiteral("插值方法"),
+                      QStringLiteral("插值方法选择"),
                       QStringLiteral("插值 方法 idw kriging"),
-                      QStringLiteral("方法选择在数据制备页（稿不入界面）"));
+                      QStringLiteral("编图场景切片未接入本次构建"));
+#endif
     register_real(registry, ids, "factor.compute",
                   QStringLiteral("计算单因素"),
                   QStringLiteral("按所选方法运行真实插值核（idw/kriging/约束 IDW）"),
@@ -845,9 +925,49 @@ void factor_commands(ui_shell::CommandRegistry& registry,
 #endif
                   },
                   [c](const CommandContext&) { return needs_project(c); });
+    // 插值参数：schema 驱动（按所选方法启用字段），写文档权威
+    // root["factor_settings"].params；compute 快照读取同一状态。
+#if defined(PWB_WITH_CLOSURE_MAPPING)
+    register_real(registry, ids, "factor.params", QStringLiteral("参数"),
+                  QStringLiteral("插值计算参数（网格/幂/种子，随工程保存）"),
+                  QStringLiteral("参数 params 网格 幂"),
+                  [c] {
+                      QString method;
+                      if (auto* preparation =
+                              closure_mapping::preparation_page(c.window);
+                          preparation != nullptr
+                          && preparation->task_panel() != nullptr) {
+                          method = preparation->task_panel()
+                                       ->selected_method();
+                      }
+                      const auto current = factor_config::read_params(
+                          c.context->projectStore().get());
+                      FactorParamsDialog dialog(current, method, c.window);
+                      if (dialog.exec() != QDialog::Accepted) return;
+                      std::string error;
+                      if (!factor_config::write_params(
+                              c.context->projectStore().get(), dialog.params(),
+                              &error)) {
+                          emit c.shell->status_message(
+                              QStringLiteral("参数保存失败：%1")
+                                  .arg(QString::fromStdString(error)));
+                          return;
+                      }
+                      emit c.shell->status_message(
+                          QStringLiteral("插值参数已保存：网格 %1 × N%2"
+                                         "（下一次计算生效并触发重算）")
+                              .arg(dialog.params().grid_n)
+                              .arg(method.isEmpty()
+                                       ? QString()
+                                       : QStringLiteral(" · 方法 %1")
+                                             .arg(method)));
+                  },
+                  [c](const CommandContext&) { return needs_project(c); });
+#else
     register_disabled(registry, ids, "factor.params", QStringLiteral("参数"),
                       QStringLiteral("插值计算参数"), QStringLiteral("参数 params"),
-                      QStringLiteral("M5 接入"));
+                      QStringLiteral("编图场景切片未接入本次构建"));
+#endif
     register_real(registry, ids, "factor.cancel", QStringLiteral("取消"),
                   QStringLiteral("打开任务中心取消运行中的计算"),
                   QStringLiteral("取消 cancel"), [c] { open_task_center(c); },
@@ -864,13 +984,53 @@ void factor_commands(ui_shell::CommandRegistry& registry,
                       // 连井剖面 = ws2 页内阶段窗格（随工作区进入自明）。
                       c.shell->navigate_workspace(2);
                   });
+    // 连井剖面路径（井序编辑 + 自动 PCA 排列；井序随剖面 sidecar 以
+    // stable well ids 持久化）。联动开关在 ws2 剖面窗格（同一 QAction）。
+#if defined(PWB_WITH_VIZ_B)
+    register_real(registry, ids, "factor.crosswell_path",
+                  QStringLiteral("连井剖面"),
+                  QStringLiteral("编辑连井剖面路径（井序，随剖面保存）"),
+                  QStringLiteral("连井 路径 path 排列"),
+                  [c] {
+                      c.shell->navigate_workspace(2);
+                      if (!workspace_compose::run_crosswell_path_dialog(
+                              c.window)) {
+                          emit c.shell->status_message(
+                              QStringLiteral(
+                                  "剖面尚未装配或未加载井数据——先载入井"));
+                      }
+                  },
+                  [c](const CommandContext&) { return needs_project(c); });
+    register_real(registry, ids, "factor.link", QStringLiteral("联动"),
+                  QStringLiteral("地图井选择 ↔ 连井剖面双向联动开关"),
+                  QStringLiteral("联动 link 剖面 井"),
+                  [c] {
+                      if (auto* action = c.shell->findChild<QAction*>(
+                              QStringLiteral("FactorLinkToggle"));
+                          action != nullptr) {
+                          action->trigger();
+                          emit c.shell->status_message(
+                              action->isChecked()
+                                  ? QStringLiteral(
+                                        "联动已开启：地图选井 → 剖面过滤；"
+                                        "剖面勾选 → 地图高亮")
+                                  : QStringLiteral("联动已关闭"));
+                      } else {
+                          emit c.shell->status_message(
+                              QStringLiteral("剖面窗格未装配（VIZ-B 切片）"));
+                      }
+                  },
+                  [c](const CommandContext&) { return needs_project(c); });
+#else
     register_disabled(registry, ids, "factor.crosswell_path",
                       QStringLiteral("连井剖面"),
                       QStringLiteral("按路径自动排列连井剖面"),
-                      QStringLiteral("连井 路径 path"), QStringLiteral("M5 接入"));
+                      QStringLiteral("连井 路径 path"),
+                      QStringLiteral("连井剖面切片未参与本次构建"));
     register_disabled(registry, ids, "factor.link", QStringLiteral("联动"),
                       QStringLiteral("剖面联动开关"), QStringLiteral("联动 link"),
-                      QStringLiteral("M5 接入"));
+                      QStringLiteral("连井剖面切片未参与本次构建"));
+#endif
     register_real(registry, ids, "factor.contour", QStringLiteral("生成等值线"),
                   QStringLiteral("从已完成单因素任务提取等值线草稿"),
                   QStringLiteral("等值线 contour"),
@@ -891,13 +1051,45 @@ void factor_commands(ui_shell::CommandRegistry& registry,
 #endif
                   },
                   [c](const CommandContext&) { return needs_project(c); });
-    // 稿：等值线间距数值控件（20 m）——无专用控件类型，
-    // 以禁用命令呈现当前值。
+    // 等值线间距：真实参数（米），单一权威 root["contour_settings"]
+    // .interval_m —— 等值线 worker 读取同一状态（固定间距层级策略，
+    // 生成结果记录 source_interval 出处）。
+#if defined(PWB_WITH_CLOSURE_MAPPING)
+    register_real(registry, ids, "factor.contour_interval",
+                  QStringLiteral("等值线间距"),
+                  QStringLiteral("等值线固定间距（米，随工程保存）"),
+                  QStringLiteral("间距 等值线 interval contour"),
+                  [c] {
+                      const double current = factor_config::read_contour_interval(
+                          c.context->projectStore().get());
+                      bool ok = false;
+                      const double interval = QInputDialog::getDouble(
+                          c.window, QStringLiteral("等值线间距"),
+                          QStringLiteral("间距（米，>0；留空取消保持现状）"),
+                          current > 0.0 ? current : 20.0, 0.01, 100000.0, 2,
+                          &ok);
+                      if (!ok) return;
+                      std::string error;
+                      if (!factor_config::write_contour_interval(
+                              c.context->projectStore().get(), interval, &error)) {
+                          emit c.shell->status_message(
+                              QStringLiteral("间距保存失败：%1")
+                                  .arg(QString::fromStdString(error)));
+                          return;
+                      }
+                      emit c.shell->status_message(
+                          QStringLiteral("等值线间距已设为 %1 m"
+                                         "（下一次生成等值线生效）")
+                          .arg(interval, 0, 'f', 2));
+                  },
+                  [c](const CommandContext&) { return needs_project(c); });
+#else
     register_disabled(registry, ids, "factor.contour_interval",
-                      QStringLiteral("间距 20 m"),
-                      QStringLiteral("等值线间距（当前 20 m）"),
+                      QStringLiteral("等值线间距"),
+                      QStringLiteral("等值线间距"),
                       QStringLiteral("间距 等值线 interval contour"),
-                      QStringLiteral("间距参数控件未接入"));
+                      QStringLiteral("编图场景切片未接入本次构建"));
+#endif
     register_real(registry, ids, "factor.save", QStringLiteral("保存版本"),
                   QStringLiteral("保存当前阶段成果"), QStringLiteral("保存 save"),
                   [c] {
@@ -944,11 +1136,38 @@ void map_commands(ui_shell::CommandRegistry& registry,
                   },
                   /*applicability=*/nullptr,
                   /*stages=*/{"constraint_factor", "integrated_compilation"});
-    // 稿：参考图与主图联动开关——参考带联动后端未接入。
+    // 参考图与主图联动：预览视图跟随主画布 extent（单一 master）。
+    // 开关 QAction 在参考图面板装配处创建（MapRefLinkToggle，同一
+    // 状态驱动面板复选框）。
+#if defined(PWB_WITH_CLOSURE_MAPPING)
+    register_real(registry, ids, "map.ref_link", QStringLiteral("联动"),
+                  QStringLiteral("参考图视图与主图 extent 联动开关"),
+                  QStringLiteral("联动 link 参考"),
+                  [c] {
+                      if (auto* action = c.shell->findChild<QAction*>(
+                              QStringLiteral("MapRefLinkToggle"));
+                          action != nullptr) {
+                          action->trigger();
+                          emit c.shell->status_message(
+                              action->isChecked()
+                                  ? QStringLiteral(
+                                        "参考图已联动：视图范围跟随主图"
+                                        "（主图为单一权威）")
+                                  : QStringLiteral("参考图联动已关闭——"
+                                                   "两个视图独立漫游"));
+                      } else {
+                          emit c.shell->status_message(
+                              QStringLiteral("参考图面板未装配"
+                                             "（编图切片未接入）"));
+                      }
+                  },
+                  [c](const CommandContext&) { return needs_project(c); });
+#else
     register_disabled(registry, ids, "map.ref_link", QStringLiteral("联动"),
                       QStringLiteral("参考图与主图联动"),
                       QStringLiteral("联动 link 参考"),
-                      QStringLiteral("参考图联动后端未接入"));
+                      QStringLiteral("编图切片未接入本次构建"));
+#endif
     // M5-2 版式轻量页：模板/纸张/预览进入版式模式（面板骑 ws3 底部
     // 栈第 2 页，F:70）；图例整饰写文档 map_chrome（单一状态）；
     // 透明度指向参考图面板的真滑杆（单一状态，无第二份 slider）。
@@ -1125,12 +1344,25 @@ void verify_commands(ui_shell::CommandRegistry& registry,
                       }
                       return std::nullopt;
                   });
-    // 稿：◀◀ 上一处问题——问题表无上一处导航接口，诚实禁用。
-    register_disabled(registry, ids, "verify.prev_issue",
-                      QStringLiteral("上一处"),
-                      QStringLiteral("定位上一处问题"),
-                      QStringLiteral("上一处 问题 prev issue"),
-                      QStringLiteral("问题逐条导航未接入"));
+    // 上一处问题（IssueNavigator：全报告扁平化、wrap-around、
+    // refresh 后按 key 重定位游标——修复后不再指向 stale 问题）。
+    register_real(registry, ids, "verify.prev_issue",
+                  QStringLiteral("上一处"),
+                  QStringLiteral("定位上一处问题（循环导航）"),
+                  QStringLiteral("上一处 问题 prev issue"),
+                  [c] {
+                      if (auto* page = c.shell->validation_page();
+                          page != nullptr) {
+                          page->navigate_issue(-1);
+                      }
+                  },
+                  [c](const CommandContext&) -> std::optional<std::string> {
+                      auto* page = c.shell->validation_page();
+                      if (page == nullptr || page->issue_count() == 0) {
+                          return std::string("没有可定位的问题（先运行检查）");
+                      }
+                      return needs_project(c);
+                  });
     // F:75 — link couples m and ms ONLY through a real time-depth
     // calibration; without one the toggle stays disabled with its reason.
     register_real(registry, ids, "verify.link",
@@ -1188,7 +1420,7 @@ void verify_commands(ui_shell::CommandRegistry& registry,
                   },
                   [c](const CommandContext&) { return needs_compare_data(c); });
     register_real(registry, ids, "verify.run", QStringLiteral("运行验证"),
-                  QStringLiteral("对工程内全部编图文档运行 QC 规则"),
+                  QStringLiteral("对工程内全部编图文档运行 QC 规则（后台执行，可取消）"),
                   QStringLiteral("运行 run 验证 qc 检查"),
                   [c] {
                       auto* page = c.shell->validation_page();
@@ -1199,7 +1431,13 @@ void verify_commands(ui_shell::CommandRegistry& registry,
                       }
                       page->run_qc();
                   },
-                  [c](const CommandContext&) { return needs_project(c); });
+                  [c](const CommandContext&) -> std::optional<std::string> {
+                      auto* page = c.shell->validation_page();
+                      if (page != nullptr && page->qc_running()) {
+                          return std::string("验证正在运行——可先取消");
+                      }
+                      return needs_project(c);
+                  });
     register_real(registry, ids, "verify.settings", QStringLiteral("检查设置"),
                   QStringLiteral("当前内置 QC 规则一览"),
                   QStringLiteral("设置 settings 规则 rule"),
@@ -1212,26 +1450,39 @@ void verify_commands(ui_shell::CommandRegistry& registry,
                   [](const CommandContext&) -> std::optional<std::string> {
                       return std::nullopt;  // 规则一览无工程也可读
                   });
-    register_disabled(registry, ids, "verify.cancel", QStringLiteral("取消"),
-                      QStringLiteral("取消 QC 运行"), QStringLiteral("取消 cancel"),
-                      QStringLiteral("QC 同步执行，没有可取消的任务"));
-    register_real(registry, ids, "verify.locate", QStringLiteral("定位问题"),
-                  QStringLiteral("定位当前报告的第一个空间问题"),
-                  QStringLiteral("定位 locate 问题"),
+    // 取消验证：异步 QC 经任务宿主协作取消；cancelled 不合并——上一份
+    // 有效报告保持不变。同步回退路径（无任务宿主）无可取消任务。
+    register_real(registry, ids, "verify.cancel", QStringLiteral("取消"),
+                  QStringLiteral("取消运行中的验证（已取消运行不覆盖上一份报告）"),
+                  QStringLiteral("取消 cancel 验证"),
                   [c] {
-                      auto* page = c.shell->validation_page();
-                      if (page == nullptr || page->issue_table() == nullptr ||
-                          page->issue_table()->table()->rowCount() == 0) {
-                          emit c.shell->status_message(
-                              QStringLiteral("没有可定位的问题（先运行检查）"));
-                          return;
+                      if (auto* page = c.shell->validation_page();
+                          page != nullptr) {
+                          page->cancel_qc();
                       }
-                      emit page->issue_table()->table()->cellClicked(0, 3);
                   },
                   [c](const CommandContext&) -> std::optional<std::string> {
                       auto* page = c.shell->validation_page();
-                      if (page == nullptr || page->issue_table() == nullptr ||
-                          page->issue_table()->table()->rowCount() == 0) {
+                      if (page == nullptr || !page->qc_running()) {
+                          return std::string("当前没有运行中的验证任务");
+                      }
+                      return needs_project(c);
+                  });
+    // 下一处问题（IssueNavigator 前进方向；与「上一处」同一游标，
+    // wrap-around）。旧行为「定位第一条」由首次导航自然覆盖（无游标
+    // 时前进到第一条）。
+    register_real(registry, ids, "verify.locate", QStringLiteral("下一处"),
+                  QStringLiteral("定位下一处问题（循环导航并高亮）"),
+                  QStringLiteral("定位 locate 下一处 问题 next"),
+                  [c] {
+                      if (auto* page = c.shell->validation_page();
+                          page != nullptr) {
+                          page->navigate_issue(1);
+                      }
+                  },
+                  [c](const CommandContext&) -> std::optional<std::string> {
+                      auto* page = c.shell->validation_page();
+                      if (page == nullptr || page->issue_count() == 0) {
                           return std::string("没有可定位的问题（先运行检查）");
                       }
                       return needs_project(c);

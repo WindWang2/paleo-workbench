@@ -49,6 +49,10 @@ struct ContourDraftSlice {
     int source_grid_n = 0;
     std::string source_backend;
     std::pair<double, double> source_value_range{0.0, 0.0};
+    // Fixed-interval provenance (等值线间距): > 0 when the level set came
+    // from levels_from_interval — a re-opened draft can tell which
+    // interval produced it. 0 = nice-ladder levels.
+    double source_interval = 0.0;
     std::string status;  // "draft" | "editing"
     std::string generator_version;
     std::string updated_at;
@@ -85,6 +89,14 @@ std::vector<double> suggest_levels_fallback(double lo, double hi,
 std::vector<double> suggest_nice_levels(const Grid2D& grid_z,
                                         int n_levels = kContourDefaultNLevels);
 
+// levels_from_interval — the fixed-interval strategy (等值线间距): the
+// multiples of `interval` strictly inside (lo, hi), rounded 6 (the same
+// rounding contract as the ladder, guard 512). Empty when the interval is
+// not a positive finite number or does not fit the range — the caller
+// falls back to the nice ladder, never a fabricated level set.
+std::vector<double> levels_from_interval(double lo, double hi,
+                                         double interval);
+
 // upsert_contour_draft — replace same-factor/horizon draft or append;
 // stable id + refreshed updated_at when replacing. Mutates `existing`.
 ContourDraftSlice upsert_contour_draft(ContourDraftSlice draft,
@@ -98,13 +110,16 @@ std::vector<std::map<std::string, std::any>> line_features_from_contour_draft(
 
 // contour_draft_from_factor_task — the full single-task pipeline:
 // grid resolution -> finite check -> level pick -> stored engine contours
-// short-circuit -> extract seam -> ContourDraft.
+// short-circuit -> extract seam -> ContourDraft. interval > 0 (等值线间距,
+// meters) switches the level pick to the fixed-interval strategy when the
+// caller passed no explicit levels; the draft records it in
+// source_interval.
 ContourDraftSlice contour_draft_from_factor_task(
     const FactorTaskSlice& task,
     const std::optional<std::vector<double>>& levels,
     int n_levels, const std::optional<std::string>& name,
     const job::CancellationToken& token, const ExtractLinesFn& extract_lines_fn,
-    const IdFn& id_fn);
+    const IdFn& id_fn, double interval = 0.0);
 
 // compile_contour_draft_from_task — draft + snapshot-ledger upsert
 // (apply_to_map is permanently false in the worker path; the map apply is
@@ -113,18 +128,22 @@ ContourDraftSlice compile_contour_draft_from_task(
     const FactorTaskSlice& task, std::vector<ContourDraftSlice>& ledger,
     const std::optional<std::vector<double>>& levels, int n_levels,
     const job::CancellationToken& token, const ExtractLinesFn& extract_lines_fn,
-    const IdFn& id_fn, const std::string& updated_at);
+    const IdFn& id_fn, const std::string& updated_at,
+    double interval = 0.0);
 
 // compile_contour_drafts_for_project — per-task cancel check, id filter,
 // only_complete status gate, ValueError/ImportError per-task skip, final
 // cancel check. Returns the drafts created this call (ledger mutated).
+// interval > 0 threads the fixed-interval level strategy through every
+// compiled task (per-task stored engine contours still win — explicit
+// stored levels are the strongest intent).
 std::vector<ContourDraftSlice> compile_contour_drafts_for_project(
     const std::vector<FactorTaskSlice>& factor_map_tasks,
     std::vector<ContourDraftSlice>& ledger,
     const std::optional<std::set<std::string>>& task_ids, bool only_complete,
     int n_levels, const job::CancellationToken& token,
     const ExtractLinesFn& extract_lines_fn, const IdFn& id_fn,
-    const std::string& updated_at);
+    const std::string& updated_at, double interval = 0.0);
 
 // ---------------------------------------------------------------------------
 // Worker input/output + job spec.
@@ -139,6 +158,7 @@ struct ContourDraftInput {
     IdFn id_fn;                // empty -> deterministic "__cpp_id_N" sequence
     std::string updated_at;    // "" -> host pins; oracle injects fixed stamps
     int n_levels = kContourDefaultNLevels;
+    double interval = 0.0;     // > 0 = fixed-interval level strategy
 };
 
 // ContourDraftResult (worker file): drafts + count.

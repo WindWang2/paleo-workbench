@@ -3,6 +3,7 @@
 #include "pwb/ui_shell/style_registry.hpp"
 #include "pwb/ui_widgets/reconcile.hpp"
 
+#include <QCheckBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
@@ -42,6 +43,30 @@ MapReferencePanel::MapReferencePanel(QWidget* parent) : QFrame(parent) {
     title->setObjectName(QStringLiteral("MapDockTitle"));
     layout->addWidget(title);
 
+    // 参考图视图槽：宿主注入真实地图视图（未注入时占位说明——面板
+    // 仍是可用控件，不假装有图）。
+    view_host_ = new QWidget(this);
+    view_host_->setObjectName(QStringLiteral("MapReferenceViewHost"));
+    auto* view_layout = new QVBoxLayout(view_host_);
+    view_layout->setContentsMargins(0, 0, 0, 0);
+    view_layout->setSpacing(0);
+    view_placeholder_ = new QLabel(
+        QStringLiteral("参考图视图未装配"), view_host_);
+    view_placeholder_->setAlignment(Qt::AlignCenter);
+    view_layout->addWidget(view_placeholder_);
+    layout->addWidget(view_host_, 2);
+
+    // 联动开关（状态消费在宿主：单一 master = 主图 extent）。
+    link_check_ = new QCheckBox(QStringLiteral("与主图联动"), this);
+    link_check_->setObjectName(QStringLiteral("MapRefLinkToggle"));
+    link_check_->setChecked(false);
+    link_check_->setToolTip(QStringLiteral(
+        "开启：参考图视图范围跟随主图（主图为单一权威）；"
+        "关闭：两个视图独立漫游"));
+    connect(link_check_, &QCheckBox::toggled, this,
+            [this](bool on) { emit link_toggled(on); });
+    layout->addWidget(link_check_);
+
     status_label_ = new QLabel(QStringLiteral("暂无参考图"), this);
     // tokens.TEXT_SECONDARY/BG_SEARCH/BORDER_LIGHT — resolved through the
     // CURRENT palette at render time (theme switches re-render).
@@ -75,6 +100,31 @@ MapReferencePanel::MapReferencePanel(QWidget* parent) : QFrame(parent) {
             [this](int v) { on_opacity_changed(v); });
     controls->addWidget(opacity_slider_, 1);
     layout->addLayout(controls);
+}
+
+void MapReferencePanel::set_view(QWidget* view) {
+    if (view == nullptr || view_host_ == nullptr) return;
+    auto* view_layout = qobject_cast<QVBoxLayout*>(view_host_->layout());
+    if (view_layout == nullptr) return;
+    if (view_ != nullptr) {
+        view_layout->removeWidget(view_);
+        view_->deleteLater();
+        view_ = nullptr;
+    }
+    view_placeholder_->hide();
+    view_ = view;
+    view->setParent(view_host_);
+    view_layout->addWidget(view);
+}
+
+void MapReferencePanel::set_linked(bool linked) {
+    if (link_check_ == nullptr) return;
+    const QSignalBlocker block(link_check_);
+    link_check_->setChecked(linked);
+}
+
+bool MapReferencePanel::linked() const {
+    return link_check_ != nullptr && link_check_->isChecked();
 }
 
 void MapReferencePanel::set_layers(

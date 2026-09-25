@@ -45,6 +45,7 @@ const std::map<std::string, std::string>& role_labels() {
         {std::string(layer_role::kFaultConstraint), "断层约束"},
         {std::string(layer_role::kInterpolationBoundary), "插值限制边界"},
         {std::string(layer_role::kMaskBoundary), "掩膜/排除区"},
+        {std::string(layer_role::kConstraintPoint), "约束点"},
         {std::string(layer_role::kFactorInput), "单因素输入井点"},
         {std::string(layer_role::kFactorGrid), "单因素插值栅格"},
         {std::string(layer_role::kFactorContour), "单因素等值线"},
@@ -78,6 +79,7 @@ const std::map<std::string, std::string>& kind_labels() {
         {std::string(constraint_kind::kMask), "掩膜"},
         {std::string(constraint_kind::kExclusionArea), "排除区"},
         {std::string(constraint_kind::kTrendLine), "趋势线"},
+        {std::string(constraint_kind::kConstraintPin), "约束点"},
     };
     return labels;
 }
@@ -110,6 +112,7 @@ const std::set<std::string>& role_editable_set() {
         std::string(layer_role::kFaultConstraint),
         std::string(layer_role::kInterpolationBoundary),
         std::string(layer_role::kMaskBoundary),
+        std::string(layer_role::kConstraintPoint),
         std::string(layer_role::kIntegratedFacies),
         std::string(layer_role::kIntegratedBoundary),
         std::string(layer_role::kInterpretationAnnotation),
@@ -206,6 +209,9 @@ std::string constraint_kind_geometry_kind(const std::string& kind_value) {
         kind_value == constraint_kind::kExclusionArea) {
         return "polygon";
     }
+    if (kind_value == constraint_kind::kConstraintPin) {
+        return "point";
+    }
     return "line";
 }
 
@@ -232,6 +238,8 @@ std::optional<std::string> constraint_kind_layer_role(
          std::string(layer_role::kMaskBoundary)},
         {std::string(constraint_kind::kTrendLine),
          std::string(layer_role::kDistributionLine)},
+        {std::string(constraint_kind::kConstraintPin),
+         std::string(layer_role::kConstraintPoint)},
     };
     auto it = map.find(kind_value);
     if (it == map.end()) {
@@ -253,6 +261,7 @@ std::optional<std::string> constraint_interpolation_role(
         {std::string(constraint_kind::kInterpolationBoundary), "boundary"},
         {std::string(constraint_kind::kMask), "boundary"},
         {std::string(constraint_kind::kExclusionArea), "boundary"},
+        {std::string(constraint_kind::kConstraintPin), "pin"},
     };
     auto it = map.find(kind_value);
     if (it == map.end()) {

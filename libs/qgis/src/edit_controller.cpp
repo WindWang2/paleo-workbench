@@ -386,6 +386,58 @@ std::string EditController::set_snapping(bool enabled, double tolerance_px) {
     return "";
 }
 
+std::string EditController::set_snapping_scoped(
+    bool enabled, double tolerance_px,
+    const std::vector<std::string>& layer_ids) {
+    QgsProject* project = session_.project();
+    if (project == nullptr) return "no project";
+    QgsSnappingConfig config = project->snappingConfig();
+    if (!enabled) {
+        config.setEnabled(false);
+        project->setSnappingConfig(config);
+        return "";
+    }
+    // Resolve the domain ids to live layers first — unknown ids are
+    // skipped (a stale layer id must not widen the snap set).
+    QList<QgsVectorLayer*> snap_layers;
+    for (const std::string& layer_id : layer_ids) {
+        QgsVectorLayer* layer = session_.vectorLayerById(layer_id);
+        if (layer != nullptr) snap_layers.append(layer);
+    }
+    if (snap_layers.isEmpty()) {
+        // Honest no-op: no live constraint layers to snap to.
+        config.setEnabled(false);
+        project->setSnappingConfig(config);
+        return "";
+    }
+    config.setEnabled(true);
+    config.setMode(Qgis::SnappingMode::AdvancedConfiguration);
+    config.clearIndividualLayerSettings();
+    const QgsSnappingConfig::IndividualLayerSettings settings(
+        true, Qgis::SnappingTypes(Qgis::SnappingType::Vertex
+                                  | Qgis::SnappingType::Segment),
+        tolerance_px, Qgis::MapToolUnit::Pixels);
+    for (QgsVectorLayer* layer : snap_layers) {
+        config.setIndividualLayerSettings(layer, settings);
+    }
+    project->setSnappingConfig(config);
+    return "";
+}
+
+std::string EditController::set_snapping_config(
+    const QgsSnappingConfig& config) {
+    QgsProject* project = session_.project();
+    if (project == nullptr) return "no project";
+    project->setSnappingConfig(config);
+    return "";
+}
+
+QgsSnappingConfig EditController::snapping_config() const {
+    QgsProject* project = session_.project();
+    return project != nullptr ? project->snappingConfig()
+                              : QgsSnappingConfig();
+}
+
 bool EditController::editing(const std::string& layer_id) const {
     QgsVectorLayer* layer = session_.vectorLayerById(layer_id);
     return layer != nullptr && layer->editBuffer() != nullptr;

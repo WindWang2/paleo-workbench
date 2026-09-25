@@ -122,8 +122,13 @@ void check_shell(MainWindow& window) {
 #ifdef PWB_WITH_CONV_27
     auto* layer_dock = shell->workstation()->dock("composite_layer");
     if (window.layerPanel() != nullptr) {
-        PWB_CHECK(static_cast<const void*>(layer_dock->widget()) ==
-                  static_cast<const void*>(window.layerPanel()));
+        // mockup-faithful shell (#1492): the native tree panel rides the
+        // 图层 tab container (CompilationLayerPanel) hosted by the dock —
+        // the contract is "the panel lives inside the composite_layer
+        // dock" (direct widget or descendant), not direct identity.
+        PWB_CHECK(layer_dock->widget() != nullptr
+                  && layer_dock->widget()->isAncestorOf(
+                      window.layerPanel()));
     }
     // The retired prototype LayerManagerPanel is deleted (no hidden
     // second layer-list surface); the dock identity check above is the

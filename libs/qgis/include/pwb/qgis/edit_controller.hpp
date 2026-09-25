@@ -17,6 +17,7 @@
 #include <QString>
 
 class QgsVectorLayer;
+class QgsSnappingConfig;
 
 namespace pwb::qgis {
 
@@ -108,6 +109,21 @@ public:
 
     // Project-level snapping configuration (single authority: QgsProject).
     std::string set_snapping(bool enabled, double tolerance_px = 12.0);
+
+    // Constraint-scoped snapping (ws2): Advanced mode with per-layer
+    // settings over ONLY the named domain layer ids (vertex+segment,
+    // tolerance in pixels). An empty id list with enabled=true is an
+    // honest no-op ("no constraint layers") — snapping stays off for
+    // unrelated data-management layers either way. Returns "" on success.
+    std::string set_snapping_scoped(bool enabled, double tolerance_px,
+                                    const std::vector<std::string>& layer_ids);
+
+    // Direct config write/restore pair — the ws2 enter/leave contract:
+    // the caller snapshots the project config before scoping and restores
+    // it when the constraint workspace is left (never a silent permanent
+    // overwrite of the user's project snapping contract).
+    std::string set_snapping_config(const QgsSnappingConfig& config);
+    QgsSnappingConfig snapping_config() const;
 
     bool editing(const std::string& layer_id) const;
     bool dirty(const std::string& layer_id) const;
