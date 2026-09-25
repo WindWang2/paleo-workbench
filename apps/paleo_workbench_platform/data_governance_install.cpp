@@ -11,6 +11,7 @@
 #include <pwb/application/adapters/data_store.hpp>
 #include <pwb/data/governance.hpp>
 #include <pwb/ui_pages_data/qt/asset_selection_bus.hpp>
+#include <pwb/ui_pages_data/qt/data_workspace.hpp>  // data_workspace()->selection_bus() 需完整类型
 
 #include <QListWidget>
 #include <QPointer>

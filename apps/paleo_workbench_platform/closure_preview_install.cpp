@@ -5,6 +5,7 @@
 
 #include "closure_preview_adapters.hpp"
 
+#include "app_context.hpp"
 #include "app_shell.hpp"
 #include "main_window.hpp"
 #include "job_center.hpp"
