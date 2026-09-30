@@ -68,6 +68,10 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
+          # Runner toolcache Python (3.12/3.13) no longer ships setuptools (runner env
+          # drift 2026-09); the Build vendored GDAL step runs `python setup.py bdist_wheel`
+          # and fails closed without it (#1472, regression from 35a7790f era).
+          python -m pip install setuptools
           python -m pip install --prefer-binary -e ".[dev,native]"
           # Fail-closed geoviz graph (packaging #442): requirements-geoviz.txt
           # is the single source of truth; a broken graph fails this step.
