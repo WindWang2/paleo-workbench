@@ -110,7 +110,21 @@ EOF
 
 # Bindings install under <prefix>/lib/pythonX.Y/site-packages (CMake's
 # Python install scheme). Locate it and prepend to PYTHONPATH.
-OSGEO_SITE="$(find "${PREFIX}/lib" "${PREFIX}/lib64" -maxdepth 4 -type d -name site-packages -path "*python*" 2>/dev/null | head -1)"
+# Only hand find start dirs that actually exist: on x86_64 the prefix has
+# no lib64, and GNU find exits non-zero on a missing start dir, which under
+# set -euo pipefail makes the OSGEO_SITE assignment below abort the script
+# silently right after the installs (no output at all).
+OSGEO_SEARCH_DIRS=()
+if [ -d "${PREFIX}/lib" ]; then
+  OSGEO_SEARCH_DIRS+=("${PREFIX}/lib")
+fi
+if [ -d "${PREFIX}/lib64" ]; then
+  OSGEO_SEARCH_DIRS+=("${PREFIX}/lib64")
+fi
+OSGEO_SITE=""
+if [ "${#OSGEO_SEARCH_DIRS[@]}" -gt 0 ]; then
+  OSGEO_SITE="$(find "${OSGEO_SEARCH_DIRS[@]}" -maxdepth 4 -type d -name site-packages -path "*python*" 2>/dev/null | head -1)"
+fi
 if [ -n "${OSGEO_SITE}" ] && [ -d "${OSGEO_SITE}/osgeo" ]; then
   echo "export PYTHONPATH=\"${OSGEO_SITE}:\${PYTHONPATH:-}\"" >> "${PREFIX}/env.sh"
   echo "osgeo exposed via PYTHONPATH=${OSGEO_SITE}"
