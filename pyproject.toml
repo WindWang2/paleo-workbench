@@ -92,7 +92,7 @@ qt_api = "pyside6"
 markers = [
     "slow: opt-in real-data or graphics tests; skip in fast CI with -m 'not slow'",
     "realdata_smoke: PR-gate real-format fixtures under tests/fixtures/realdata (#1230)",
-    "opengl: GL-context tests (the product-family leg retired with the Python suite — docs/development/python-retirement/; marker kept for the archived suite and geoviz use)",
+    "opengl: GL-context tests (the product-family leg retired with the Python suite — docs/development/python-retirement/; marker kept for the archived suite and geoviz use); #940-1",
     "qgis: requires the optional qgis_render_bridge extension (see docs/ci-merge-policy.md)",
     "welllog_binding: requires the built welllog pybind module",
     "timeout: per-test timeout (requires pytest-timeout plugin)",
