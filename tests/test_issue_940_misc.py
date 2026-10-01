@@ -21,7 +21,7 @@ def test_stratal_opengl_tests_retired_with_product_suite():
     legacy/python_reference/tests (docs/development/python-retirement/); the
     ``opengl`` marker registration itself stays asserted below-adjacent."""
     archived = (
-        Path(__file__).resolve().parents[1].parent
+        Path(__file__).resolve().parents[1]
         / "legacy/python_reference/tests/test_stratal_adapter.py"
     )
     assert archived.exists(), "archived product suite must stay in legacy/python_reference/tests"
