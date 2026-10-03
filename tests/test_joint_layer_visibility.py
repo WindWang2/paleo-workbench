@@ -4,6 +4,53 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
+
+def _pyqtgraph_gl_skip_reason() -> str | None:
+    """Probe for a usable pyqtgraph OpenGL context; return a skip reason
+    (str) when this host cannot provide one, else ``None``.
+
+    #1498: the ubuntu-latest runner image drifted to Mesa 25.2.8 and its
+    GL version string (``3.3 (Compatibility Profile) Mesa 25.2.8-...``) is
+    rejected by pyqtgraph's >= OpenGL 2.1 check inside
+    ``GLViewWidget.initializeGL``. That check fires from the Qt event loop
+    (pytest-qt reports it as "Exceptions caught in Qt event loop"), so it
+    cannot be caught around the test's own widget — probe the same code
+    path synchronously before the widget is built instead.
+    """
+    try:
+        import pyqtgraph.opengl as gl
+    except ImportError:
+        return "pyqtgraph.opengl is not importable"
+
+    view = gl.GLViewWidget()
+    try:
+        view.makeCurrent()
+        ctx = view.context()
+        if ctx is None or not ctx.isValid():
+            return (
+                "no usable OpenGL context on this host "
+                "(see #1498 for the Mesa 25.2.8 runner-image drift)"
+            )
+        view.initializeGL()
+        return None
+    except RuntimeError as exc:
+        return (
+            f"pyqtgraph rejected this host's GL: {exc} "
+            "(#1498: ubuntu-latest runner Mesa 25.2.8 version-string drift)"
+        )
+    finally:
+        try:
+            view.doneCurrent()
+        except Exception:
+            pass
+        # ``view`` is parentless: it is destroyed when this function returns
+        # (CPython refcounting), which discards any paint event queued by
+        # context creation — a leftover failing paint would otherwise
+        # resurface in pytest-qt's teardown event processing after the skip.
+        view.close()
+
 
 def test_set_layer_visibility_keeps_renderer_visible_when_volume_off():
     """Volume-off must not hide the whole Renderer3D (wells/fences live there)."""
@@ -28,6 +75,10 @@ def test_set_layer_visibility_keeps_renderer_visible_when_volume_off():
 
 def test_set_planes_visible_does_not_unhide_volume_in_planes_mode(qtbot):
     """Joint '地震预览体' toggles orthogonal planes, not DualGL volume fill."""
+    reason = _pyqtgraph_gl_skip_reason()
+    if reason is not None:
+        pytest.skip(f"pyqtgraph GL unavailable: {reason}")
+
     from geoviz_seismic.renderer_3d import Renderer3D
     import numpy as np
 
