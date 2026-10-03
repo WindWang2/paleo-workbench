@@ -6,10 +6,10 @@ name: Perf gate (nightly)
 #
 # Triggers: nightly schedule + manual dispatch only (never on PR push).
 # Python-retirement note: bench_interpolation retired with the Python
-# product implementation (docs/development/python-retirement/); the gate now
-# covers the render-engine benchmark + the remaining slow perf suite
-# (tests/perf) in one job so native builds are not duplicated. Historical
-# thresholds referenced issues #933/#934 baselines:
+# product implementation (docs/development/python-retirement/); the render
+# benchmark was removed with it (issue #1499). The gate now covers the
+# remaining slow perf suite (tests/perf) in one job so native builds are
+# not duplicated. Historical thresholds referenced issues #933/#934 baselines:
 #   - #933: constrained IDW per-cell Python loop ~1.9s @200²×300w, target
 #           <300 ms after cell-batch vectorization.
 #   - #934: single-task IDW through plan kernel +31-53% vs naive (1940 vs
@@ -117,46 +117,8 @@ jobs:
       # (removed) "Run bench_interpolation (--quick) with threshold gate":
       # scripts/bench_interpolation.py benchmarked the retired Python
       # implementation (docs/development/python-retirement/); its budgets
-      # retired with it. The native render benchmark below stays.
-
-      - name: Run render-engine benchmark with threshold gate
-        env:
-          QT_QPA_PLATFORM: offscreen
-          PYTHONFAULTHANDLER: "1"
-        run: |
-          set -o pipefail
-          source native/gdal-vendored/install/env.sh
-          python benchmarks/render_engine_benchmark.py --sizes 100 10000 --json /tmp/render_bench.json 2>&1 | tee /tmp/render_bench.txt
-          cat /tmp/render_bench.json
-          python - <<'PY'
-          import json, sys
-          data = json.loads(open("/tmp/render_bench.json").read())
-          # Loose budgets: catch order-of-magnitude regressions only.
-          # Tight targets (#933/#934 lineage) can be added once the
-          # vectorized paths stabilize.
-          failed = []
-          for r in data:
-              n = r["features"]
-              # snapshot cold build scales with feature count
-              budget_snap = 2.0 if n <= 100 else 10.0
-              # first render includes geometry prep + paint
-              budget_render = 2.0 if n <= 100 else 15.0
-              if r["snapshot_build_cold_ms"] / 1000.0 > budget_snap:
-                  failed.append(f"snap cold {n}: {r['snapshot_build_cold_ms']}ms > {budget_snap*1000:.0f}ms")
-              if r["first_render_ms"] / 1000.0 > budget_render:
-                  failed.append(f"first render {n}: {r['first_render_ms']}ms > {budget_render*1000:.0f}ms")
-              else:
-                  print(f"ok render {n}: first={r['first_render_ms']}ms snap={r['snapshot_build_cold_ms']}ms")
-              # culling sanity: zoomed render should be faster than first at large sizes
-              if n >= 10000 and r["zoom_render_ms"] > r["first_render_ms"]:
-                  print(f"::warning:: culling: zoom {r['zoom_render_ms']}ms > first {r['first_render_ms']}ms at n={n}")
-          if failed:
-              print("::error::render gate exceeded budgets:")
-              for f in failed:
-                  print("::error::  " + f)
-              sys.exit(1)
-          print("render_engine gate: all budgets ok")
-          PY
+      # retired with it. The native render-engine benchmark was likewise
+      # removed (issue #1499) once its script was archived in commit 25da9547.
 
       - name: Run slow perf suite (tests/perf) as threshold gate
         env:
